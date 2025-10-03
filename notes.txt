@@ -1,1 +1,14 @@
-texts!
+Lang Chain:
+https://python.langchain.com/docs/tutorials/agents/
+
+Goal:
+- create a hotel agent that based on user input finds hotel info.
+- user input can be:
+    - location
+    - dates (to and from)
+    - price range
+- returns pricing, ranking, availablity, ammentities
+- for POC purposes return json data about 1 hotel
+
+Stretch Goal:
+- compare diff hotels, create an algo to rank each hotel
