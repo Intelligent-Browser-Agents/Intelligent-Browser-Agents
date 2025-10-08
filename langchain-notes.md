@@ -7,3 +7,7 @@ https://python.langchain.com/docs/tutorials/agents/
 2. install dependencies
 3. download and set up langsmith (got api key, set up .env folder)
 4. set up tavily search engine (got the api key, in .env)
+
+# Working on Define Tools
+1. set up the search engine tool 
+2. using llm tools, groq (api key)
