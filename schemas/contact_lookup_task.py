@@ -31,7 +31,7 @@ class ContactLookupTask(BaseModel):
           cleaned = re.sub(rf"\b(?:in|near)\s+{re.escape(location)}", "", cleaned, flags=re.IGNORECASE)
 
       # Remove generic keywords and connectors
-      cleaned = re.sub(r"\b(find|get|show|fetch|contact(?:\s+info|(?:\s+details)?)|for|details)\b", "", cleaned, flags=re.IGNORECASE)
+      cleaned = re.sub(r"\b(find|get|show|me|the|of|fetch|contact(?:\s+info|(?:\s+details)?)|for|details)\b", "", cleaned, flags=re.IGNORECASE)
       cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,")
 
       return cls(company=cleaned, target_year=year, location_hint=location)
