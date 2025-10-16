@@ -1,0 +1,11 @@
+chrome_profile/
+
+# virtual environments
+env/
+.venv/
+venv/
+
+
+# IDE stuff
+.vscode/
+.idea/
