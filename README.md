@@ -44,11 +44,11 @@ Output
 ### Design Tradeoffs & Findings
 
 Option Consideration Decision
-Regex extraction vs. NLP parsing Regex gives deterministic, transparent results for simple patterns; NLP would be overkill. ✅ Used regex for MVP
-LLM pre-processing Could improve ambiguous phrasing (“find Joe Lawncare 25 contact”) but adds latency. ❌ Deferred until refinement
-Field validation Used Pydantic for easy downstream schema serialization (JSON). ✅ Adopted
-Location extraction Limited to one trailing phrase (“in Orlando”), adequate for MVP. ✅ Keep simple
-Error handling Falls back to None for missing fields. ✅ Acceptable for early stage
+Regex extraction vs. NLP parsing Regex gives deterministic, transparent results for simple patterns; NLP would be overkill. 
+LLM pre-processing Could improve ambiguous phrasing (“find Joe Lawncare 25 contact”) but adds latency. 
+Field validation Used Pydantic for easy downstream schema serialization (JSON). 
+Location extraction Limited to one trailing phrase (“in Orlando”), adequate for MVP. 
+Error handling Falls back to None for missing fields. 
 
 ### Test Coverage
 
@@ -302,13 +302,6 @@ This structured output includes:
 - **Fallback status** (whether backup domains were used)
 - **Clean contact data** ready for browser automation
 
-**IG Team Responsibilities :**
-
-- ✅ Structured JSON output using Pydantic models
-- ✅ Information retrieval and extraction mechanics
-- ✅ Modular design for easy integration
-- ✅ Evidence pipeline (pages visited, extraction metadata)
-- ✅ Error handling with fallback support
 
 **Agent Pipeline Integration:**
 
@@ -349,24 +342,3 @@ python -m scripts.contact_extraction_cli --url "https://www.ucf.edu" --company "
 python -m scripts.contact_agent_full --query "UCF Computer Science contact" --provider dummy
 ```
 
-### POC Status: ✅ COMPLETE
-
-The Contact Agent POC now demonstrates:
-
-- ✅ Natural language query processing
-- ✅ Intelligent domain discovery with scoring
-- ✅ Robust contact information extraction
-- ✅ Structured JSON output for BI team integration
-- ✅ Error handling and fallback mechanisms
-- ✅ Evidence trail for verification
-- ✅ Modular, extensible architecture
-
-**Next Steps for Production:**
-
-1. Integrate with LangGraph for agent orchestration
-2. Add LLM-based verification layer
-3. Implement user feedback loop for ambiguous cases
-4. Add screenshot/HTML snapshot evidence
-5. Integrate with Browser Interaction team's Overseer agent
-6. Add ChromaDB for successful interaction storage
-7. Implement rate limiting and caching
