@@ -168,3 +168,205 @@ Later stages will plug into this same pattern as LangGraph nodes or chained Lang
 
 Proceed to Step 3 — Contact Extraction & Verification,
 where the top-ranked domains will be fetched (Playwright / BeautifulSoup) and parsed for emails, phones, and social links.
+
+---
+
+## Step 3 — Contact Extraction & Verification
+
+This step completes the Contact Agent POC by extracting structured contact information from the top-ranked domains identified in **Step 2**.
+
+### Objective
+
+Given a domain candidate like `https://www.example.com/`, this module:
+
+1. Fetches the webpage using Playwright (handles JavaScript-rendered content)
+2. Parses HTML with BeautifulSoup to extract contact details
+3. Follows "Contact Us" links to find additional information
+4. Returns structured, validated contact data in JSON format
+
+### Files Implemented
+
+- **schemas/contact_models.py** - Defines Pydantic models for:
+
+  - `ContactInfo` - Structured contact data (emails, phones, social links, etc.)
+  - `ContactExtractionInput` - Input parameters for extraction
+  - `ContactExtractionOutput` - Extraction results with metadata
+  - `ContactAgentResult` - Final output for BI team integration
+
+- **tools/contact_extractor.py** - Core extraction logic:
+
+  - Web scraping with Playwright
+  - HTML parsing with BeautifulSoup
+  - Email/phone number regex extraction
+  - Social media link detection
+  - Contact form identification
+  - Address extraction
+
+- **scripts/contact_extraction_cli.py** - Stand-alone CLI to test Step 3 in isolation
+
+- **scripts/contact_agent_full.py** - **Complete end-to-end workflow** (Step 1 → 2 → 3)
+
+### Logic Breakdown
+
+| Stage               | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| 1. Page Loading     | Uses Playwright to load page with JavaScript support, handles timeouts   |
+| 2. Email Extraction | Regex patterns to find valid email addresses, filters false positives    |
+| 3. Phone Extraction | Detects US/international formats, normalizes to consistent format        |
+| 4. Social Media     | Identifies links to Facebook, Instagram, Twitter/X, LinkedIn, etc.       |
+| 5. Contact Forms    | Finds HTML forms that appear to be for contact/inquiry                   |
+| 6. Address Parsing  | Uses schema.org markup and regex patterns to extract physical addresses  |
+| 7. Link Following   | Optionally visits "Contact Us" pages for additional information          |
+| 8. Validation       | Validates emails, normalizes phone numbers, calculates confidence scores |
+
+### Contact Information Schema
+
+The `ContactInfo` model aligns with IG team requirements for structured JSON output:
+
+```json
+{
+  "source_url": "https://example.com",
+  "extraction_timestamp": "2025-10-22T10:30:00",
+  "emails": ["info@example.com", "support@example.com"],
+  "phone_numbers": ["4075551234", "18005551234"],
+  "social_links": {
+    "facebook": "https://facebook.com/example",
+    "instagram": "https://instagram.com/example"
+  },
+  "contact_forms": ["https://example.com/contact"],
+  "address": "123 Main St, Orlando, FL 32816",
+  "company_name": "Example Company",
+  "confidence_score": 0.9,
+  "extraction_method": "multi_page (2 pages)"
+}
+```
+
+### Example CLI Usage
+
+**Test Step 3 in isolation:**
+
+```bash
+python -m scripts.contact_extraction_cli --url "https://www.ucf.edu/about" --company "UCF"
+```
+
+**Complete end-to-end workflow (Step 1 → 2 → 3):**
+
+```bash
+# Using dummy provider (for testing without API key)
+python -m scripts.contact_agent_full --query "find contact info for Joe's Lawncare in Orlando" --provider dummy
+
+# Using SerpAPI for real Google search results
+python -m scripts.contact_agent_full --query "UCF Computer Science Department contact" --provider serpapi
+
+# Output as JSON for BI team integration
+python -m scripts.contact_agent_full --query "Shah's Halal Orlando" --provider serpapi --json
+```
+
+### Design Trade-offs & Findings
+
+| **Option**                  | **Consideration**                                                        | **Decision**                             |
+| --------------------------- | ------------------------------------------------------------------------ | ---------------------------------------- |
+| **Playwright vs. Requests** | Playwright handles JavaScript-rendered content; slower but more reliable | ✅ Use Playwright for POC                |
+| **Contact Page Following**  | Following links increases coverage but adds latency                      | ✅ Optional flag (default: enabled)      |
+| **Validation Strictness**   | Strict validation reduces false positives but may miss edge cases        | ✅ Moderate validation with filters      |
+| **Confidence Scoring**      | Simple weighted scoring vs. ML model                                     | ✅ Simple scoring for MVP                |
+| **Error Handling**          | Graceful degradation vs. strict failure                                  | ✅ Graceful with detailed error messages |
+
+### Integration with Browser Interaction Team
+
+The `ContactAgentResult` model is designed for seamless handoff to the BI team:
+
+```python
+ContactAgentResult(
+    original_query="find contact for Joe's Lawncare in Orlando",
+    normalized_task={...},  # Step 1 output
+    domains_searched=5,     # Step 2 metrics
+    best_domain="https://joeslawncare.com",
+    contact_data=ContactInfo(...),  # Step 3 output
+    success=True,
+    confidence=0.85,
+    evidence={
+        "pages_visited": [...],
+        "extraction_duration": 12.5,
+        "domain_candidates": [...]
+    },
+    errors=[],
+    fallback_triggered=False
+)
+```
+
+This structured output includes:
+
+- **Evidence trail** for verification (pages visited, domain candidates)
+- **Success metrics** (confidence scores, error logs)
+- **Fallback status** (whether backup domains were used)
+- **Clean contact data** ready for browser automation
+
+**IG Team Responsibilities :**
+
+- ✅ Structured JSON output using Pydantic models
+- ✅ Information retrieval and extraction mechanics
+- ✅ Modular design for easy integration
+- ✅ Evidence pipeline (pages visited, extraction metadata)
+- ✅ Error handling with fallback support
+
+**Agent Pipeline Integration:**
+
+```
+Overseer (Step 1: Normalize)
+  → Execution (Step 2: Domain Finding)
+  → Execution (Step 3: Contact Extraction)
+  → Verification (Built-in validation)
+  → Fallback (Automatic retry with alternate domains)
+  → Finish (Structured ContactAgentResult)
+```
+
+### Installation & Setup
+
+1. **Install dependencies:**
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+2. **Set up SerpAPI key** (for live search):
+
+```bash
+# Create .env file in project root
+echo "SERPAPI_KEY=your_key_here" > .env
+```
+
+3. **Run tests:**
+
+```bash
+# Test individual steps
+python -m scripts.task_parser
+python -m scripts.domain_finder_cli --company "UCF" --provider dummy
+python -m scripts.contact_extraction_cli --url "https://www.ucf.edu" --company "UCF"
+
+# Test complete workflow
+python -m scripts.contact_agent_full --query "UCF Computer Science contact" --provider dummy
+```
+
+### POC Status: ✅ COMPLETE
+
+The Contact Agent POC now demonstrates:
+
+- ✅ Natural language query processing
+- ✅ Intelligent domain discovery with scoring
+- ✅ Robust contact information extraction
+- ✅ Structured JSON output for BI team integration
+- ✅ Error handling and fallback mechanisms
+- ✅ Evidence trail for verification
+- ✅ Modular, extensible architecture
+
+**Next Steps for Production:**
+
+1. Integrate with LangGraph for agent orchestration
+2. Add LLM-based verification layer
+3. Implement user feedback loop for ambiguous cases
+4. Add screenshot/HTML snapshot evidence
+5. Integrate with Browser Interaction team's Overseer agent
+6. Add ChromaDB for successful interaction storage
+7. Implement rate limiting and caching
