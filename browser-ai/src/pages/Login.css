@@ -8,7 +8,7 @@ body {
 
 /* === Center the Login Container === */
 #root, .login-page {
-  background-color: #766868;
+  background-color: #89a0af;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -71,7 +71,7 @@ body {
   box-sizing: border-box;
   padding: 12px;
   margin-top: 15px;
-  background-color: #646cff;
+  background-color: #3A5275;
   color: white;
   border: none;
   border-radius: 8px;
@@ -114,7 +114,7 @@ body {
 .forgot-password {
   background: none;
   border: none;
-  color: #646cff;
+  color: #3A5275;
   font-weight: 500;
   font-size: 15px;
   cursor: pointer;
@@ -125,4 +125,36 @@ body {
 .forgot-password:hover {
   color: #3A5275;
   text-decoration: underline;
+}
+/* Register section */
+.register-container {
+  display: flex;
+  flex-direction: column; /* Stack items vertically */
+  align-items: center;
+  margin-top: 25px;
+}
+
+.register-text {
+  color: black;
+  font-size: 14px;
+}
+
+.register-button {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  margin-top: 15px;
+  background-color: #3A5275;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 17px;
+  transition: all 0.2s ease;
+}
+
+.register-button:hover {
+  background-color: #3A5275;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  transform: scale(1.02);
 }
