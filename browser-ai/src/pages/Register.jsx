@@ -7,7 +7,7 @@ export default function Register() {
 
   return (
     <div className="register-page">
-      <div className="register-container">
+      <div className="registe-container">
         <h1>Create an Account</h1>
 
         <form className="register-form">

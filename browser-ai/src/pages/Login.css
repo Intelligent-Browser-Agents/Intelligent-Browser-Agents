@@ -1,12 +1,12 @@
-/* === General Page Styling === */
+
 body {
-  background-color: #766868; /* warm gray background */
+  background-color: #766868; 
   margin: 0;
   height: 100vh;
   font-family: 'Inter', sans-serif;
 }
 
-/* === Center the Login Container === */
+
 #root, .login-page {
   background-color: #89a0af;
   display: flex;
@@ -15,7 +15,7 @@ body {
   height: 100%;
 }
 
-/* === Login Box === */
+
 .login-container {
   background-color: #FFFFFF;
   padding: 60px 50px;
@@ -59,13 +59,13 @@ body {
   background-color: #e4e6eb;
 }
 
-/* Placeholder Text */
+
 ::placeholder {
   color: #555;
   opacity: 0.8;
 }
 
-/* === Sign In Button === */
+
 .login-button {
   width: 100%;
   box-sizing: border-box;
@@ -104,13 +104,13 @@ body {
   font-size: 15px;
 }
 
-/* Left text ("Forgot your password?") */
+
 .forgot-password-container span {
-  color: #000; /* solid black */
+  color: #000; 
   font-weight: 400;
 }
 
-/* Right link ("Forgot password") */
+
 .forgot-password {
   background: none;
   border: none;
@@ -126,10 +126,10 @@ body {
   color: #3A5275;
   text-decoration: underline;
 }
-/* Register section */
+
 .register-container {
   display: flex;
-  flex-direction: column; /* Stack items vertically */
+  flex-direction: column; 
   align-items: center;
   margin-top: 25px;
 }
