@@ -1,12 +1,12 @@
-/* === General Page Styling === */
+
 body {
-  background-color: #766868; /* warm gray background */
+  background-color: #766868; 
   margin: 0;
   height: 100vh;
   font-family: 'Inter', sans-serif;
 }
 
-/* === Center the Register Container === */
+
 #root, .register-page {
   background-color: #89a0af;
   display: flex;
@@ -15,11 +15,10 @@ body {
   height: 100%;
 }
 
-/* === Register Box === */
 .registe-container {
   background-color: #FFFFFF;
   padding: 60px 40px;
-  border-radius: 10px;
+  border-radius: 14px;
   box-shadow: 0 6px 30px rgba(0, 0, 0, 0.25);
   width: 330px;
   max-width: 90%;
@@ -33,7 +32,7 @@ body {
   box-shadow: 0 10px 35px rgba(0, 0, 0, 0.3);
 }
 
-/* === Title === */
+
 .registe-container h1 {
   color: #3A5275;
   font-size: 50px;
@@ -41,7 +40,7 @@ body {
   font-weight: 600;
 }
 
-/* === Form Inputs === */
+
 .register-input {
   width: 100%;
   box-sizing: border-box;
@@ -60,13 +59,13 @@ body {
   background-color: #e4e6eb;
 }
 
-/* === Placeholder Text === */
+
 ::placeholder {
   color: #555;
   opacity: 0.8;
 }
 
-/* === Register Button === */
+
 .register-button {
   width: 100%;
   box-sizing: border-box;
@@ -87,7 +86,7 @@ body {
   transform: scale(1.02);
 }
 
-/* === Back to Login Button === */
+
 .back-to-login {
   margin-top: 20px;
 }
@@ -107,7 +106,7 @@ body {
   text-decoration: underline;
 }
 
-/* === Fade-in Animation === */
+
 @keyframes fadeIn {
   from { opacity: 0; transform: scale(0.98); }
   to { opacity: 1; transform: scale(1); }
