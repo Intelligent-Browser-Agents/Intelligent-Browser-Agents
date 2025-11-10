@@ -1,4 +1,4 @@
-TKT-001 — Research serper.dev API
+TKT-001 — Research serper.dev API - DONE
 
 Description: Gather official docs, endpoints (search, news, images), auth method, rate limits, request/response examples, pricing.
 Acceptance: Document saved in repo (docs/serper.md) with sample curl and JSON response.
@@ -6,7 +6,7 @@ Estimate: 2–4h
 Dependencies: none
 Priority: High
 
-TKT-002 — Create API key management
+TKT-002 — Create API key management - DONE
 
 Description: Add .env support, dotenv in backend, validation on startup, secret handling notes.
 Acceptance: App reads SERPER_API_KEY from env; startup fails with clear error when missing; docs updated.
@@ -14,7 +14,7 @@ Estimate: 1h
 Dependencies: TKT-001
 Priority: High
 
-TKT-003 — Implement serper.dev client module
+TKT-003 — Implement serper.dev client module - IN PROGRESS
 
 Description: Create reusable client with methods search(query, opts), and rate-limit/retry wrapper.
 Acceptance: Client returns parsed JSON; retries on 5xx; exponential backoff; unit tests cover success and retry paths.
