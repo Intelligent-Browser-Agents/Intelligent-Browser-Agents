@@ -1,9 +1,0 @@
-11.10.25:
-working on the first/second 
-create a simple frontend to chat with and then console log the output
-
-
-11.6.25:
-making tickets to better understand the plan to implement serper.dev.
-then, going to work on the html ui to test output.
-maybe, need to create a google sheet to track prompt -> output as a record.

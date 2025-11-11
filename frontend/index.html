@@ -166,19 +166,19 @@
         // HISTORY STORAGE IMPLEMENTATION
         // Store search history in memory as an array of objects
         // Each entry contains: { timestamp, query, results }
-        // 
-        // const searchHistory = [];
-        // 
-        // function addToHistory(query, results) {
-        //     const entry = {
-        //         timestamp: new Date().toISOString(),
-        //         query: query,
-        //         results: results
-        //     };
-        //     searchHistory.push(entry);
-        //     console.log('History updated:', searchHistory);
-        // }
-        // 
+        
+        const searchHistory = [];
+        
+        function addToHistory(query, results) {
+            const entry = {
+                timestamp: new Date().toISOString(),
+                query: query,
+                results: results
+            };
+            searchHistory.push(entry);
+            console.log('History updated:', searchHistory);
+        }
+        
         // To implement:
         // 1. Call addToHistory(query, data) after successful API response
         // 2. Add a button to view/clear history
@@ -207,7 +207,8 @@
                 // YOUR BACKEND ENDPOINT HERE
                 // Replace this URL with your actual backend endpoint
                 console.log('Fetching /api/search with query:', query);
-                const response = await fetch('/api/search', {
+
+                const response = await fetch('http://localhost:3000/api/search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -226,14 +227,14 @@
                     throw new Error(`api error: ${data.message || response.statusText}`);
                 }
 
-                // Display results
+                // // Display results
                 console.log('Displaying results...');
                 output.className = 'output-box';
                 output.textContent = JSON.stringify(data, null, 2);
 
                 // ADD TO HISTORY HERE
                 // Uncomment when ready to implement:
-                // addToHistory(query, data);
+                addToHistory(query, data);
 
             } catch (error) {
                 output.className = 'output-box error';

@@ -1,0 +1,146 @@
+find me the best apple pie in miami:
+
+
+{
+  "searchParameters": {
+    "q": "find me the best apple pie in miami",
+    "type": "search",
+    "engine": "google"
+  },
+  "organic": [
+    {
+      "title": "Best Apple pie in Miami? - Reddit",
+      "link": "https://www.reddit.com/r/Miami/comments/1eqiv2a/best_apple_pie_in_miami/",
+      "snippet": "Joe's stone crab has amazing apple pies, Idk if you can buy the whole thing tho. I think it's just by the slice. Key-Telephone4894. • ...",
+      "date": "Aug 12, 2024",
+      "sitelinks": [
+        {
+          "title": "Best Pies for Holiday : r/Miami",
+          "link": "https://www.reddit.com/r/Miami/comments/1819jk2/best_pies_for_holiday/"
+        },
+        {
+          "title": "Best pecan pie in Miami?",
+          "link": "https://www.reddit.com/r/Miami/comments/1i5s96u/best_pecan_pie_in_miami/"
+        }
+      ],
+      "position": 1
+    },
+    {
+      "title": "TOP 10 BEST Apple Pie in Miami, FL - Updated 2025 - Yelp",
+      "link": "https://www.yelp.com/search?find_desc=Apple+Pie&find_loc=Miami%2C+FL",
+      "snippet": "Top 10 Best Apple Pie in Miami, FL - Last Updated October 2025 - Yelp - Fireman Derek's Bake Shop & Cafe, Gusto Casero By Mdq Sweets, Knaus Berry Farm, ...",
+      "position": 2
+    },
+    {
+      "title": "Fireman Derek's Menu | Fireman Derek's Bake Shop",
+      "link": "https://firemandereks.com/menu/",
+      "snippet": "Our homestyle Apple Pie is topped with a homemade streusel and is best served with a dollop of fresh whipped cream, or warmed with a scoop of vanilla ice cream.",
+      "position": 3
+    },
+    {
+      "title": "trying the BEST pies in the country! . #miami #florida #applepie ...",
+      "link": "https://www.instagram.com/reel/DH4XT8XSsE7/?hl=en",
+      "snippet": "Trying the BEST pies in the country! 🥧🥧 . #miami #florida #applepie #keylimepie more View all 242 comments",
+      "date": "Mar 31, 2025",
+      "position": 4
+    },
+    {
+      "title": "Where would you get the best apple and pecan pies for take out ...",
+      "link": "https://www.facebook.com/groups/letseatsouthflorida/posts/779558045933774/",
+      "snippet": "The Cookie Shop , 234 Basin Drive, 33308. Call first due to Thanksgiving. Best apple pie EVER. ·.",
+      "date": "Nov 24, 2024",
+      "position": 5
+    },
+    {
+      "title": "Miami's Best Pies: 5 Must-Try Desserts - Modern Luxury",
+      "link": "https://www.modernluxury.com/5-must-try-pies-in-miami/",
+      "snippet": "5 Must-Try Pies in Miami · Fireman Derek's Coconut Custard Pie · Madruga Bakery's Apple Pie · Joe's Stone Crab's Key Lime Pie · Cindy Lou's Cookies' ...",
+      "date": "Oct 11, 2024",
+      "position": 6
+    },
+    {
+      "title": "Jessica Abraham - Amazing French Patisserie in Miami - pick-up ...",
+      "link": "https://jessica-abraham.myshopify.com/",
+      "snippet": "Authentic high-end French cakes by Pastry Chef Jessica Abraham. Kosher Parve Certified by ORB. Pas Isroel.",
+      "position": 7
+    },
+    {
+      "title": "Zak THE BAKER – Miami, Fl",
+      "link": "https://zakthebaker.com/",
+      "snippet": "Independent Artisan Kosher Bakery Miami, Florida. Established 2012. Bread NATURALLY LEAVENED. Pastry MADE BY HAND. Cafe FROM SCRATCH. Team WITH JOY.",
+      "sitelinks": [
+        {
+          "title": "Bakery / Cafe",
+          "link": "https://zakthebaker.com/bakery/"
+        },
+        {
+          "title": "Order Online",
+          "link": "https://zakthebaker.com/order-online/"
+        },
+        {
+          "title": "FAQ",
+          "link": "https://zakthebaker.com/faq/"
+        },
+        {
+          "title": "Kosher",
+          "link": "https://zakthebaker.com/kosher/"
+        }
+      ],
+      "position": 8
+    },
+    {
+      "title": "Apple Pie Delivery in Miami - Uber Eats",
+      "link": "https://www.ubereats.com/dish/miami-fl/apple-pie?srsltid=AfmBOopzy8HifMA_gO3o2adh6RynYPz_TIE3-KeTcr1X4nq5b18inj0u",
+      "snippet": "Who has the best Apple Pie in Miami? The Apple Pie from McDonald's® in Sweetwater is one of the options for Apple Pie delivery with the highest rating from ...",
+      "position": 9
+    },
+    {
+      "title": "Best Apple Pie in Miami - Joanna's Marketplace - TikTok",
+      "link": "https://www.tiktok.com/@fatgirlhedonist/video/7205383794868636970",
+      "snippet": "1. Cabista biyo badan 2. jimicsi joogta ah 3.Joogteyn baaritaano caafimaad (6 biloodba halmar) 4. Samee bedtime ritual (quraan akhri, buug akhri ) ...",
+      "date": "Feb 28, 2023",
+      "position": 10
+    }
+  ],
+  "peopleAlsoAsk": [
+    {
+      "question": "What is Oprah's favorite apple pie?",
+      "snippet": "Word of her famously tall, flaky-crusted Levee-High Apple Pie quickly traveled around the world and made her down-home Blue Owl Bakery a source for a true slice of heaven. The Levee-High Apple Pie was named one of Oprah's Favorite Things!",
+      "title": "Levee High Caramel Pecan Apple Pie by Blue Owl Bakery | Goldbelly",
+      "link": "https://www.goldbelly.com/restaurants/blue-owl-bakery/levee-high-caramel-pecan-apple-pie"
+    },
+    {
+      "question": "What town is famous for apple pies?",
+      "snippet": "Julian, California is famous for its Apple Pies. And for good reason. Julian boasts a number of pie shops and restaurants that offer their pie specialties. Julian pie shops also offer a variety of other pie flavors.",
+      "title": "Julian Apple Pie - Visit Julian, California",
+      "link": "https://visitjulian.com/apple-pie/"
+    }
+  ],
+  "relatedSearches": [
+    {
+      "query": "Find me the best apple pie in miami reddit"
+    },
+    {
+      "query": "Find me the best apple pie in miami florida"
+    },
+    {
+      "query": "Best pumpkin pie in Miami"
+    },
+    {
+      "query": "Apple pie near me"
+    },
+    {
+      "query": "Best pecan pie in Miami"
+    },
+    {
+      "query": "Best key lime pie in Miami"
+    },
+    {
+      "query": "Best pies Miami"
+    },
+    {
+      "query": "Pie Miami"
+    }
+  ],
+  "credits": 1
+}
