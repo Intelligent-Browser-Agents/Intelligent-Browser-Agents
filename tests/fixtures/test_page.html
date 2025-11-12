@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Page</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 5px; }
+        input, textarea, select { padding: 8px; margin: 5px; width: 200px; }
+        .success { color: green; font-weight: bold; }
+        .drag-container { display: flex; gap: 50px; margin: 20px 0; }
+        .drag-box { 
+            width: 100px; height: 100px; 
+            border: 2px solid #333; padding: 10px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #scroll-target { margin-top: 1500px; padding: 20px; background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Page for Action Execution</h1>
+        
+        <!-- Buttons -->
+        <section>
+            <h2>Buttons</h2>
+            <button id="test-button" onclick="handleClick()">Click Me</button>
+            <button class="submit-btn" role="button">Submit</button>
+            <button disabled>Disabled Button</button>
+            <div id="click-result"></div>
+        </section>
+        
+        <!-- Form -->
+        <section>
+            <h2>Form Elements</h2>
+            <form id="test-form" onsubmit="handleSubmit(event)">
+                <input type="text" id="name-input" name="name" placeholder="Enter your name">
+                <input type="email" id="email-input" name="email" placeholder="Email">
+                <select id="country-select" name="country">
+                    <option value="">Select Country</option>
+                    <option value="us">United States</option>
+                    <option value="uk">United Kingdom</option>
+                    <option value="ca">Canada</option>
+                </select>
+                <textarea id="message-input" name="message" placeholder="Your message"></textarea>
+                <input type="file" id="file-input" name="file">
+                <button type="submit">Submit Form</button>
+            </form>
+            <div id="form-result"></div>
+        </section>
+        
+        <!-- Drag and Drop -->
+        <section>
+            <h2>Drag and Drop</h2>
+            <div class="drag-container">
+                <div class="drag-box" id="drag-source" draggable="true">
+                    Drag Me
+                </div>
+                <div class="drag-box" id="drop-target">
+                    Drop Here
+                </div>
+            </div>
+            <div id="drag-result"></div>
+        </section>
+        
+        <!-- Scroll Target -->
+        <section id="scroll-target">
+            <h2>Scroll Target</h2>
+            <button id="scroll-button">Button at Bottom</button>
+        </section>
+    </div>
+    
+    <script>
+        // Button click handler
+        function handleClick() {
+            document.getElementById('click-result').innerHTML = 
+                '<span class="success">Button clicked successfully!</span>';
+        }
+        
+        // Form submit handler
+        function handleSubmit(e) {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData);
+            document.getElementById('form-result').innerHTML = 
+                '<span class="success">Form submitted with: ' + JSON.stringify(data) + '</span>';
+            return false;
+        }
+        
+        // Drag and drop handlers
+        const dragSource = document.getElementById('drag-source');
+        const dropTarget = document.getElementById('drop-target');
+        
+        dragSource.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', e.target.innerHTML);
+        });
+        
+        dropTarget.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        });
+        
+        dropTarget.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const data = e.dataTransfer.getData('text/html');
+            dropTarget.innerHTML = data;
+            dragSource.innerHTML = 'Dropped!';
+            document.getElementById('drag-result').innerHTML = 
+                '<span class="success">Drag and drop completed!</span>';
+        });
+    </script>
+</body>
+</html>
