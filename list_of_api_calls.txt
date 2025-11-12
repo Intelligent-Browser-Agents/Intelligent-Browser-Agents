@@ -144,3 +144,157 @@ find me the best apple pie in miami:
   ],
   "credits": 1
 }
+
+find me the best gift shops in orlando
+
+{
+  "searchParameters": {
+    "q": "find me the best gift shops in orlando",
+    "type": "search",
+    "engine": "google"
+  },
+  "answerBox": {
+    "snippet": "___Universal CityWalk. 4.3. (4,710) Bars & Clubs Florida Center Admission tickets from $167. ...\n___Lake Buena Vista Factory Stores. 4.2. (1,049) ...\n___World of Chocolate Museum and Café 4.4. (898) ...\n___The LEGO Store. 4.5. (1,093) ...\n___MacroBaby. 4.7. (438) ...\n___M&M'S Disney Springs. 4.4. (358) ...\n___Hogan's Beach Shop. 4.7. (48) ...\n___Kennedy Space Center Store. 4.5. (351)",
+    "title": "THE 15 BEST Orlando Gift & Specialty Shops (2025) - Tripadvisor",
+    "link": "https://www.tripadvisor.com/Attractions-g34515-Activities-c26-t144-Orlando_Florida.html"
+  },
+  "organic": [
+    {
+      "title": "TOP 10 BEST Souvenir Shops in Orlando, FL - Updated 2025 - Yelp",
+      "link": "https://www.yelp.com/search?find_desc=Souvenir+Shops&find_loc=Orlando%2C+FL",
+      "snippet": "Top 10 Best Souvenir Shops Near Orlando, Florida · 1. All Gifts $2.99 & Less · 2. Florida Gifts for Less · 3. Disney Gift Outlet · 4. Bargain World Lake Buena ...",
+      "rating": 3.8,
+      "ratingCount": 5689,
+      "position": 1
+    },
+    {
+      "title": "Orlando Gift Shop - Disney Gifts, Univeral Studios & Florida Souvenirs",
+      "link": "https://www.ti-gifts.com/",
+      "snippet": "Spacious and clean with an enormous range of Disney and Florida memorabilia. The Treasure Island Gift Shop in Conveniently located, ample parking, ...",
+      "position": 2
+    },
+    {
+      "title": "Places to buy a gift? : r/orlando - Reddit",
+      "link": "https://www.reddit.com/r/orlando/comments/1et5avx/places_to_buy_a_gift/",
+      "snippet": "Freehand Goods in College Park, R. Nichols, Park Ave CDs and Neighbors in Audubon Park. Lots of great local items.",
+      "date": "Aug 15, 2024",
+      "sitelinks": [
+        {
+          "title": "Disney Souvenir Shops : r/orlando",
+          "link": "https://www.reddit.com/r/orlando/comments/wtpldi/disney_souvenir_shops/"
+        },
+        {
+          "title": "Disney Souvenirs outside of Disney? : r/orlando",
+          "link": "https://www.reddit.com/r/orlando/comments/1cxz3ed/disney_souvenirs_outside_of_disney/"
+        }
+      ],
+      "position": 3
+    },
+    {
+      "title": "Favorite Gift Shops in Orlando, Florida - Facebook",
+      "link": "https://www.facebook.com/groups/grewupinorlando/posts/9630203407030791/",
+      "snippet": "I loved going to Bargain World when we were in Orlando. I just love them gift shops! Orlando resident shares fond memories of visiting Bargain World and...",
+      "position": 4
+    },
+    {
+      "title": "Shopping & Boutique Shops in Orlando, Florida - Disney Springs",
+      "link": "https://www.disneysprings.com/shopping/category/gifts-housewares/",
+      "snippet": "House of Blues® Gear Shop. West Side · Apparel & Accessories ; Jo Malone London. Town Center · Gifts & Housewares ; Lefty's - The Left Hand Store. Marketplace ...",
+      "position": 5
+    },
+    {
+      "title": "Modern gift store with unique and fun gifts for babies, kids + adults ...",
+      "link": "https://www.goodcrowdshop.com/",
+      "snippet": "We are a modern gift shop with loads of personality right in the heart of College Park, in Orlando. Shop in person or online and find the perfect gift for ...",
+      "sitelinks": [
+        {
+          "title": "Buy e-gift card",
+          "link": "https://www.goodcrowdshop.com/s/gift-cards"
+        },
+        {
+          "title": "Shop all",
+          "link": "https://www.goodcrowdshop.com/s/shop"
+        },
+        {
+          "title": "Events + workshops",
+          "link": "https://www.goodcrowdshop.com/events"
+        },
+        {
+          "title": "About Us",
+          "link": "https://www.goodcrowdshop.com/page-1"
+        }
+      ],
+      "position": 6
+    },
+    {
+      "title": "6 Shops You MUST Visit at Universal Orlando - YouTube",
+      "link": "https://www.youtube.com/watch?v=sNDoi5sWIlk",
+      "snippet": "Come along as I take you on a full tour of the best gift shops at Universal Studios Florida! Whether you're hunting for unique merchandise, ...",
+      "date": "Jun 3, 2025",
+      "position": 7
+    },
+    {
+      "title": "SeaWorld Orlando Souvenirs – SeaWorld Gift Shop",
+      "link": "https://seaworld.com/orlando/shopping/",
+      "snippet": "Here, you'll find roller coaster memorabilia, souvenirs, apparel, hats, jewelry, accessories, gifts, toys, and stuffed animals.",
+      "position": 8
+    },
+    {
+      "title": "Made in Orlando: Unique Gifts With Local Flavor",
+      "link": "https://www.visitorlando.com/blog/post/unique-orlando-gifts/",
+      "snippet": "Discover unique, Orlando-made gifts throughout our neighborhoods, theme parks and entertainment districts.",
+      "date": "Nov 18, 2024",
+      "position": 9
+    }
+  ],
+  "peopleAlsoAsk": [
+    {
+      "question": "What is the most famous thing in Orlando?",
+      "snippet": "Orlando is famous for its world-class theme parks. Walt Disney World Resort, with its four parks including Magic Kingdom and Epcot, is a must-visit. Universal Orlando Resort offers thrilling rides at Universal Studios and Islands of Adventure.",
+      "title": "Orlando Florida - Attractions & Things to Do in Orlando FL - Visit Florida",
+      "link": "https://www.visitflorida.com/places-to-go/central/orlando/"
+    },
+    {
+      "question": "What is the most sold souvenir?",
+      "snippet": "France tops the list, with the Eiffel Tower keychain being the most popular souvenir in the world. The country sees the highest annual international tourist arrivals, at 117.1 million, as well as international tourism expenditures of $31.193 million, the second-highest amount on the list.",
+      "title": "These 3 European Countries Have The World's Most Popular ... - Forbes",
+      "link": "https://www.forbes.com/sites/rebeccahughes/2024/09/27/these-3-european-countries-have-the-worlds-most-popular-souvenirs-per-new-study/"
+    },
+    {
+      "question": "Is Orlando good for shopping?",
+      "snippet": "With over 250 retailers, The Florida Mall is the largest shopping center in the Orlando area. Whether you're looking for souvenirs, tech, or fashion, from upscale brands, to bargain deals, The Florida Mall has it all.",
+      "title": "Best Shopping in Orlando - Outlet Malls & More | Go City®",
+      "link": "https://gocity.com/en/orlando/things-to-do/best-shopping-in-orlando"
+    }
+  ],
+  "relatedSearches": [
+    {
+      "query": "Lake Buena Vista Facto..."
+    },
+    {
+      "query": "Find me the best gift shops in orlando for christmas"
+    },
+    {
+      "query": "Find me the best gift shops in orlando for her"
+    },
+    {
+      "query": "Cheap Gift Shops Orlando"
+    },
+    {
+      "query": "Best souvenir shops Orlando"
+    },
+    {
+      "query": "Gift shop Orlando international Drive"
+    },
+    {
+      "query": "Disney gift Shops Orlando"
+    },
+    {
+      "query": "Souvenir shops near me"
+    },
+    {
+      "query": "Best gift shops orlando reddit"
+    }
+  ],
+  "credits": 1
+}
