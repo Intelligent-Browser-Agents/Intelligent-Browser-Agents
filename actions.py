@@ -2,11 +2,15 @@
 Primitive browser actions
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
 from typing import Optional, Tuple
 from playwright.async_api import Page, Locator
-from .models import ActionCommand, ScrollConfig
-from .resolver import resolve_selector, resolve_drag_selector
-from .errors import ActionExecutionError
+from models import ActionCommand, ScrollConfig
+from resolver import resolve_selector, resolve_drag_selector
+from errors import ActionExecutionError
 
 
 async def click_element(

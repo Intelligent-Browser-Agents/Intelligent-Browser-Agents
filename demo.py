@@ -2,10 +2,19 @@
 Demo script showing usage of the action execution module
 """
 
+import sys
+from pathlib import Path
+
+# Make absolute imports work when running this file directly
+sys.path.insert(0, str(Path(__file__).parent))
+
 import asyncio
 import json
-from pathlib import Path
-from ig_action_exec import ActionCommand, Target, run_action, browser_manager
+
+from actions import ActionCommand
+from models import Target
+from runner import run_action
+from browser import browser_manager
 
 
 async def main():

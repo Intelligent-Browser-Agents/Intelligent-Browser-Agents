@@ -2,10 +2,14 @@
 Error taxonomy and exception mapping
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
 import traceback
 from typing import Optional
 from playwright.async_api import TimeoutError, Error as PlaywrightError
-from .models import ErrorInfo
+from models import ErrorInfo
 
 
 class ActionExecutionError(Exception):

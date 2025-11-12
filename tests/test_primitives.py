@@ -5,8 +5,15 @@ Tests for primitive actions
 import pytest
 import asyncio
 from pathlib import Path
-from ig_action_exec import ActionCommand, Target, run_action
-from ig_action_exec.browser import browser_manager
+import sys
+
+# Add parent to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from actions import ActionCommand
+from models import Target
+from runner import run_action
+from browser import browser_manager
 
 
 @pytest.fixture

@@ -2,9 +2,13 @@
 Selector resolution utilities
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
 from typing import Optional, List
 from playwright.async_api import Page, Locator, FrameLocator
-from .models import Target, DragTarget
+from models import Target, DragTarget
 
 
 async def resolve_selector(

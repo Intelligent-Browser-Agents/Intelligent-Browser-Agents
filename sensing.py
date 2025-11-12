@@ -2,10 +2,14 @@
 Sensing actions for reading DOM content
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
 from typing import Optional, Dict, Any
 from playwright.async_api import Page
-from .models import ActionCommand
-from .resolver import resolve_selector
+from models import ActionCommand
+from resolver import resolve_selector
 
 
 async def extract_dom(page: Page, max_chars: int = 10000) -> str:

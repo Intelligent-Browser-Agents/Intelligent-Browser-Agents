@@ -1,161 +1,145 @@
-# IG Action Execution Module
+# Intelligent Browser Agents
 
-A minimal browser action execution library using Playwright for Python. This module takes structured action commands, executes them in a real browser, and returns structured results with evidence.
+A minimal browser action execution library using Playwright.
 
-## Features
+## Setup
 
-- **No planning or reasoning** - Just executes actions and reports outcomes
-- **Evidence capture** - Screenshots and DOM snippets for every action
-- **Strict scope** - Single attempt per action, no retries beyond readiness checks
-- **Typed interfaces** - Pydantic models for inputs and outputs
-- **Session management** - One browser profile per session ID
+### Prerequisites
+- Python 3.10+
+- macOS/Linux/Windows
 
-## Installation
+### Installation
 
+1. Clone/navigate to repository:
 ```bash
-# Install the package
-pip install -e .
-
-# Install Playwright browsers
-playwright install chromium
+cd intelligent_browser_agents
 ```
 
-## Quick Start
-
-```python
-from ig_action_exec import ActionCommand, Target, run_action
-
-# Navigate to a URL
-nav_command = ActionCommand(
-    trace_id="trace_001",
-    session_id="session_001",
-    action_type="navigate_to_url",
-    input_value="https://example.com"
-)
-result = await run_action(nav_command)
-
-# Click an element
-click_command = ActionCommand(
-    trace_id="trace_002",
-    session_id="session_001",
-    action_type="click_element",
-    target=Target(
-        selector="#submit-button",
-        selector_type="css"
-    )
-)
-result = await run_action(click_command)
-
-# Check result
-if result.status == "success":
-    print(f"Action completed: {result.evidence.screenshot_path}")
-else:
-    print(f"Action failed: {result.error.message}")
+2. Create and activate virtual environment:
+```bash
+python3 -m venv venv
+source venv/bin/activate
 ```
 
-## Supported Actions
-
-### Navigation
-- `navigate_to_url` - Open a URL
-- `go_back` - Navigate back in history
-- `go_forward` - Navigate forward  
-- `reload_page` - Reload current page
-- `close_tab` - Close current tab
-- `switch_tab` - Switch to tab by index
-
-### Interaction
-- `click_element` - Click on element
-- `double_click_element` - Double click
-- `type_input` - Type text into input
-- `press_key` - Press keyboard key
-- `hover_over` - Hover over element
-- `scroll` - Scroll page
-- `scroll_to` - Scroll to element
-- `upload_file` - Upload file to input
-- `drag_and_drop` - Drag and drop
-
-### Sensing (Read-only)
-- `extract_dom` - Get page HTML
-- `get_element_text` - Get element text
-- `get_element_attribute` - Get attribute value
-- `take_screenshot` - Capture screenshot
-
-### Composite Helpers
-- `search_and_click` - Find and click element
-- `fill_out_form` - Fill multiple form fields
-
-## Running Tests
-
+3. Install dependencies:
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run specific test
-pytest tests/test_primitives.py::test_click_button -v
+pip install -r requirements.txt
 ```
 
-## Running the Demo
+## Running the Project
+
+### ✅ Run Demo Directly (RECOMMENDED)
+
+From **inside** the `intelligent_browser_agents` folder:
 
 ```bash
+source venv/bin/activate
 python demo.py
 ```
 
-This will execute three sequential actions on a local test page and display the results.
+This works because all Python files use absolute imports with `sys.path.insert()` at the top.
 
-## Action Command Schema
+### ✅ Run Tests
 
-```python
-{
-  "trace_id": "unique_id",
-  "session_id": "session_id",
-  "action_type": "click_element",
-  "target": {
-    "selector": "#button",
-    "selector_type": "css",
-    "selector_strategy": "strict"
-  },
-  "timeout_ms": 8000,
-  "screenshot": {
-    "enabled": true,
-    "clip_to_element": true
-  },
-  "dom_snippet_chars": 4000
-}
+From the **parent directory** (one level up):
+
+```bash
+source intelligent_browser_agents/venv/bin/activate
+python -m pytest intelligent_browser_agents/tests/ -v
 ```
 
-## Action Result Schema
-
-```python
-{
-  "trace_id": "unique_id",
-  "status": "success",
-  "action_type": "click_element",
-  "session_id": "session_id",
-  "timings_ms": {
-    "resolve": 45,
-    "interact": 120,
-    "post_capture": 200
-  },
-  "evidence": {
-    "screenshot_path": "/tmp/ig_evidence/trace_001.png",
-    "dom_snippet_path": "/tmp/ig_evidence/trace_001_dom.html",
-    "visible_text": "Button clicked"
-  },
-  "error": null
-}
+Or run a specific test:
+```bash
+python -m pytest intelligent_browser_agents/tests/test_primitives.py::test_click_button -v
 ```
 
-## Error Codes
+## Import Strategy
 
-- `timeout` - Action timed out
-- `element_not_found` - Element not found
-- `not_interactable` - Element not interactable
-- `detached` - Element detached from DOM
-- `navigation_failed` - Page navigation failed
-- `upload_failed` - File upload failed
-- `unsupported_action` - Action type not supported
-- `bad_command` - Invalid command format
-- `internal` - Internal error
+**All files use the same pattern:**
+
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
+# Now absolute imports work
+from models import ActionCommand, Target
+from runner import run_action
+from browser import browser_manager
+```
+
+**Why this works:**
+- ✅ `python demo.py` from inside folder → works
+- ✅ `pytest` from parent folder → works  
+- ✅ No relative imports (no dots) → simple and consistent
+- ✅ No circular imports → clean dependencies
+
+## Project Structure
+
+```
+intelligent_browser_agents/
+├── __init__.py              # Package init (with sys.path setup)
+├── demo.py                  # Demo entry point
+├── actions.py               # Browser actions (click, type, scroll)
+├── models.py                # Pydantic data models
+├── runner.py                # Action execution runner
+├── browser.py               # Playwright browser manager
+├── errors.py                # Error handling & mapping
+├── resolver.py              # CSS/XPath selector resolution
+├── sensing.py               # DOM extraction
+├── evidence.py              # Screenshot & DOM capture
+├── metrics.py               # Timing metrics
+├── requirements.txt         # pip dependencies
+├── README.md                # This file
+├── tests/
+│   ├── __init__.py
+│   ├── test_primitives.py
+│   └── fixtures/
+│       └── test_page.html
+└── venv/                    # Virtual environment
+```
+
+## Dependencies
+
+- **playwright** - Browser automation
+- **pydantic** - Data validation  
+- **pytest** - Testing framework
+- **pytest-asyncio** - Async test support
+
+See `requirements.txt` for versions.
+
+## Troubleshooting
+
+### "No module named X"
+- Check you're in the right directory
+- Ensure venv is activated: `source venv/bin/activate`
+- Verify sys.path.insert() is in all module files
+
+### "Playwright executable not found"
+```bash
+playwright install
+```
+
+### Tests not collecting
+```bash
+python -m pytest --collect-only intelligent_browser_agents/tests/
+```
+
+## Development
+
+### File descriptions:
+- **models.py** - Pydantic models for commands/results/targets
+- **runner.py** - Main dispatch loop that executes actions
+- **actions.py** - Implementation of all primitive actions
+- **resolver.py** - Selector resolution (CSS/XPath/role)
+- **browser.py** - Playwright browser & context management
+- **sensing.py** - DOM extraction & analysis utilities
+- **evidence.py** - Screenshot and DOM snippet capture
+
+### Running with coverage:
+```bash
+python -m pytest intelligent_browser_agents/tests/ --cov=intelligent_browser_agents
+```
 
 ## License
 

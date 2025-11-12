@@ -2,16 +2,20 @@
 Main action runner
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
 import asyncio
 from typing import Dict, Any, List
-from .models import ActionCommand, ActionResult, Timings, Evidence, Details
-from .browser import browser_manager
-from .metrics import Timer
-from .evidence import evidence_capture
-from .errors import map_exception_to_error
-from .resolver import get_selector_string
-from . import actions
-from . import sensing
+from models import ActionCommand, ActionResult, Timings, Evidence, Details
+from browser import browser_manager
+from metrics import Timer
+from evidence import evidence_capture
+from errors import map_exception_to_error
+from resolver import get_selector_string
+import actions
+import sensing
 
 
 async def run_action(command: ActionCommand) -> ActionResult:
