@@ -24,9 +24,16 @@ export default function Login() {
             placeholder="Password"
             className="login-input"
           />
-          <button type="submit" className="login-button">
-            Sign In
+        {/* Login Button */}
+        <div className="login-button-container">
+          <button
+            type="button"
+            className="login-button"
+            onClick={() => navigate("/dashboard")} // <-- navigate here
+          >
+            Login
           </button>
+        </div>
         </form>
 
         {/* Forgot Password Section */}
