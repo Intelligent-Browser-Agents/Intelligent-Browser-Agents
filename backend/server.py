@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 To-DO List:
 - Add bcrypt hashing for user passwords
 """
-# token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
+
 
 # Global Variables
 conn = None #postgres connection
