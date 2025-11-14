@@ -23,7 +23,7 @@ To run uvicorn
 
 Connect in terminal to postgres
 ```bash
-psql -h localhost -U postgres -p 5432 -d user_database
+    psql -h localhost -U postgres -p 5432 -d user_database
 ```
 
 - user_database is the database
