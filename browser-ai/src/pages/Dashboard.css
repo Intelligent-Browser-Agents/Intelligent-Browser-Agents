@@ -61,38 +61,68 @@
 /* Main content area */
 .dashboard-main {
   flex: 1;
-  padding: 60px;
+  width: 100%;
   display: flex;
   flex-direction: column;
+
+  /* align text to top-left area but centered horizontally */
+  justify-content: flex-start;
   align-items: center;
+
+  /* top spacing only (controls how high it sits) */
+  padding: 10px 0 0 0; /* <-- adjust this number to move up/down */
+
+  /* modern typography */
+  font-family: "Inter", "Poppins", "Segoe UI", sans-serif;
+  font-size: clamp(30px, 5vw, 40px);
+  font-weight: 800;
+  letter-spacing: 1.2px;
   color: white;
+  line-height: 1.1;
+
+  /* visual polish */
+  text-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
+
+  /* remove weird spacing */
+  margin: 0;
 }
 
-/* Input bar at bottom */
+
 .dashboard-input-bar {
   position: absolute;
-  bottom: 25px;
+  bottom: 24px;
   left: 300px;
   right: 40px;
+
   display: flex;
-  gap: 10px;
-  padding: 10px;
-  background-color: white;
-  border-radius: 14px;
-  box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+  align-items: center;
+  gap: 12px;
+
+  padding: 10px 0;
+
+  /* REMOVE visible background + border */
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+
+  /* keep layout clean */
+  border-radius: 0;
 }
+
+
 
 .dashboard-input {
   flex: 1;
   padding: 12px;
   border-radius: 8px;
-  border: 2px solid #3A5275;
+  border: 2px solid #000000;
   font-size: 16px;
 }
 
 .dashboard-input-btn {
   background-color: #3A5275;
-  color: white;
+  color: rgb(55, 48, 48);
   border: none;
   padding: 12px 16px;
   border-radius: 8px;
@@ -101,7 +131,7 @@
 
 .dashboard-input:focus {
   outline: 2px solid #3A5275;
-  background-color: #e4e6eb;
+  background-color: #332d2d;
 }
 
 /* Buttons in the input bar */
