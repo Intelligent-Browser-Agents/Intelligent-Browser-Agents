@@ -20,6 +20,9 @@ import bcrypt
 
 """
 To-DO List:
+- Change user update endpoint to not include password
+- Create endpoint for updating password w/ JWT auth
+- Add forgot password, that sends an email with a randomly generated password
 """
 
 
