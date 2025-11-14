@@ -13,11 +13,13 @@ import psycopg2
 
 # For loading .env variables
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
+
+# For password hashing
+import bcrypt
 
 """
 To-DO List:
-- Add bcrypt hashing for user passwords
 """
 
 
@@ -145,7 +147,9 @@ async def insert_user(request: Request):
     
     # Inserting the new user
     query = 'INSERT INTO users (username, firstname, lastname, email, password, isverified) VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_id;'
-    cur.execute(query, (username, firstname, lastname, email, password, False))
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
+    hashed_password = hashed_password.decode('utf-8')
+    cur.execute(query, (username, firstname, lastname, email, hashed_password, False))
     newUserId = cur.fetchone()[0]
     return {'userId': newUserId, 'error': error}
 
@@ -239,7 +243,9 @@ async def update_user(request: Request):
         cur.execute(query, (email, str(userId)))
     if password is not None:
         query = 'UPDATE users SET password = %s WHERE user_id = %s;'
-        cur.execute(query, (password, str(userId)))
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
+        hashed_password = hashed_password.decode('utf-8')
+        cur.execute(query, (hashed_password, str(userId)))
         pass_updated = True
     
     query = 'SELECT * FROM users WHERE user_id = %s;'
@@ -275,8 +281,11 @@ async def login_user(request: Request):
         error = 'Username or Password is Missing'
         return {'error' : error}
     
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
+    hashed_password = hashed_password.decode('utf-8')
+    
     query = 'SELECT * FROM users WHERE username = %s AND password = %s;'
-    cur.execute(query, (username, password))
+    cur.execute(query, (username, hashed_password))
     results = cur.fetchone()
     
     if results is not None:
