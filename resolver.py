@@ -18,67 +18,87 @@ async def resolve_selector(
 ) -> Optional[Locator]:
     """
     Resolve a selector to a Playwright Locator
-    
+
     Args:
         page: Playwright page instance
         target: Target specification
         timeout: Timeout in milliseconds
-        
+
     Returns:
         Locator or None if not found
+
+    Raises:
+        Exception with detailed error message if resolution fails
     """
-    # Navigate to frames if specified
-    frame_context = await navigate_to_frame(page, target.frame_path)
-    
-    # Determine the base context (page or frame)
-    context = frame_context if frame_context else page
-    
-    locator = None
-    
-    # Handle different selector strategies
-    if target.selector_strategy == "role_or_text" and not target.selector:
-        # Try role first, then text
-        if target.role_hint:
-            try:
-                locator = context.get_by_role(target.role_hint)
-                if await locator.count() > 0:
-                    return locator.first
-            except:
-                pass
-        
-        if target.text_hint:
-            try:
-                locator = context.get_by_text(target.text_hint)
-                if await locator.count() > 0:
-                    return locator.first
-            except:
-                pass
-        
-        return None
-    
-    # Standard selector resolution
-    if not target.selector:
-        return None
-    
-    if target.selector_type == "css":
-        locator = context.locator(target.selector)
-    elif target.selector_type == "xpath":
-        locator = context.locator(f"xpath={target.selector}")
-    elif target.selector_type == "role":
-        locator = context.get_by_role(target.selector)
-    elif target.selector_type == "text":
-        locator = context.get_by_text(target.selector)
-    else:
-        return None
-    
-    # Check if element exists
     try:
-        if await locator.count() > 0:
-            return locator.first
-    except:
-        pass
-    
-    return None
+        frame_context = await navigate_to_frame(page, target.frame_path)
+        context = frame_context if frame_context else page
+
+        locator = None
+
+        # Handle role_or_text strategy
+        if target.selector_strategy == "role_or_text" and not target.selector:
+            if target.role_hint:
+                try:
+                    locator = context.get_by_role(target.role_hint)
+                    count = await locator.count()
+                    if count > 0:
+                        return locator.first
+                    print(f"[Resolver] No elements found with role: {target.role_hint}")
+                except Exception as e:
+                    print(f"[Resolver] Error finding element by role '{target.role_hint}': {e}")
+
+            if target.text_hint:
+                try:
+                    locator = context.get_by_text(target.text_hint)
+                    count = await locator.count()
+                    if count > 0:
+                        return locator.first
+                    print(f"[Resolver] No elements found with text: {target.text_hint}")
+                except Exception as e:
+                    print(f"[Resolver] Error finding element by text '{target.text_hint}': {e}")
+
+            raise Exception(f"Element not found using role_or_text strategy (role: {target.role_hint}, text: {target.text_hint})")
+
+        # Standard selector resolution
+        if not target.selector:
+            raise Exception("No selector provided in target")
+
+        # Create locator based on selector type
+        try:
+            if target.selector_type == "css":
+                locator = context.locator(target.selector)
+            elif target.selector_type == "xpath":
+                locator = context.locator(f"xpath={target.selector}")
+            elif target.selector_type == "role":
+                locator = context.get_by_role(target.selector)
+            elif target.selector_type == "text":
+                locator = context.get_by_text(target.selector)
+            else:
+                raise Exception(f"Unsupported selector type: {target.selector_type}")
+        except Exception as e:
+            raise Exception(f"Failed to create locator for {target.selector_type} selector '{target.selector}': {str(e)}")
+
+        # Check if element exists
+        try:
+            count = await locator.count()
+            print(f"[Resolver] Found {count} element(s) matching {target.selector_type} selector '{target.selector}'")
+
+            if count > 0:
+                return locator.first
+            else:
+                raise Exception(f"No elements found matching {target.selector_type} selector '{target.selector}'")
+        except Exception as e:
+            # Re-raise if it's already our custom exception
+            if "No elements found matching" in str(e):
+                raise
+            # Otherwise wrap the error
+            raise Exception(f"Error checking element count for {target.selector_type} selector '{target.selector}': {str(e)}")
+
+    except Exception as e:
+        # Log the error and re-raise
+        print(f"[Resolver] Selector resolution failed: {str(e)}")
+        raise
 
 
 async def resolve_drag_selector(
@@ -88,33 +108,55 @@ async def resolve_drag_selector(
 ) -> Optional[Locator]:
     """
     Resolve a drag target selector
-    
+
     Args:
         page: Playwright page instance
         drag_target: Drag target specification
         timeout: Timeout in milliseconds
-        
+
     Returns:
         Locator or None if not found
+
+    Raises:
+        Exception with detailed error message if resolution fails
     """
-    if drag_target.selector_type == "css":
-        locator = page.locator(drag_target.selector)
-    elif drag_target.selector_type == "xpath":
-        locator = page.locator(f"xpath={drag_target.selector}")
-    elif drag_target.selector_type == "role":
-        locator = page.get_by_role(drag_target.selector)
-    elif drag_target.selector_type == "text":
-        locator = page.get_by_text(drag_target.selector)
-    else:
-        return None
-    
     try:
-        if await locator.count() > 0:
-            return locator.first
-    except:
-        pass
-    
-    return None
+        # Create locator based on selector type
+        locator = None
+        try:
+            if drag_target.selector_type == "css":
+                locator = page.locator(drag_target.selector)
+            elif drag_target.selector_type == "xpath":
+                locator = page.locator(f"xpath={drag_target.selector}")
+            elif drag_target.selector_type == "role":
+                locator = page.get_by_role(drag_target.selector)
+            elif drag_target.selector_type == "text":
+                locator = page.get_by_text(drag_target.selector)
+            else:
+                raise Exception(f"Unsupported drag selector type: {drag_target.selector_type}")
+        except Exception as e:
+            raise Exception(f"Failed to create drag locator for {drag_target.selector_type} selector '{drag_target.selector}': {str(e)}")
+
+        # Check if element exists
+        try:
+            count = await locator.count()
+            print(f"[Resolver] Found {count} drag element(s) matching {drag_target.selector_type} selector '{drag_target.selector}'")
+
+            if count > 0:
+                return locator.first
+            else:
+                raise Exception(f"No drag elements found matching {drag_target.selector_type} selector '{drag_target.selector}'")
+        except Exception as e:
+            # Re-raise if it's already our custom exception
+            if "No drag elements found matching" in str(e):
+                raise
+            # Otherwise wrap the error
+            raise Exception(f"Error checking drag element count for {drag_target.selector_type} selector '{drag_target.selector}': {str(e)}")
+
+    except Exception as e:
+        # Log the error and re-raise
+        print(f"[Resolver] Drag selector resolution failed: {str(e)}")
+        raise
 
 
 async def navigate_to_frame(

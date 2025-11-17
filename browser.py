@@ -24,7 +24,8 @@ class BrowserManager:
         if not self.playwright:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
-                headless=True,
+                headless=False,
+                slow_mo=1000,
                 args=['--no-sandbox', '--disable-setuid-sandbox']
             )
     

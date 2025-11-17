@@ -8,12 +8,31 @@ from datetime import datetime
 from typing import Optional, Tuple
 from playwright.async_api import Page, Locator
 
+RUN_STAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 class EvidenceCapture:
     """Handles evidence capture for actions"""
     
-    def __init__(self, output_dir: str = "/tmp/ig_evidence"):
-        self.output_dir = Path(output_dir)
+    def __init__(self, output_dir: Optional[str] = None):
+        # 1) allow env var override
+        env_dir = os.getenv("IG_EVIDENCE_DIR")
+        if output_dir is None:
+            if env_dir:
+                base = Path(env_dir)
+            else:
+                # 2) default to repo-local artifacts/evidence
+                # try to find repo root by walking up to .git or pyproject.toml
+                here = Path(__file__).resolve()
+                root = next(
+                    (p for p in [*here.parents] if (p / ".git").exists() or (p / "pyproject.toml").exists()),
+                    Path.cwd()
+                )
+                base = root / "artifacts" / "evidence"
+            # 3) per-run subfolder to keep files grouped
+            self.output_dir = base / RUN_STAMP
+        else:
+            self.output_dir = Path(output_dir)
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
     
     async def capture_screenshot(

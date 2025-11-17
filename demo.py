@@ -19,7 +19,7 @@ from browser import browser_manager
 
 async def main():
     """Run demo actions"""
-    # Get test page URL
+    
     test_file = Path(__file__).parent / "tests" / "fixtures" / "test_page.html"
     test_url = f"file://{test_file.absolute()}"
     

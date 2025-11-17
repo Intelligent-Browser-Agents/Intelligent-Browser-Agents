@@ -19,42 +19,56 @@ async def click_element(
 ) -> Tuple[Optional[Locator], bool]:
     """
     Click an element
-    
+
     Args:
         page: Playwright page
         command: Action command
-        
+
     Returns:
         Tuple of (element, success)
     """
-    element = await resolve_selector(page, command.target, command.timeout_ms)
-    
-    if not element:
-        return None, False
-    
     try:
-        # Readiness checks
-        await element.wait_for(state="attached", timeout=command.timeout_ms)
-        await element.wait_for(state="visible", timeout=command.timeout_ms)
-        await element.wait_for(state="stable", timeout=command.timeout_ms)
-        
-        # Check if enabled
-        is_enabled = await element.is_enabled()
-        if not is_enabled:
+        element = await resolve_selector(page, command.target, command.timeout_ms)
+
+        if not element:
             raise ActionExecutionError(
-                "not_interactable",
-                "Element is not enabled",
+                "element_not_found",
+                "Failed to resolve element selector",
                 command.target.selector
             )
-        
-        # Click
-        await element.click(timeout=command.timeout_ms)
-        return element, True
-        
+
+        try:
+            # Readiness checks
+            await element.wait_for(state="attached", timeout=command.timeout_ms)
+            await element.wait_for(state="visible", timeout=command.timeout_ms)
+
+            # Check if enabled
+            is_enabled = await element.is_enabled()
+            if not is_enabled:
+                raise ActionExecutionError(
+                    "not_interactable",
+                    "Element is not enabled",
+                    command.target.selector
+                )
+
+            await element.click(timeout=command.timeout_ms)
+            return element, True
+
+        except ActionExecutionError:
+            raise
+        except Exception as e:
+            print(f"[Actions] Error during click_element interaction: {str(e)}")
+            raise ActionExecutionError(
+                "internal",
+                f"Failed to click element: {str(e)}",
+                command.target.selector
+            )
+
     except Exception as e:
         if isinstance(e, ActionExecutionError):
             raise
-        return element, False
+        print(f"[Actions] click_element failed: {str(e)}")
+        return None, False
 
 
 async def double_click_element(
@@ -92,30 +106,45 @@ async def type_input(
     command: ActionCommand
 ) -> Tuple[Optional[Locator], bool]:
     """Type text into an input element"""
-    element = await resolve_selector(page, command.target, command.timeout_ms)
-    
-    if not element:
-        return None, False
-    
     try:
-        await element.wait_for(state="visible", timeout=command.timeout_ms)
-        await element.wait_for(state="stable", timeout=command.timeout_ms)
-        
-        if not await element.is_enabled():
+        element = await resolve_selector(page, command.target, command.timeout_ms)
+
+        if not element:
             raise ActionExecutionError(
-                "not_interactable",
-                "Element is not enabled",
+                "element_not_found",
+                "Failed to resolve element selector",
                 command.target.selector
             )
-        
-        # Clear and type
-        await element.fill(command.input_value or "", timeout=command.timeout_ms)
-        return element, True
-        
+
+        try:
+            await element.wait_for(state="visible", timeout=command.timeout_ms)
+
+            if not await element.is_enabled():
+                raise ActionExecutionError(
+                    "not_interactable",
+                    "Element is not enabled",
+                    command.target.selector
+                )
+
+            # Clear and type
+            await element.fill(command.input_value or "", timeout=command.timeout_ms)
+            return element, True
+
+        except ActionExecutionError:
+            raise
+        except Exception as e:
+            print(f"[Actions] Error during type_input interaction: {str(e)}")
+            raise ActionExecutionError(
+                "internal",
+                f"Failed to type into element: {str(e)}",
+                command.target.selector
+            )
+
     except Exception as e:
         if isinstance(e, ActionExecutionError):
             raise
-        return element, False
+        print(f"[Actions] type_input failed: {str(e)}")
+        return None, False
 
 
 async def press_key(
