@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request # FastAPI framework, Requests for anything but GET
+# FastAPI framework, Requests for anything but GET
+from fastapi import FastAPI, Request 
 
 # ForJWT Gen
 import jwt
@@ -13,16 +14,21 @@ import psycopg2
 
 # For loading .env variables
 import os
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 
 # For password hashing
 import bcrypt
 
+# Emailing
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# Random Password Generation
+import secrets
+
 """
 To-DO List:
-- Change user update endpoint to not include password
-- Create endpoint for updating password w/ JWT auth
-- Add forgot password, that sends an email with a randomly generated password
 """
 
 
@@ -92,6 +98,32 @@ def user_exists_id(userId: int) -> bool:
     return results is not None
 
 
+def send_forgot_password(to_email: str, new_password: str) -> None:
+    from_email = os.getenv('EMAIL_ACCOUNT')
+    from_password = os.getenv('EMAIL_PASSWORD')
+
+    subject = "Password Reset - Intelligent Browser Agents"
+    body = f"Your new password is: {new_password}\nPlease change it after logging in."
+
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(from_email, from_password)
+        text = msg.as_string()
+        server.sendmail(from_email, to_email, text)
+        server.quit()
+        print(f"Password reset email sent to {to_email}")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
+
 """
 User CRUD Endpoints
 """
@@ -117,7 +149,7 @@ async def get_user(request: Request):
     results = cur.fetchone()
     
     if results is not None:
-        user_id, username, firstname, lastname, email, _, _, _ = results
+        user_id, username, firstname, lastname, email, _, _, _, _ = results
         return {'user_id': user_id, 'username': username, 'firstname': firstname, 'lastname':lastname, 'email':email,'error': error}
     else:
         error = f'No Users Found in Database'
@@ -156,7 +188,7 @@ async def insert_user(request: Request):
     newUserId = cur.fetchone()[0]
     return {'userId': newUserId, 'error': error}
 
-@app.delete('/api/users/delete/')
+@app.delete('/api/users/delete/') # Delete User
 async def delete_user(request: Request):
     #incoming: token
     #outgoing: success/failure
@@ -211,7 +243,8 @@ async def update_user(request: Request):
             decoded = jwt.decode(token, secret_key, algorithms='HS256')
             userId = decoded['user_id']
         except jwt.InvalidTokenError as e:
-            return {'error': e}
+            error = str(e)
+            return {'error': error}
     else:
         error = 'No Token Provided'
         return {'error' : error}
@@ -245,7 +278,7 @@ async def update_user(request: Request):
         query = 'UPDATE users SET email = %s WHERE user_id = %s;'
         cur.execute(query, (email, str(userId)))
     if password is not None:
-        query = 'UPDATE users SET password = %s WHERE user_id = %s;'
+        query = 'UPDATE users SET password = %s, chng_pass = false WHERE user_id = %s;'
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
         hashed_password = hashed_password.decode('utf-8')
         cur.execute(query, (hashed_password, str(userId)))
@@ -255,13 +288,13 @@ async def update_user(request: Request):
     cur.execute(query, (str(userId)))
     results = cur.fetchone()
     if results is not None:
-        user_id, username, firstname, lastname, email, _, _, _ = results
+        user_id, username, firstname, lastname, email, _, _, _, _ = results
         return {'user_id': user_id, 'username': username, 'firstname': firstname, 'lastname':lastname, 'email':email,'passUpdated': pass_updated,'error': error}
     else:
         error = f'No Users Found in Database'
         return {'error': error}
     
-@app.post('/api/users/login/')
+@app.post('/api/users/login/') # User Login
 async def login_user(request: Request):
     #incoming: username, password, token(Optional)
     #outgoing: JWT token
@@ -280,6 +313,8 @@ async def login_user(request: Request):
     username = body['username']
     password = body['password']
 
+    print(password)
+
     if username == '' or password == '':
         error = 'Username or Password is Missing'
         return {'error' : error}
@@ -287,12 +322,16 @@ async def login_user(request: Request):
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
     hashed_password = hashed_password.decode('utf-8')
     
+    print(hashed_password)
+
     query = 'SELECT * FROM users WHERE username = %s AND password = %s;'
     cur.execute(query, (username, hashed_password))
     results = cur.fetchone()
     
     if results is not None:
-        user_id, username, firstname, lastname, _, _, _, _ = results
+        user_id, username, firstname, lastname, _, _, _, _, chng_pass = results
+        if chng_pass == True:
+            error = 'Password Change Required'
         secret_key = os.getenv('TOKEN_SECRET')
         # Generate JWT Token
         payload = {
@@ -307,6 +346,43 @@ async def login_user(request: Request):
     else:
         error = 'Invalid Username or Password'
         return {'error': error}
+    
+@app.get('/api/users/forgot-password/') # User Forgot Password
+async def forgot_password(request: Request):
+    #incoming: username or email
+    #outgoing: success/failure
+    error  = ''
+
+    # Checking values in query exists 
+    if len(request.query_params) == 0 or (request.query_params.get('username') == None and request.query_params.get('email') == None):
+        error = 'No username or email Specified'
+        return {'error' : error}
+    
+    username = request.query_params.get('username') if 'username' in request.query_params else None
+    email = request.query_params.get('email') if 'email' in request.query_params else None
+    
+    if username != None:
+        query = 'SELECT email, user_id FROM users WHERE username = %s;'
+        cur.execute(query, (username,))
+        results = cur.fetchone()
+    else: 
+        query = 'SELECT email, user_id FROM users WHERE email = %s;'
+        cur.execute(query, (email,))
+        results = cur.fetchone()
+
+    if results is not None:
+        email = results[0]
+        userId = results[1]
+        new_password = secrets.token_hex(6) # Generate a secure random password
+        hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
+        hashed_password = hashed_password.decode('utf-8')
+        query = 'UPDATE users SET password = %s, chng_pass = true WHERE user_id = %s;'
+        cur.execute(query, (hashed_password, str(userId)))
+        send_forgot_password(email, new_password)
+        return {'error': error}
+    else:
+        error = f'No Users Found in Database'
+        return {'error': error} 
 
 
 
