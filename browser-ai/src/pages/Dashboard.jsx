@@ -4,6 +4,13 @@ import "./Dashboard.css";
 export default function Dashboard() {
   const [input, setInput] = useState("");
 
+  const [showSettings, setShowSettings] = useState(false);
+
+  // ⬅ Stores the settings text
+  const [agentPrompt, setAgentPrompt] = useState(
+    localStorage.getItem("agentPrompt") || ""
+  );
+
   const [conversations, setConversations] = useState([
     { id: crypto.randomUUID(), title: "Browse 1", messages: [] }
   ]);
@@ -58,6 +65,11 @@ export default function Dashboard() {
     if (e.key === "Enter") handleSend();
   };
 
+  const handleSaveSettings = () => {
+    localStorage.setItem("agentPrompt", agentPrompt); // persistence
+    setShowSettings(false); // close modal
+  };
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeChat.messages]);
@@ -72,7 +84,11 @@ export default function Dashboard() {
         <button className="sidebar-btn" onClick={handleNewChat}>
           ＋ New Browse
         </button>
-        <button className="sidebar-btn">⚙️ Settings</button>
+        
+        <button className="sidebar-btn" onClick={() => setShowSettings(true)}>
+          ⚙️ Settings
+        </button>
+
         <button className="sidebar-btn">👤 User Credentials</button>
         <button className="sidebar-btn">↪ Logout</button>
 
@@ -91,7 +107,7 @@ export default function Dashboard() {
         </div>
       </aside>
 
-      {/* Main Chat Window */}
+      {/* Main Chat */}
       <main className="dashboard-main">
         {activeChat.messages.length === 0 && (
           <h2 className="welcome-text">Welcome Guest</h2>
@@ -116,7 +132,27 @@ export default function Dashboard() {
         />
         <button className="dashboard-bar-btn" onClick={handleSend}>➤</button>
       </div>
+
+      {/* ---------- SETTINGS MODAL ---------- */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowSettings(false)}>✖</button>
+            <h2>Settings</h2>
+
+            <label>Agent’s Prompt</label>
+            <textarea
+              placeholder="Type here..."
+              value={agentPrompt}
+              onChange={(e) => setAgentPrompt(e.target.value)}
+            />
+
+            <button className="save-btn" onClick={handleSaveSettings}>
+              Save
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
