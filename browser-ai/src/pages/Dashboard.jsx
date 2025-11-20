@@ -47,7 +47,7 @@ export default function Dashboard() {
     const newChat = {
       id: crypto.randomUUID(),
       title: `Browse ${conversations.length + 1}`,
-      messages: [{ text: "New chat started.", isUser: false }]
+      messages: [{ text: "How can I be of assistance today?", isUser: false }]
     };
 
     setConversations((prev) => [...prev, newChat]);
