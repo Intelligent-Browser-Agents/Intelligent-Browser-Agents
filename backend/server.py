@@ -159,15 +159,15 @@ async def get_user(request: Request):
 @app.post('/api/users/insert/') # Insert New User 
 async def insert_user(request: Request):
     #incoming: username, firstname, lastname, email, password
-    #outgoing: UserId->Now, JWT->later
+    #outgoing: UserId
     error  = ''
     body = await request.json()
 
-    username = body['username']
-    firstname = body['firstname']
-    lastname = body['lastname']
-    email = body['email']
-    password = body['password']
+    username = body['username'] if 'username' in body else ''
+    firstname = body['firstname'] if 'firstname' in body else ''
+    lastname = body['lastname'] if 'lastname' in body else ''
+    email = body['email'] if 'email' in body else ''
+    password = body['password'] if 'password' in body else ''
 
     # Checking values in query
     if username == '' or firstname == '' or lastname == '' or email == '' or password == '':
@@ -194,8 +194,6 @@ async def delete_user(request: Request):
     #outgoing: success/failure
     error  = ''
     token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
-    
-    body = await request.json()
 
     userId = 0
 
@@ -297,7 +295,7 @@ async def update_user(request: Request):
 @app.post('/api/users/login/') # User Login
 async def login_user(request: Request):
     #incoming: username, password, token(Optional)
-    #outgoing: JWT token
+    #outgoing: token
     error  = ''
     token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
     body = await request.json()
@@ -383,7 +381,6 @@ async def forgot_password(request: Request):
     else:
         error = f'No Users Found in Database'
         return {'error': error} 
-
 
 
 """

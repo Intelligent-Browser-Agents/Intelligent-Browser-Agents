@@ -43,3 +43,6 @@ CREATE TABLE Users (
 Adding a new user 
 INSERT INTO users (username, firstname, lastname, email, isverified)
 VALUES ('testuser', 'Caleb', 'Yaghoubi', 'test@email.com', true);
+
+Testing 
+pytest -q testing.py
