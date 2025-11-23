@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+httpx
+requests
+beautifulsoup4
+lxml
+rank-bm25
+transformers
+torch
+numpy
+pydantic
+pytest
+pyyaml
+
