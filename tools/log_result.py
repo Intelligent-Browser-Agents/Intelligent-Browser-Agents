@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, MutableMapping, Optional, Sequence, Uni
 from uuid import UUID
 
 from schemas import LogActionResult, LogRecord
+from tools.evidence_manager import EvidenceManager
 
 
 class LogResultService:
@@ -20,10 +21,12 @@ class LogResultService:
         self,
         *,
         initial_records: Optional[MutableMapping[UUID, Sequence[LogRecord]]] = None,
+        evidence_manager: Optional[EvidenceManager] = None,
     ) -> None:
         self._lock = RLock()
         self._records_by_trace: Dict[UUID, List[LogRecord]] = defaultdict(list)
         self._records_by_id: Dict[UUID, LogRecord] = {}
+        self._evidence_manager = evidence_manager or EvidenceManager()
 
         if initial_records:
             for trace_id, records in initial_records.items():
@@ -76,6 +79,10 @@ class LogResultService:
         with self._lock:
             self._records_by_trace.clear()
             self._records_by_id.clear()
+
+    def get_evidence_manager(self) -> EvidenceManager:
+        """Get the evidence manager instance."""
+        return self._evidence_manager
 
     def _store_record(self, record: LogRecord, trace_id: UUID) -> None:
         """Internal helper to store a record in all indexes."""

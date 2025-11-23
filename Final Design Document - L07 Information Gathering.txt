@@ -1,0 +1,961 @@
+﻿L07: Information Gathering
+Team: Aridsondez, Greg, Jordan, Kush, Vignesh
+Sponsors: Dr. Zihang Zou, Dr. Liqiang Wang
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+TABLE OF CONTENTS
+1.Executive Summary        4
+1.1 Overview of the Interactive Browser Agent        4
+1.2 Role of the Information Gathering Team        5
+1.3 Problem Statement and Motivation        7
+1.4 High-Level Goals of the System        8
+1.5 Stakeholders and End-Users        10
+2. DOM Understanding & Extraction        11
+2.1 Past Research and Findings        11
+2.2 DOM Extraction        12
+2.2.1 Intro        12
+2.2.2 What is a webpages DOM and why is it important?        12
+2.2.3 Research and Findings        13
+2.2.4 Plan of Execution        14
+2.2.5 Handling Captchas        16
+2.2.5a Research and Findings        16
+2.2.5b Plan of Execution for dealing with Captchas        16
+2.2.6 High-Level Algorithmic Explanation of our DOM Extraction Plan of Execution        17
+2.2.7 Definition of Success        18
+2.2.8 Legal Considerations with DOM Extraction        19
+2.3 Architecture        20
+2.4 Formatting Output        21
+2.5 DOM Understanding        22
+2.5.1 Intro        22
+2.5.2 Research and Findings        22
+2.5.3 Execution        23
+2.5.4 Choice of LLM        25
+2.5.4a Research and Findings        25
+2.5.4b Choice of LLM        26
+2.5.5 High-Level Algorithmic Explanation of our Plan of Execution        26
+2.5.6 Definition of Success        27
+2.5.7 Final Note        28
+3. Action Execution        28
+3.1 System Role & Motivation        29
+3.2 Technical Architecture        32
+3.2.1 Architectural Overview        32
+3.2.3 Data Flow and Execution Pipeline        35
+3.2.3 Communication and Synchronization        36
+3.2.4 Architectural Benefits        36
+3.3 Tools and Libraries        37
+3.4 Testing and Metrics        37
+3.5 Timeline        38
+3.6 Future Work and Integration        39
+4. Specific Agent - Hotel        40
+4.1 Research Extraction Libraries        43
+4.2 Switch To Verticals        44
+4.3 Tavily vs Serper.dev        45
+4.4 Final Search Conclusion        47
+5. Data Processing Module        48
+5.1 Purpose of the Module        48
+5.2 Position Within Team Workflow        49
+5.3 Upstream Data Sources and Challenges        51
+5.3.1 Labeled and Processed DOM Data        51
+5.3.2 Output from the DOM Understanding Agent        52
+5.3.3 Summary of Input Challenges        52
+5.4 Functional Requirements of the Processing Module        53
+5.4.1 Core Requirements        53
+5.4.2 Non Functional Requirements        53
+5.5 Confidence Scoring System        54
+5.5.1 Motivation for Confidence Scores        54
+5.5.2 Components of the Confidence Score        54
+5.5.3 Final Scoring Formula        54
+5.4.4 Example Scoring Walkthrough        55
+6. Log Result of Action        55
+6.2 Design Goals        57
+6.3 Technical Architecture        58
+6.3.1. Core Components        59
+6.3.2. Schema Structure        60
+6.3.3. Storage and Transmission        61
+6.4 Evidence Management and Security        61
+6.5 Communication and Synchronization        62
+6.6 Testing and Validation        62
+6.7 Tools and Libraries        63
+6.8 Timeline        64
+6.9 Architectural Benefits        65
+6.10 Future Work and Integration        66
+
+
+1.Executive Summary
+1.1 Overview of the Interactive Browser Agent
+The interactive browser agent project uses an innovative multi agent system, which will have a huge impact on how users browse on the web. It is used as a middleman that can process large and complex requests that are given to it in natural language by the users, which is then broken down into simpler tasks and then gets executed with the least amount of human involvement as possible. This project is built to help users perform tasks that would take them multiple steps that need to be done manually, such as searching for information and then comparing information from different sources, submitting forms, and completely automating it. 
+The basis of this whole system is a large language reasoning model that is combined with real time browser automation. A central Overseer agent takes in the input from the user then interprets what the user is trying to do, and plans how these tasks need to be done to get the user their output. Then the Execution Agent takes over and does the browser automation part where they carry out these actions on the web and return the results that are expected by the overseer agent that is readable for the machine. By using this multi agent approach, what the interactive browser agent is trying to demonstrate is how autonomous it can be and how it can adapt and get information in a variety of different web environments.
+The main goal of the Interactive Browser Agent project is to make a basic foundation to automate web tasks that are powered by artificial intelligence. In this iteration, the framework is planned to also include some advanced use cases like online booking, business data collection, and some more. Each of these said use cases involves gathering, inputting, and structuring information available on the web in a way that just can't be done by traditional webscraping. This system can be used as a step toward developing intelligent browser based agents that can understand the user’s inputs, understand the context and also be able to come back from making any errors in a reliable way. 
+  
+
+1.2 Role of the Information Gathering Team
+We are the team that turns unstructured web data into structured, verifiable, and actionable information for the whole interactive browser agent. Our role here is to retrieve raw data from the page, understand its structure and the meaning of the data, and interact with the page when told to do so and return a complete answer that is both the structured result and the evidence proving that it is the right information. This whole process requires an organized and structured data pipeline that is secure for raw data retrieval, semantic analysis of webpage elements, and standardized output. 
+In essence, in this project architecture, the Information Gathering Team serves as the entry point to gather factual input from the web. The orchestration agent converts the natural language instruction and then converts it into a structured command, and then sends it to the Execution Agent. Then the information gathering command then gets the command from the execution agent, and we determine the appropriate action to perform, like searching for information, extracting webpage content, or even interacting with the webpage form, and then return this processed data back to the execution agent. Every module in our architecture depends on real world information and originates from our team's system. 
+Each member of the team is responsible for a specific portion of the workflow that connects into the collective architecture. Greg manages the DOM Extraction module, which handles page retrieval and raw HTML capture. Aridsondez develops the DOM Understanding Agent, which converts unstructured HTML into semantically meaningful components. Kush implements the Searching module, which connects to third-party search application programming interfaces such as Google Search, Bing Search, and SerpAPI. Vignesh leads the Data Processing module, which normalizes outputs from all prior stages into unified JSON structures and assigns confidence scores. Jordan implements interaction logic for webpage actions such as typing into text fields, clicking buttons, and logging the result of each action. Together, the group has designed a cohesive and extensible architecture that supports both data retrieval and action verification.
+The modular and independent structure of this project helps each member of our team be responsible for their own module and which gives us a lot of technical clarity about our roles in the project. Each team member can focus on a specialized function, yet all components communicate through a well defined structure. 
+
+
+  
+
+
+1.3 Problem Statement and Motivation
+Modern artificial-intelligence assistants can understand human commands but remain limited when interacting with real websites. Most of these assistants rely on hardcoded integrations or static APIs. When a user requests a task such as “Schedule a lawn appointment near me”, these systems can parse the command but are not able to navigate a browser dynamically, handle logins, fill forms, or confirm the results. The problem lies in bridging natural language understanding with true web based execution.
+The information gathering team is trying to solve this problem. The team’s motivation comes from the fact that artificial intelligence agents need to be given the same functions that a human can do when they use a browser. For example, how humans can open any site, read the layout, and figure out if there are any fields to fill, and then decide how to proceed. A generalized browser agent must be able to recreate these actions in a controlled and programmatic way. 
+The problem can be broken down into 4 main areas. The first is data accessibility. Web pages are always changing and updating with new designs and information. The different elements are always appearing and disappearing, and many sites use a modern Javascript framework that ends up updating the page even after it loads. This causes traditional web scraping to be unreliable and unable to get all the information. The second challenge is semantic understanding. Even with the data of the webpage available, our system must be able to parse through that information and identify which parts of the pages are buttons, forms, or menus and then interact with them accordingly. The third part is secure interaction. Some tasks may require entering sensitive information like credit card details or user name and passwords. These tasks need to be handled securely and safely so that the user doesn't get their data exposed. The last challenge in this project is generalization. The system needs to be adaptable enough to work with different types of websites without having the need to be customized for each use case. 
+The Information Gathering team is creating a modular browser interaction framework that allows the larger Interactive Browser Agent to adapt and operate intelligently across a wide range of websites. This work has real-world potential beyond the classroom. It could help researchers automate data collection, assist companies with customer service automation, and improve accessibility by allowing users to control websites through voice. The team is driven by the goal of combining web automation, artificial intelligence, and secure information handling into a single, continuous system. The final result will show how an AI agent can understand, act, and confirm its actions on the web without relying on site-specific programming.
+
+1.4 High-Level Goals of the System
+The information gathering team has several key goals that overall shape the whole intelligent agentic browser system. The first goal is to create a generalized web interaction subsystem that works directly with the web rather than using APIs that already exist. This subsystem’s abilities should include the ability to open any website, understand its structure, and carry out any tasks such as searching, clicking, and inputting text. This generality allows the agent to be adaptable for many different use cases and makes future improvements easier.
+The second goal of the team focuses on getting and structuring data in a secure way. This part is where we collect the raw page data and then run it through our DOM extraction module which will gather the structure of the HTML. This is then fed into a DOM understanding agent and is then passed to the Processing module where it is then converted into a clean and formatted JSON. This lets the Execution and Verification agents of the Browser Interaction team to easily read and act on the data given. Any sensitive information that is needed is never saved and is only requested from the user when needed to keep it all secure.
+Another major goal is to ensure seamless integration with the orchestration and verification systems. The Information Gathering module works as part of a larger pipeline, sending processed data to the orchestration agent through shared memory instead of using slower API calls. This design reduces latency and improves performance. The verification subsystem then checks the results to confirm whether each action was successful based on the output logs produced by the Information Gathering process.
+Because websites are often dynamic and complex, the module also needs to handle interactive elements and delayed content. Pages can include pop-ups, captchas, or scripts that load later. To address this, the team uses automation tools like Playwright and Selenium, which fully render the page before analysis. This ensures the agent sees the complete DOM and interacts accurately with elements. The interaction modules designed by Jordan handle clicks and text inputs while recording screenshots and logs as proof of actions.
+Reliability is another important priority. Every piece of extracted information is given a confidence score that reflects how certain the system is about its accuracy. These scores are calculated based on factors such as DOM layout, text matching, and position relevance. The Verification agent uses these scores to decide if the results are trustworthy or if human review is needed.
+Together, these goals form the foundation of the Information Gathering module. By the end of development, the system should be able to take a user command, locate and interpret web pages, extract and organize data, perform the required actions, and return a structured JSON file with both the data and supporting verification evidence.
+
+1.5 Stakeholders and End-Users
+The Interactive Browser Agent involves several groups of stakeholders and each of us play an important role in shaping the whole project and its outcomes. The team includes 5 members: Greg, Aridsondez, Jordan, Khush and Vignesh. Each person on the team leads the development of a crucial tool of the browser agent.  Greg manages the DOM Extraction module, which captures the raw HTML from target webpages. Aridsondez is responsible for the DOM Understanding Agent, which interprets page elements and builds semantic connections. Kush leads the Search subsystem, which links to external search APIs and organizes results. Vignesh works on the Processing Data module, which cleans, normalizes, and scores outputs for other agents to use. Jordan develops the Interaction tools that allow the agent to perform real browser actions and log all outcomes for verification. Together, their work forms a set of interconnected modules that operate in parallel and are tested collectively to ensure system integration.
+The course instructors and teaching assistants serve as key evaluators. Their focus is on the quality of the engineering process, the clarity of design, and the technical execution of the system. They review both the overall architecture and the thoroughness of the documentation produced by the team.
+The end users are another crucial group. They include researchers, developers, and general consumers who want to automate browser tasks without writing code. These users should be able to issue natural language commands like “Book a hotel in downtown Orlando for Friday night” or “Find the best coffee shops near campus.” The agent will then search the web, navigate pages, and collect information automatically. For these users, reliability, accuracy, and privacy are critical.
+By understanding and balancing the needs of these groups, the team ensures that the project achieves both its academic and practical goals. The design emphasizes transparency, adaptability, and security, creating a strong foundation for future development and real-world applications.
+2. DOM Understanding & Extraction 
+2.1 Past Research and Findings 
+Recently our group has switched our focus from building a browser that is tailored to performing specific tasks to building a browser with much more general intelligence. As a result, this change has switched the focus of our group's research and minimized the usefulness of some of our group's past research and findings. Our past research was geared towards developing individual agents that would be used as tools for specific use cases by the overarching agentic architecture created by the L07 - Browser Interaction team. For example, we had been developing specific agents for gathering information from airline, hotel, and e-commerce websites. However, we have now pivoted to developing tools that can handle the broadest amount of user prompts as possible. This change of focus to create a more powerful browser that can handle a wider range of user prompts will allow for an improved user experience. 
+However, some of our group’s past research is still applicable even after our change of focus. For example, Python libraries such as langchain and langraph, as well as Beautiful Soup, Sellinium, and Playwright are still areas of focus for our research efforts. Additionally, our research focusing on existing popular intelligent browser agent implementations is still applicable as it gave us a better understanding into how to go about developing our browser. The libraries previously listed as well as the understanding of intelligent browser agents that we have gained in our past research are relevant to and will be brought up in this section of our document explaining our plan for DOM extraction and DOM understanding. 
+From our MVP:
+“In support of this, we have begun researching Playwright’s capabilities for consistent form interaction, JSON schema design using Pydantic and strategies for linking raw execution evidence to structured outputs. These efforts lay the foundation for creating a robust pipeline where every IG result can be verified and directly consumed by BI without ambiguity”. 
+2.2 DOM Extraction
+2.2.1 Intro
+The driving motivations for why a user would opt to use an intelligent web browser over a non-intelligent web browser are the intelligent web browser’s ability to adapt to website changes, handle interactivity, and automate decisions. These actions are made possible by the agentic architecture of the intelligent web browser. The web browser’s agents are what make the web browser “intelligent”. One of the key processes at the agents disposal that allows the agents to perform the actions that make them intelligent, is the ability to extract information from websites. To be even more specific, the processes that allow the agents to extract and understand the DOM of a website’s pages are major contributors to the intelligence of a browser. 
+2.2.2 What is a webpages DOM and why is it important? 
+Retrieving the DOM from a webpage is extremely important to understanding how to interact with a website. The DOM of the website is a tree-like structure that is constructed by a web browser as it renders the website. The web browser begins by retrieving the base HTML of a webpage from a webserver and line by line constructs a tree-like structure from the HTML. The key difference between the base HTML and the DOM object is the DOM tracks the current state of each element of a website’s HTML after languages such as JavaScript cause dynamic changes to the webpages base HTML. Additionally, the other component of a DOM object besides the tree, is the API in which the HTML elements can be interacted with. Therefore, the DOM of a webpage can reveal everything you need to know about how to interact with a webpage. 
+  
+
+Note. This diagram was created on 10/22/25 by Rajput and can be found at: https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.geeksforgeeks.org%2Fjavascript%2Fdom-document-object-model%2F&psig=AOvVaw2SyaakHZwWbZgULnIqCqyv&ust=1763676181067000&source=images&cd=vfe&opi=89978449&ved=0CBYQjRxqFwoTCOirwfWb_5ADFQAAAAAdAAAAABAE
+2.2.3 Research and Findings
+There are several common approaches used to retrieve the DOM of a webpage. One approach we explored was to use direct HTTP requests to the web servers. Python provides this functionality through the use of the requests library. The combination of the requests library as well as another popular Python library Beautiful Soup, which allows for parsing of HTML text into a DOM-like structure, and vice-versa, but doesn’t have the ability to directly extract the live DOM from a webpage, would give us the capability of extracting, parsing, and filtering the DOM from a webpage. However, after researching this approach, there are major limitations with this implementation. One specific and fatal limitation we found with this approach is that it would only work for static websites and not allow us to extract the live DOM of a webpage, which is indeed necessary for the application we are trying to build. Another common approach we explored was communicating directly with a webpage’s API endpoints. This approach seemed promising in theory, as it would allow for fast and clean structured data to be returned in JSON format. However, this approach falls short because of the limitations of finding hidden API endpoints. There are also several other approaches we explored that proved to be unfeasible for various reasons, such as using modern web scraping services, which fell short due to funding restrictions. 
+2.2.4 Plan of Execution
+The DOM extraction approach we have settled on makes use of a combination of the Python libraries Selenium, Beautiful Soup, and lxml, as well as browser dev tools. The browser dev tools will allow for retrieval of JavaScript based event listeners that are harder to search and filter for than the standard interactive HTML elements are. Selenium is the key to our approach. Selenium allows for dynamic DOM retrieval. When a webpage is loaded and the base HTML is altered by JavaScript code, the element objects in the DOM and the base HTML elements no longer match. The other approaches did not allow us to retrieve this altered DOM tree. Selenium allows us to do so. This is because Selenium works by running a headless (or real) browser and executing the JavaScript like a real browser would. After the JavaScript is done running and the browser finishes loading the webpage, the DOM is then extracted. After the DOM is extracted, we will use Beautiful Soup to parse and filter the DOM. Additionally, this is where lxml comes into play, as it is a library that allows for fast and flexible parsing of HTML documents. We will integrate the lxml library with Beautiful Soup in order to parse and filter the DOM as efficiently as possible. We have also floated around the idea of possibly passing a screenshot of the DOM tree displayed in a friendly format such as you would see when using inspect on a web browser back to the execution agent. The screenshot would be used either in conjunction with or as a fallback to the other outputs of the DOM extraction tool.
+At this point we’d like to reiterate that the tools our team is developing will be used by the overarching agentic architecture developed by L07 - Browser Interaction. We need to point this out because although we have just described the general process we will use when extracting a webpages DOM, this process is in fact two separate steps that will be further broken down into two tools. One tool being exclusive to DOM extraction, and another tool being a DOM understanding tool. More specifically, as our team is developing several tools that fall under the category of “DOM understanding tools”, it is an interactive element identifying tool. 
+Library Name
+	Explanation
+	selenium (DOM Extraction)
+	Used to automate real web browsers. Allows Python scripts to launch a browser, load a webpage, interact with it, and extract information exactly like a human would.
+	beautifulsoup4 (DOM Understanding)
+	Used for parsing, navigating, and extracting data from HTML or XML documents.
+	lxml (DOM Understanding)
+	Used for parsing, manipulating, and querying HTML and XML.
+Faster, more powerful, and more standards-compliant than the default Python HTML parsers.
+	
+
+2.2.5 Handling Captchas
+2.2.5a Research and Findings
+Handling captchas is a big ongoing area of research for our team. Some of the biggest roadblocks we have encountered have to do with captchas. The problem with using a framework such as selenium, or any framework that simulates, interacts, or automates real web browsers, is that the websites you encounter will often be able to detect that a human is not doing the browsing. Captchas are obviously in place to prevent precisely this exact occurrence. Services such as those provided by Bright Data, 2Captcha, Anti-Captcha, and CapMonster, can assist with bypassing or solving captchas. However, the limitations with most of these services are that they don’t actually solve the captchas without human assistance, instead, they attempt to bypass the captchas. Bright Data has the best infrastructure in place to attempt to bypass the captchas, 2Captcha and Anti-Captcha use human assistance to solve captchas, and CapMonster uses machine learning techniques to attempt to solve the captchas. If it was possible to always guarantee a bypass or solve of the captchas every time, then these services would be ideal for helping solve this issue; However, it is not always a guarantee, and a user of our web browser isn’t going to want to use a program that isn’t guaranteed to always work. 
+2.2.5b Plan of Execution for dealing with Captchas
+Our current plan for dealing with captchas is to use Bright Data. Although not always a guarantee, they provide the best infrastructure to attempt to avoid running into captchas. Ultimately, this is a big ongoing area of research for our team, and our approach is constantly changing. We may even eventually land on the solution of needing user assistance in solving the captchas; However, we are trying to avoid this at all costs in order to create the most powerful user experience as possible, and as a result the most “intelligent” browser we can create.
+2.2.6 High-Level Algorithmic Explanation of our DOM Extraction Plan of Execution
+This section will provide a more technically detailed explanation of our approach for DOM extraction. This section will go into specifics and provide a line by line, but extremely high-level explanation of what our actual code will look like when we go about developing our DOM extraction tool. This is meant to serve as a complement to section 2.2.4 and any readers who are not interested in the very specific technical details of our approach will be able to read the remaining sections of this document without suffering any consequential confusion from skipping this section. 
+To begin, as needed with any Python script, we will import the libraries in which we will be using to assist with the development of our application. These imports include all of the libraries specified in 2.2.4 that are specifically used for DOM Extraction, mainly being several sub-libraries from selenium, such as Remote and ChromeOptions from selenium.webdriver, and ChromiumRemoteConnection from selenium.webdriver.chromium.remote_connection. Standard Python “from… import…” statements will accomplish this step.
+Our next several lines of code will actually be imported directly from Bright Data as this is the code provided by Bright Data that will allow us to bypass captchas. It will include a webdriver variable that is equal to a URL for a remote driver connection we will be using. The remote driver is provided by Bright Data and is necessary for using their infrastructure to bypass captchas. As a result, we will not be running our selenium web driver locally, instead we will be running a remote instance using Bright Data’s infrastructure. Following the webdriver variable will be our main function which starts with calling the ChromiumRemoteConnection function and passing it our remote connection URL contained in our webdriver variable along with a few other configuration parameters, and storing the output of the function in a connection variable. Next will be a Python “ with…” statement used for establishing a remote connection using our connection variable. Next, will be a driver.get statement for doing the actual HTML retrieval using selenium, several print statements for tracking the status of our browser, such as captcha solving status and web scraping status, and four lines of code imported from Bright Data used to bypass or attempt to solve captchas. Finally, we will have a line of code html = driver.page_source so we can have a simple variable named html to use for any later work we do with the html we retrieve, instead of using driver.page_source every time, and a return html statement. 
+We are still deciding how our group will go about packaging our tools so L07 - Browser Interaction’s execution agent can have access to them as easily as possible. If we decide the best approach would be to contain all our tools in one script and L07 saves the file in the same directory as the rest of the browser’s code and imports the tools to their script when needed, then we will most likely have a function in our script that handles formatting our results properly into the JSON format we desire. This format is discussed later on in section 2.4 of the document. If this is the case, then there will be no code in our DOM extraction tool that handles formatting; however, if we decide formatting will be handled by the individual tools/functions, then there will be added code beyond what was discussed to handle formatting results. 
+We’d like to make note that this is a very early discussion of our DOM extraction tool’s code, and there will probably be many changes to our code as the project matures; therefore, this high-level line by line explanation is subject to extreme change as the project develops. 
+2.2.7 Definition of Success
+Our definition of success for our DOM Extraction tool is a tool that can take a webpage’s domain as input and return the webpage’s DOM Tree as output. 
+  
+
+
+
+If we can be successful in creating such a tool that accomplishes this flow of data, we will successfully provide group L07 - Browser Interaction’s execution agent with one of the necessary tools, amongst several other tools we will be developing, in which the agent can use to accomplish the crucial step that will be inevitably involved in almost any plan that Browser Interaction’s agentic architecture chooses to execute, the step of DOM extraction.
+2.2.8 Legal Considerations with DOM Extraction
+There are several very real legal considerations all developers need to take into consideration when performing any web scraping, and we are taking the time to be extremely cautious of them while developing our DOM Extraction tool. The first of the considerations we are attempting to keep in mind is websites’ terms of service, this includes but is not limited to restrictions on scraping/collection, the use of bots or browser automation tools, rate limits, or redistribution or analysis of data. Additionally, we are keeping an eye on any potential copyright issues as the DOM we extract can contain items such as HTML markup, CSS classes, text, images or metadata, which all can be subject to copyright law. Finally, we also have discussed possible risky legal scenarios when dealing with web scraping that requires CAPTCHA completion, and websites that block bots and the legality of how we go about circumventing the infrastructure the websites have in place. 
+2.3 Architecture 
+This brings us to a discussion about the architecture of the DOM extraction and understanding process. To clarify, there is no direct link between the tools used for DOM extraction and understanding. The overachieving agentic architecture built by L07 - Browser Interaction will develop and execute a plan based on the user’s prompt that will call upon our tools when needed. Therefore, the “link” between the DOM extraction tool and all of our team's DOM understanding tools is technically the execution agent that will be developed by Browser Interaction. Using any generic prompt as an example, the first step in the plan would almost certainly be to retrieve relevant websites to the user’s prompt. This step in the plan would call the tool our team is developing for domain searching and filtering (this tool will be explained in detail in another section of this document). Then the domains this tool outputs will be sent back to the execution agent and the execution agent will send these domains to another agent that will verify if it believes the output is up to standards. This is a very naive and undetailed explanation of this verification process and is not our team's area of research or development. This process will be explained more detailed and correctly in L07 - Browser Interactions documents. However, this “loop” between our tools, the execution agent, and the verification agent, is the technical “link” between our tools. Continuing the example, after the outputs of our domain searching and filtering tool are verified, the next step in the plan will be executed. The next step will almost certainly be to retrieve the DOMs of these domains outputted by the domain searching and filtering tool. The execution link will call upon and pass the domains to our DOM extraction tool and the DOM for these webpages will be returned to the execution agent. Finally, getting to the goal of this explanation, the execution agent will again enact Browser Interaction’s verification process and pass the DOMs for each webpage to one of our DOM understating tools. There will most likely be some use of asynchronous programming allowing these DOMs to be passed all at once instead of one by one. Therefore, the architecture of DOM extraction and DOM understanding is a more complex process than if the tools were linked directly together. We are not in control of which tools are called or the order in which they are called. However, this architecture is what allows our Browser to be as powerful and intelligent as possible and is a very important component of what we are building. 
+  
+
+2.4 Formatting Output
+A big issue in large complex projects is making sure the data stays in a consistent usable format. In our project, because there is so much passing back and forth of data between our group and group L07 - Browser Interaction, we need a standardized format for our data. The format we have chosen is JSON format. For example, when we pass the results from our DOM extraction tool to the execution agent it will be in the form of something along the lines of {“Data Type” : “DOM”, “Domain” : “Webpages Domain”, “Data” : "Webpages DOM”}. The DOM understanding tools and all our tools in general will also follow a similar JSON format. We haven’t decided the exact specifications of what our key-value pairs will be for each tool's output, but it will be something along the lines of the example given. Additionally, to enforce a strict structure that our JSON objects have to adhere to, we will use Python’s Pydantic library. Pydantic can be used to validate the data types of the data inputted into JSON objects. 
+2.5 DOM Understanding 
+2.5.1 Intro 
+After the DOM is extracted, and as we briefly touched on in the DOM extraction section, we will need to parse, filter, and ultimately understand the elements of the DOM tree. These DOM understanding tools are extremely important tools for our Browser’s agents because these are the tools that will ultimately allow our agents to understand what actions are available to be taken and what information can be extracted from each webpage. For example, we will need to filter out which elements are interactable, which elements are simply for styling, which elements contain useful data, and so on. 
+That was a general explanation that applies to all of the DOM understanding tools we will be developing; however, the next section will hone in on specifically the tool used to identify which elements are interactable, and which elements are not. 
+2.5.2 Research and Findings
+There were several approaches we researched and explored during the process of deciding the approach we will use to go about identifying the interactive elements from a DOM tree. One approach that was promising is to use Beautiful Soup in conjunction with lxml to filter for all of the interactive elements. This approach works fine for the most part, and our actual approach is ultimately built on top of this approach; however, adding rich descriptions of what each element actually represents on top of identifying simply if an element is an interactive element or not, is not feasible when considering how broad of a scope of prompts we want our to be able to handle. Most of our research and efforts in this area went towards how to add rich descriptions to each element. The more information we are able to pair an element with when passing the identified elements back to the execution agent, the less the chance of the agent incorrectly identifying the actions available when interacting with that webpage. However, ultimately we would have to resort to an obnoxious amount of if statements or some form of inefficient matching algorithm in order to handle adding useful descriptions to our data. The only exception being if the text descriptions used for an individual element provide enough detail. However, simply pairing an element with its text description is often not enough information, and sometimes isn’t useful at all. 
+2.5.3 Execution
+Before diving straight into the approach we have decided to take, we’d like to reiterate that at this point in our Browsers execution, the data assumed to be passed to our tool when it is called upon to identify the interactive elements in a webpages DOM, is the webpages raw HTML or a DOM tree that can be converted into raw HTML, and the interactive elements that can only be detected through dev tools such as event listeners written in JavaScript. Therefore, the interactive elements that can only be detected with dev tools do not need to be filtered out from the HTML. 
+To filter out the remaining interactive elements we will use Beautiful Soup along with lxml. As mentioned in a previous section of this document lxml is a library that allows for fast and flexible parsing of HTML documents. Its integration with Beautiful Soup allows for our filtering and parsing to be as flexible and efficient as possible. The actual filtering process will involve the use of standard Beautiful Soup methods such as find_all() and standard Python functions, data structures, and statements, such as for loops, str(), lists, etc. A list of as many standard interactive HTML elements as possible will be manually written. For example, 
+interactive_tags = ["a", "button", "input", "select", "textarea", "form", "script", "iframe", "embed", "object", "video", "audio"].
+We will filter through the raw HTML for all objects that match one of these standard interactive HTML elements. 
+Once we manually filter out as many interactive elements as possible, and this next step is the key to our approach and why it differentiates from the previous approaches we explored, we will pass the raw HTML to an LLM using Langchain and prompt it to filter out any interactive elements we may have missed as well as add as rich descriptions as possible to all of the interactive elements that have been identified. Because we have passed the raw HTML to the LLM it can use the context of the surrounding HTML to create as rich descriptions as possible. These descriptions will be paired with the individual HTML elements they describe in the form of key-value pairs and ultimately create a JSON object containing all the key-value pairs of interactive elements and their descriptions for a particular webpage. The formatting we desire will be specified during our call to the LLM. In addition, we will then update our list of standard interactive HTML tags with any additional tags that the LLM identified to be standard and we didn’t originally have listed. The more interactive elements we can filter out before we pass the HTML to the LLM the better, as this will hopefully prevent the LLM from missing any interactive elements and mitigate the chance we return elements back to the execution agent without useful descriptions. 
+The data will be returned to the execution agent in a similar format to what was described in the “formatting of the DOM extraction and DOM understanding tools’ outputs” section, except the data field will have the JSON object containing all of the elements and their descriptions. 
+
+
+Library Name
+	Explanation
+	langchain (DOM Understanding)
+	Framework for building applications powered by large language models (LLMs) such as ChatGPT, Claude, or Llama. Gives tools to connect LLMs with data, APIs, memory, tools, agents, and reasoning workflows.
+	beautifulsoup4 (DOM Understanding)
+	Used for parsing, navigating, and extracting data from HTML or XML documents.
+	lxml (DOM Understanding)
+	Used for parsing, manipulating, and querying HTML and XML.
+Faster, more powerful, and more standards-compliant than the default Python HTML parsers.
+	Note. The above table has been reused from section 2.2.4 of this document. We felt that since section 2.2.4 had briefly touched on all the libraries that will be used throughout the DOM Understanding and DOM Extraction process before providing an explanation about the distinction between the two tools, it was appropriate to have a table that included all the libraries that will be used throughout the process with clear explanations in order to assist users with a concise recap; However, the libraries only used in the DOM extraction process have been excluded from the above table to further emphasize the differentiation between the two tools.
+2.5.4 Choice of LLM 
+2.5.4a Research and Findings 
+Our main concerns when considering which LLM to use for our interactive element identifying tool is the level of prompt engineering necessary to interact with the LLM, the cost of using the LLM, and how well the LLM integrates with Python. All the best LLMs seem to integrate with Python smoothly and efficiently, so this wasn’t really a deciding factor. However, the cost and the level of prompt engineering difficulty did play a factor in our decision making process. Llama created by Meta, seems to require the highest level of prompt engineering; therefore, we ruled this one out. As a result, the choice really comes down to ChatGPT and Claude. ChatGPT is more expensive than Claude but is the LLM our team is most familiar interacting with. 
+2.5.4b Choice of LLM 
+We haven’t made a final decision on which LLM to use and will continue researching into finding the LLM we feel fits our requirements the best. 
+2.5.5 High-Level Algorithmic Explanation of our Plan of Execution
+This section, as 2.2.6 provided for our DOM Extraction tool, will provide a high-level line by line explanation of what our code will potentially look like for our identifying interactive elements from the DOM tree tool. We’d like to reiterate, that just as we stated in section 2.2.6, much of this code is subject to change, and readers of this document that aren’t interested in a more technically detailed explanation of our approach will suffer no confusion from only reading the explanation of our approach from 2.5.3 and skipping this section. One additional note, “line by line” will not apply to this section and is not meant to be taken literally. The code for this section is much more extensive than the code for DOM Extraction; therefore, this will be more of a paragraph by paragraph explanation of our code as we have deemed this as the more appropriate course of action. 
+
+
+We begin again with our imports, which will be BeautifulSoup from bs4, using OpenAI as an example OpenAI from openai, and lxml. We have not decided on which LLM we will use at this moment, but we will use OpenAI for the sake of our potential code explanation. We discussed our current research into which LLM to choose in section 2.5.4. Next, we would establish our connection to OpenAI. Following that, we will have several exhaustive lists of potential HTML elements types and names that would be typically deemed as interactive. Next, would be a function that filters through these lists using beautiful soup and lxml, and returns a Boolean indicating if the element passed to the function is indeed interactive or not. We would then build numbered HTML lists for our prompt to the LLM using Python’s “for…” statement and “enumeration…” function. Then we establish our system and user prompts for the LLM. Finally, we pass batches of HTML elements to the LLM and ask which elements are interactive, we map the indices of each element back to actual HTML tags, and return all the interactive elements. 
+
+
+We realize this is a way higher level explanation of the DOM understanding code then the DOM extraction code, but given the extensiveness of the DOM understanding code, it isn’t feasible to go into as much technical detail as we did with DOM Extraction, as it would take about 50 pages on its own. We hope this simply serves at the very least as a complement to the execution section to provide slightly more detail than initially explained.
+2.5.6 Definition of Success
+Our definition of success for our DOM Understanding tool, specifically the tool used to identify which elements are interactable, and which elements are not, is a tool that can take a webpage’s DOM tree as input and return all interactive elements from the DOM tree and a quick summary of what that element does in JSON format. 
+  
+
+Again, as explained in section 2.2.7, which explained our group’s definition of success for our DOM Extraction tool, if we can be successful in creating such a tool that accomplishes this flow of data, we will successfully provide group L07 - Browser Interaction’s execution agent with another one of the necessary tools in which the agent can use to accomplish even the most generic plan L07’s agentic architecture can come up with. 
+2.5.7 Final Note
+One final note regarding the interactive element identifying tool, is we are still heavily researching and exploring approaches to solve this problem as efficiently and effectively as possible. Our approach is still being worked on and is constantly being modified and improved. Therefore, this approach is currently not finalized and may change in our future documentation. In addition, because it is almost certain that the next step in execution after retrieving the DOM is identifying the interactive elements, we have floated the idea of combining the two tools together; however, this is another area we are currently exploring and haven’t made an ultimate decision on.
+3. Action Execution
+While the Output Structuring component focuses on formatting and validating the data returned from completed tasks, the success of that process depends entirely on how accurately those tasks are carried out within the browser itself. The Action Execution Module is the subsystem responsible for translating structured agent commands into concrete, observable actions on a live webpage. It serves as the physical layer of interaction between the multi-agent system and the external web environment, bridging the gap between high-level reasoning and low-level browser manipulation.
+
+
+This layer effectively transforms computational reasoning into tangible web behavior, ensuring that the system’s decisions are manifested through direct and traceable interaction with dynamic web elements. It acts as the “hands” of the intelligent agent, carrying out complex multi-step operations with precision and adaptability.
+In the context of the Information Gathering (IG) architecture, this module receives explicit instructions from the Execution Agent in the form of structured JSON commands that define the type of action to perform, the target element to interact with, and any necessary input data. Using this information, the Action Execution Module performs real-world web interactions such as typing into form fields, clicking buttons, submitting login credentials, scrolling through pages, or navigating between links. Each action is monitored, verified, and logged to provide traceability and evidence of successful completion.
+
+
+Unlike traditional web automation that relies on static scripts or hardcoded selectors, this system must be capable of dynamically adapting to different website structures and interaction patterns. Because the overarching project aims to demonstrate autonomous browser agents that can generalize across domains, this component is designed to interpret and execute actions flexibly using contextual and semantic cues provided by other Information Gathering subsystems, such as the DOM Understanding Module. Together, these components allow the system not only to extract information from the web but also to engage with it, executing meaningful steps that reflect the intent of the user’s original natural language request. This functionality represents a major step toward creating intelligent browsing systems capable of completing end-to-end workflows without human micromanagement, paving the way for autonomous digital assistants in research, commerce, and productivity domains.
+
+
+The purpose of this section is to outline the design, architecture, and workflow of the Action Execution Module. It will describe how the component processes agent instructions, interacts with webpage elements, handles errors, and communicates with verification layers to ensure reliable performance. Additionally, this section will detail the technologies used to implement browser interactions, security measures taken to protect user data, and plans for future improvement and scalability.
+3.1 System Role & Motivation
+
+
+The Action Execution Module serves as the critical operational core of the Information Gathering (IG) system. It is the component responsible for turning agent-generated intent into real, verifiable browser interactions. Whereas modules such as DOM Extraction and DOM Understanding focus on analyzing and interpreting web page content, and the Output Structuring subsystem packages data into machine-readable formats, the Action Execution Module is where intent becomes action. It is the stage where the system transitions from observation to manipulation, from interpreting what exists on a webpage to changing that state according to the user’s instruction.
+In the broader multi-agent architecture, this module occupies a vital position between the Execution Agent and the Verification Agent. The Execution Agent receives the Overseer’s plan and translates it into actionable steps represented as structured JSON commands. These commands are then dispatched to the IG subsystem, where the Action Execution Module interprets them and performs the requested operations within the browser environment. Once complete, the module communicates its results, including DOM snapshots, screenshots, and success or failure flags, to the Verification Agent for confirmation. In this way, it closes the reasoning–action loop that defines the intelligent behavior of the overall system.
+The motivation for developing this module lies in one of the central challenges of the Interactive Browser Agent project: achieving reliable, adaptive web interaction without manual scripting or hard-coded site logic. Traditional automation frameworks, such as Selenium or basic Python web scrapers, depend on brittle selectors and rigid workflows that fail when webpage layouts change or new elements are introduced. In contrast, the Action Execution Module must operate in dynamic and unpredictable environments, guided by semantic information rather than static identifiers. It needs to determine which button to click, which field to fill, or when to wait for an element to appear, all while maintaining contextual awareness of the task.
+Our design emphasizes modularity and agentic flexibility. Instead of having a separate subsystem for each use case (for example, individual agents for booking, shopping, or contact forms), the team chose a unified architecture in which the Action Execution Module generalizes the core primitives required for any browser interaction: locating elements, inputting data, triggering events, and confirming results. This approach allows other agents, such as those responsible for orchestration and verification, to reuse the same interaction framework across domains. The result is a more scalable and maintainable system that can handle an expanding variety of real-world tasks without redesigning its fundamental logic.
+From a system perspective, this module also introduces the mechanical reliability necessary for end-to-end autonomy. Every agent above it, the Overseer, Orchestrator, and Execution layers, depends on accurate feedback from the physical interaction layer. If a click is mis-targeted or a field is left blank, the reasoning pipeline collapses, producing hallucinated or inconsistent results. By designing the Action Execution Module with built-in feedback loops, we ensure that every interaction is traceable, auditable, and repeatable. Each executed action generates accompanying evidence, including screenshots and DOM snapshots, which supports downstream verification and debugging.
+The motivation for this design also stems from the goal of human-level reliability. For the Interactive Browser Agent to emulate a human user’s ability to complete tasks online, it must not only understand instructions but also perform them with the same situational judgment. The Action Execution Module embodies that principle by giving the system the capacity to “see” elements, “decide” when they are ready for interaction, and “act” within real time constraints. It effectively replaces the manual component of browsing, allowing the AI pipeline to accomplish multi-step tasks, such as form submission or account registration,  with minimal supervision.
+In summary, the Action Execution Module is both the bridge and foundation of the IG subsystem. It bridges semantic understanding and tangible execution while laying the groundwork for autonomy across web domains. Without it, the architecture would remain theoretical; with it, the project demonstrates how an intelligent agent can physically operate within the digital world. The development of this module represents a significant step toward fully autonomous, adaptive browser agents capable of completing complex tasks safely, efficiently, and consistently.
+3.2 Technical Architecture 
+The Action Execution Module is designed as a modular subsystem that interprets structured commands from the Execution Agent and performs corresponding physical interactions within a live browser environment. Its architecture balances flexibility, performance, and verifiability, ensuring that each interaction can be dynamically adapted to a new webpage structure without requiring manual reconfiguration. To achieve this, the module is organized into several internal components, each responsible for a distinct stage in the action lifecycle: interpretation, element resolution, execution, feedback collection, and reporting. Together, these layers create a robust, agentic foundation that can reliably perform user-like operations in a constantly changing web ecosystem.
+3.2.1 Architectural Overview
+At a high level, the Action Execution Module operates as an intelligent middleware layer between the Execution Agent, which issues task instructions, and the Verification Agent, which evaluates the outcome of those actions. When the Execution Agent produces a JSON-formatted directive (for example, “click the ‘Book Now’ button” or “enter ‘Orlando’ in the destination field”), the Action Execution system parses the command, locates the appropriate element on the webpage using DOM information supplied by the DOM Understanding subsystem, performs the specified interaction, and records both the outcome and the evidence of success. These results are then returned as a structured response to the Verification Agent for evaluation.
+
+
+To maintain generality, all communication between agents occurs using standardized JSON schemas defined by the Information Gathering team. Each instruction contains a minimal but sufficient set of fields:
+
+
+action_type – specifies the interaction primitive (click, fill, select, scroll, etc.);
+
+
+target_selector – contains CSS, XPath, or role-based identifiers;
+
+
+input_value – optional value to be entered into the field;
+
+
+metadata – contextual attributes such as timeouts or confidence scores;
+
+
+trace_id – unique identifier linking the action to an orchestration plan step.
+
+
+This schema provides a consistent interface across multiple agents, making it easy to extend or replace individual components without disrupting the overall system.The internal structure of the Action Execution Module can be divided into five major subsystems:
+
+
+Action Interpreter:
+This component receives the JSON command and determines which browser primitive should be executed. It converts the symbolic action (for example, “fill_form” or “click_button”) into an operational instruction recognizable by the automation layer. The interpreter also validates the input to ensure all required parameters are present and that the requested operation is logically possible within the current page context.
+
+
+Element Resolver:
+Once the operation is identified, the Element Resolver determines which DOM element should be targeted. It combines multiple strategies to increase accuracy, including direct selector matching, heuristic role identification (for example, inferring that a <button> with text “Submit” is a form confirmation element), and semantic cues provided by the DOM Understanding Agent. This subsystem uses the Playwright automation framework, which offers robust querying functions (locator(), get_by_role(), and get_by_text()) that are more adaptable than fixed XPath selectors.
+
+
+Action Runner:
+The Action Runner executes the operation in the browser using Playwright’s asynchronous API. It supports a suite of core primitives such as click(), fill(), select_option(), check(), goto(), and keyboard.press(). Each operation is wrapped in a retry mechanism that waits for the DOM element to become stable and visible before interacting with it. The Action Runner also logs performance metrics (latency, retries, page state) for each interaction.
+
+
+Feedback Collector:
+After each action, the Feedback Collector gathers evidence confirming whether the intended operation succeeded. It retrieves the updated HTML of the page, captures a screenshot, and collects relevant confirmation messages (for example, “Form submitted successfully”). This information is packaged into a structured response and tagged with the same trace_id as the original instruction, ensuring that every result can be linked to its originating command.
+
+
+Result Dispatcher:
+The final component prepares the standardized output message to return to the Verification Agent. This message includes the result status (success, fail, or partial), any extracted data from the page, and links to the collected evidence (DOM snapshot and screenshot). By preserving the schema across all steps, the Result Dispatcher guarantees seamless integration with the other IG subsystems.
+
+
+Each subsystem operates as an asynchronous service running within the same process memory as the Information Gathering pipeline. This in-memory communication design removes the latency and overhead of network-based APIs, improving performance and maintaining the security of sensitive information.
+
+
+3.2.3 Data Flow and Execution Pipeline
+
+
+The data flow for a single interaction can be summarized in five sequential steps:
+
+
+Instruction Reception:
+The Execution Agent generates a JSON action command and sends it to the Information Gathering system.
+
+
+Interpretation and Validation:
+The Action Interpreter verifies the command’s syntax and semantics, rejecting malformed or incomplete instructions before execution.
+
+
+Element Identification:
+The Element Resolver locates the corresponding DOM element using the DOM Understanding data and ensures it is ready for interaction.
+
+
+Action Execution and Monitoring:
+The Action Runner performs the requested action using Playwright. Throughout execution, it monitors for runtime exceptions such as TimeoutError, ElementNotFoundError, or DetachedFromDOMError and triggers automatic recovery routines if they occur.
+
+
+When an action fails to execute successfully, the Action Execution module is responsible for generating a structured error report and sending it to the Logging and Error Handling subsystems. Rather than attempting recovery autonomously, the module limits its role to detection and documentation. For example, if a click target cannot be located or a text field fails to accept input, the module captures the associated error code, a DOM snapshot, and a screenshot of the current browser state. This information is then packaged in a standardized JSON format and returned to the Browser Interaction layer, which may decide whether to retry, adjust the plan, or request new input from the user. This approach maintains a clear separation of concerns and keeps the execution component lightweight and deterministic.
+
+
+Evidence Generation and Reporting:
+The Feedback Collector captures the post-action state of the page, including DOM changes, visible messages, and screenshots. The Result Dispatcher then sends this compiled report back to the Verification Agent for validation and further planning.
+
+
+This flow ensures that every step of the action lifecycle is deterministic, observable, and recoverable. It also provides a clear audit trail for debugging or sponsor review.
+
+
+3.2.3 Communication and Synchronization
+Because the broader system involves multiple agents operating concurrently, synchronization between modules is essential. The Action Execution Module uses a lightweight state manager to ensure that no two actions manipulate the same browser context simultaneously. Each browser session maintains its own memory state,  including cookies, navigation history, and local storage, allowing multiple user-level tasks to run independently.
+
+
+Additionally, each action step is timestamped and versioned, enabling rollback if a later verification step fails. This checkpointing approach mirrors the agent state management principles described earlier in the document, ensuring consistency across the pipeline.
+
+
+3.2.4 Architectural Benefits
+
+
+This modular and layered design provides several benefits:
+
+
+Generalization: The same framework supports all categories of browser tasks, from form submissions to product searches, without domain-specific customization.
+
+
+Traceability: Every action produces a structured trail of logs, screenshots, and DOM states, improving debugging and transparency.
+
+
+Scalability: Each component can be replaced or extended independently, allowing future versions of the system to integrate new capabilities such as visual recognition or multi-tab orchestration.
+
+
+Security: By operating entirely in memory and limiting external dependencies, the module ensures that sensitive data never leaves the secure execution environment.
+
+
+3.3 Tools and Libraries 
+
+
+The Action Execution module relies primarily on the Playwright automation framework to perform browser-level interactions such as clicking, scrolling, and filling input fields. Playwright’s asynchronous design allows the system to manage multiple independent browser contexts efficiently, while its role-based selectors improve element targeting accuracy across dynamically generated web pages. The module is implemented in Python 3.11, which provides robust asynchronous I/O support through the asyncio library. For communication, all inputs and outputs are structured using JSON schemas validated by Pydantic, ensuring consistent formatting across agents. The environment operates on a headless Chromium instance to reduce overhead while maintaining full browser functionality. Together, these tools allow the system to execute complex actions reliably without direct human input.
+3.4 Testing and Metrics
+
+
+Testing for the Action Execution module focuses on verifying both correctness and reliability. Each core interaction type, such as clicking, typing, or submitting, will be validated using automated unit tests that confirm proper execution on controlled test pages. Integration tests will simulate multi-step workflows, ensuring that the module correctly processes JSON commands and produces accurate evidence reports. Metrics such as average action latency, element resolution accuracy, and overall success rate will be recorded and visualized to track performance over time. Continuous integration pipelines will automatically rerun these tests after every major update, ensuring consistent behavior across development iterations. 
+ 
+
+
+
+
+3.5 Timeline 
+
+
+Week
+	Date Range (Approx.)
+	Milestone
+	Description / Deliverable
+	Week 1–2
+	Aug 26 – Sept 8
+	Environment Setup
+	Installed Python 3.11 and Playwright; verified browser automation on sample pages.
+	Week 3–4
+	Sept 9 – Sept 22
+	Schema Design and Parser Implementation
+	Defined JSON schema for input/output; implemented command parser and validation using Pydantic.
+	Week 5–6
+	Sept 23 – Oct 6
+	Core Action Prototypes
+	Implemented base primitives (click, fill, submit, select_option); validated selector reliability.
+	Week 7–8
+	Oct 7 – Oct 20
+	DOM Integration Testing
+	Integrated with DOM Understanding module; tested element recognition and selector mapping on multiple webpages.
+	Week 9
+	Oct 21 – Oct 27
+	Evidence Capture Framework
+	Added screenshot and DOM snapshot collection after each executed action; standardized output format.
+	Week 10
+	Oct 28 – Nov 3
+	Error Reporting Interface
+	Implemented structured error emission to Logging/Error Handling subsystems; verified JSON trace fields.
+	Week 11–12
+	Nov 4 – Nov 17
+	Unit & Integration Testing
+	Created automated test harness (pytest); measured success rate and action latency metrics.
+	Week 13
+	Nov 18 – Nov 24
+	Optimization & Documentation
+	Improved selector heuristics; refined documentation for developer onboarding and sponsor review.
+	Week 14–15
+	Nov 25 – Dec 12
+	Working Demo & SD1 Deliverables
+	Completed end-to-end demonstration of Execution → Verification handoff, finalized report, and submitted SD1 deliverable.
+	
+
+
+
+As of this report, the Action Execution module has completed its initial research and prototype phases. The next stage focuses on refining element targeting, adding evidence capture, and integrating with the Browser Interaction subsystem. By the end of Senior Design I, the team aims to achieve full compatibility with the JSON schema used across the system and validate performance through automated testing.
+
+
+3.6 Future Work and Integration 
+
+
+Future work on the Action Execution module will focus on improving adaptability and scalability. Planned enhancements include the ability to manage multi-tab browsing sessions, dynamically handle newly loaded elements, and integrate optional visual cues for element confirmation. The module will also finalize its interface with the Browser Interaction team’s logging system to provide real-time status updates. In the second phase of the project, the team will refine communication protocols and explore the use of lightweight concurrent workers to support multiple execution threads simultaneously. These improvements will ensure seamless integration with the broader multi-agent architecture and increase the system’s reliability for complex user tasks.
+Next, we broke the information gathering team’s roles into different subsections to cover all aspects of the web. Shopping, travel, hotel, contact information were sub categories that were going to be used during the decision logic so that each of these tools could have their own simplified process of extracting the DOM and relaying information back to the browser interaction team. Focusing on the hotel aspect, the goal was to create a sub agent that could ideally hone in on this one subset of user queries and return information in a neat, easy-to-navigate, and usable format for the browser interaction team.
+
+
+4. Specific Agent and Searching
+
+
+Hotel data extraction represents a challenge in web automation due to three systemic obstacles. First, schema structure across platforms can be radically different in each DOM structures: Booking.com encodes prices in <span class="priceDisplay"> elements while Hotels.com uses <div data-testid="price-summary">, requiring site-specific parsing logic. Second, modern booking platforms employ dynamic rendering through React and Vue frameworks where critical content loads asynchronously, making traditional static HTML scraping unreliable. Third, anti-bot countermeasures including rate limiting and CAPTCHA challenges actively obstruct automated extraction. 
+  
+
+
+
+The system architecture that was used for this agent was a 3 layer processing step. The perception layer, which is the browser interface scraped, outputs a data contract consisting of cleaned HTML strings, page metadata (URL, load time, screenshot hash for visual debugging), and network diagnostics (failed requests, redirect chains). During the reasoning layer, we used two different tools to actually break down and understand the raw elements we are extracting. 
+
+
+
+
+First, the Tavily Search Integration within Langchain serves as the pipeline entry point, converting natural language queries like "hotels in Orlando under $200" into structured web searches. Unlike raw search APIs returning unstructured results, Tavily outputs JSON containing verified hotel entity URLs ranked by relevance. The DOM Analyzer employs few-shot prompting where the LLM receives the preprocessed HTML alongside three labeled examples demonstrating correct element identification. For instance: "This `<h2 class="hotel-name">Holiday Inn</h2>` contains a hotel name (valid), while this `<span class="advertisement">Book Now!</span>` is promotional content (invalid)." By providing positive and negative examples, the model learns to distinguish semantic hotel data from navigation elements, advertisements, and boilerplate content without requiring hardcoded CSS selectors. The LLM outputs CSS selectors for identified elements (e.g., `div.listing-card > h3.property-name`), which the Schema Mapper then queries to extract actual text content.
+
+
+This reasoning layer outputs List[HotelListing] objects containing required fields (name, price_usd, location) and optional metadata (star_rating, amenities, availability_dates).
+
+
+The last layer is the validation layer which acts as the quality assurance, type checking and making sure the information is critical enough to be sent back to browser interaction. The Schema Validator performs three verification passes: type checking ensures prices are numeric floats and ratings fall within [0.0, 5.0] bounds; completeness scoring flags listings missing more than two required fields; and format normalization converts currency strings ("$189") to standardized floats (189.0). The Confidence Scorer assigns probabilistic reliability metrics based on field completeness (80% weight) and selector stability across three page reloads (20% weight), enabling downstream systems to filter low-quality extractions.
+
+
+The Hotel Agent integrates into LangChain's tool ecosystem through the `@tool` decorator, exposing the function signature `extract_hotels(url: str, filters: Dict) -> List[HotelListing]` to the LangGraph supervisor agent. Query orchestration follows a three-stage pipeline: user natural language queries first invoke the Tavily tool to retrieve canonical booking site URLs, these results feed to the Hotel Agent tool which scrapes the top-ranked sites, and finally outputs route to an Aggregator tool that deduplicates listings based on fuzzy (name, address) matching and ranks by price or user-specified criteria. 
+
+
+4.1 Research Extraction Libraries 
+
+
+In our research, we evaluated traditional DOM extraction libraries such as BeautifulSoup alongside LLM-based parsing approaches. BeautifulSoup, while lightweight and highly efficient for static HTML parsing, suffered from frequent brittleness when CSS selectors changed due to website updates, leading to approximately 40% breakage over three months. In contrast, using LLMs for extraction dramatically improved robustness, maintaining around 85% accuracy over six months with zero manual updates required. However, this reliability came at a cost of roughly $0.03 per extraction versus near-zero compute for static parsing, which is manageable for prototypes but challenging to scale in production without caching. 
+
+
+  
+
+
+
+While this three-layer architecture proved robust during controlled testing with known hotel booking platforms (Booking.com, Hotels.com, Expedia), real-world deployment across diverse domains still need to be reviewed for final deployments. However, after some deliberation from our sponsor we pivoted towards building out the information gathering side as purely a DOM extractor, manipulator, and outputer, instead of it being focussed on one avenue. 
+
+
+4.2 Switch To Verticals
+
+
+Initially, the project focused on building specialized domain-specific agents tailored for particular verticals—such as hotel booking or online shopping. This approach allowed for targeted optimization and reasoning specific to each domain’s nuances. However, as development progressed, it became clear that a large portion of the underlying extraction logic, particularly DOM parsing, schema validation, and reasoning workflows was largely shared across these domains, resulting in nearly 80% code overlap. 
+
+
+  
+
+
+
+The project’s conceptual evolution entailed reframing the system from a collection of isolated domain-centric agents into a generalized web scraping and extraction platform. Following this conceptual pivot, the design evolved to incorporate dynamic schema management and tooling adaptation.This enabled the processing pipeline to remain agnostic to domain details, focusing instead on uniform extraction and compliance verification steps. We each focused on an individual part of the process to enhance and modify the functionality of how information gathering would be handled. This modularity allows for flexible error handling and detailed logging of actions, which improves reliability and maintainability. The pivot toward this architecture was driven by the need for scalable, robust, and reusable components that support a wide range of domains while enabling seamless integration and easier debugging.
+
+
+
+
+4.3 Tavily vs Serper.dev
+
+
+In terms of specific tool calling, there was substantial research being done that compared which tools would be best for user queries that lead to high ranking websites. In our generalized web extraction flow, the search tool serves as the entry point to the information gathering pipeline: it receives natural language queries ("find hotel booking sites in Orlando under $200") and returns ranked URLs that the Playwright controller subsequently scrapes. The evaluation compares two tools with fundamentally different design ideas: Tavily, built specifically for AI agents and RAG workflows, and Serper.dev, optimized for speed and cost efficiency as a Google Search proxy. 
+
+
+Tavily positions itself as an AI search engine built specifically for agent workflows, distinguishing itself from traditional search APIs through its focus on LLM optimization rather than raw SERP replication. The core architectural advantage Tavily offers is content extraction and token optimization. Unlike SERP APIs that return raw HTML snippets requiring additional preprocessing, Tavily automatically scrapes up to 20 sites per query, filters unwanted HTML and CSS elements, and extracts relevant information optimized for LLM context windows. This design targets RAG (Retrieval-Augmented Generation) applications where the goal is feeding clean, relevant content to language models rather than simply obtaining URL lists. The platform provides official LangChain integration, enabling seamless tool registration within agent frameworks through pre-built connectors. The platform excels when the extraction pipeline requires full content preprocessing by automatically cleaning HTML, ranking relevant passages, and structuring data for LLM consumption. However, this comprehensive approach introduces potential over-engineering for use cases needing only ranked URL lists. If the browser agent's DOM extraction layer already handles content cleaning and schema validation (as in our generalized architecture), paying for Tavily's preprocessing may represent redundant processing. 
+
+
+Serper.dev takes a fundamentally different approach, positioning itself as "the world's fastest and cheapest Google Search API" with a focus on minimalist design and aggressive pricing. The platform functions as a lightweight Google Search proxy, delivering SERP results in 1-2 seconds at $0.30 per 1,000 queries—translating to $0.0003 per individual search. Rather than aggregating multiple sources or applying AI-driven content extraction, the platform provides fast, structured access to Google's search results through clean JSON responses. Each query returns organic search results with URLs, titles, and snippets in a standardized format requiring minimal parsing. 
+
+
+When evaluating Tavily versus Serper.dev for browser agent URL discovery, the optimal choice depends on specific architectural requirements and the division of labor within the extraction pipeline. Tavily's strength lies in its AI-native design: if the browser agent benefits from pre-processed, LLM-optimized content with built-in relevance scoring, the premium cost and moderate latency may be justified. Conversely, Serper.dev optimizes for the scenario where the browser agent's downstream DOM extraction layer already implements robust content cleaning, schema validation, and relevance scoring. In this architecture—which describes our generalized DOM extractor—paying for Tavily's content preprocessing represents redundant work. The agent only needs ranked URLs to feed into Playwright; all intelligence about extracting structured hotel data happens in the perception, reasoning, and validation layers downstream. 
+
+
+4.4 Final Search Conclusion 
+
+
+For our specific use case—a generalized web extraction platform supporting multiple schemas (HotelListing, ProductListing, ContactListing)—Serper.dev provides better architectural fit. The platform's simplicity aligns with our design principle of keeping domain logic in schema definitions rather than tool implementations. A generalized search layer should be domain-agnostic, returning ranked URLs regardless of whether the query seeks hotels, products, or contact information.
+
+
+The search tool evaluation connects directly to the broader information gathering architecture and the recent pivot from domain-specific agents to a generalized DOM extraction platform. Initially, the project implemented specialized agents—HotelAgent, ShoppingAgent, ContactAgent—each with custom search integrations optimized for their vertical. The HotelAgent might have used Tavily with hotel-specific prompts and domain filtering, while the ShoppingAgent configured different parameters for product searches. This approach created maintainability challenges: each agent duplicated search logic with minor variations, leading to the observed 80% code overlap that motivated the architectural pivot.
+
+
+In the generalized architecture, the search layer becomes a domain-agnostic component that accepts a query string and schema type, returning ranked URLs regardless of the specific extraction domain. The recommended implementation uses Serper.dev as the default search backend for the generalized SearchOrchestrator class, with query construction logic that appends schema-appropriate keywords (e.g., "booking sites" for hotels, "official website" for contact information, "buy online" for products). This search tool decision directly supports the broader project narrative: the evolution from specialized agents to a generalized platform requires identifying which components benefit from domain-specific optimization versus which should remain generic infrastructure.
+
+
+After examining the benefits and negatives of Tavily and Serper.dev, we decided that for this project and scope, utilizing Serper would be easier and meet all our goals. The first part of the process of information gathering is going to use this tool and we decided that within the search tool, there can be multiple ways to heighten the accuracy of the api call. This includes adding more context to the query, having a ranking feature for the results, and finally having an output that’s neatly formatted so that the other tools of information gathering can proceed with their tasks.
+
+
+4.5 Design Philosophy 
+
+
+        The design philosophy emphasizes separation of concerns and modularity. Rather than tightly combining search logic with extraction logic, the SearchOrchestrator exposes a clean interface accepting query strings and schema types as inputs, returning structured JSON containing ranked URLs with confidence metadata. This abstraction enables the DOM extraction pipeline to remain functional to search provider details, whether results originate from Serper.dev or future alternatives becomes an implementation detail hidden behind the orchestrator's interface.
+
+
+         At a high level, it must intelligently optimize queries for different domain contexts (hotel searches require different keyword strategies than product searches), apply learned ranking tactics to prioritize URLs with high extraction success probability, and normalize changing search result formats into consistent output schemas. The component serves approximately 60-80% of all extraction pipeline requests, making its reliability, performance, and cost efficiency critical to overall system success. The SearchOrchestrator is split into six specialized subcomponents, each responsible for a discrete stage of the search workflow. This architecture enables independent development, testing, and optimization of each processing stage while maintaining clear interface boundaries.
+
+
+        The QueryParser serves as the entry point, accepting raw user input and extracting structured query parameters. The QueryRewriter implements domain-specific query optimization strategies to improve search result relevance. The SerperClient captures all interactions with the Serper.dev search API, abstracting HTTP communication, authentication, error handling, and response parsing into a clean interface. The RankingEngine reorders search results based on learned heuristics predicting DOM extraction success probability. The Normalization Layer transforms Serper's response format into an internal representation, decoupling downstream components from external API schema changes. The OutputFormatter constructs the final JSON response consumed by downstream systems, assembling data from all previous stages into a comprehensive, versioned output schema. Following up, here is a detailed walkthrough of an example we have tested out showcasing why this architecture is useful.
+
+
+User input enters the SearchOrchestrator through an API endpoint (ex: POST /api/v1/search), carrying a payload with query string, schema_type identifier, and optional filters dictionary. The QueryParser validates input integrity, rejects bad requests (empty queries, unsupported schema types), and constructs a normalized QueryRequest object. For the example query "hotels in orlando under $200" with schema type "HotelListing", the parser extracts location="orlando" and max_price=200 into the filters dictionary, preserving the raw query for reference.
+
+
+        The QueryRequest passes to the QueryRewriter, which communicates with the schema-specific keyword registry and determines that HotelListing contexts benefit from appending "booking sites". The rewriter rewrites an optimized query string: "hotels in orlando under $200 booking sites". Edge case checks verify the query length remains under 200 characters and language detection confirms that it is an English input. The rewriter outputs a RewrittenQuery object containing both original and optimized strings for state tracking.
+
+
+The SerperClient receives the optimized query and constructs an HTTP POST request to Serper.dev's endpoint. Request payload specifies q="hotels in orlando under $200 booking sites", num=10 (requesting 10 results), gl="us" (US geolocation), and includes authentication headers. The client records the request timestamp for latency calculation for later down the line. Serper responds within 1-2 seconds with a JSON payload containing an organic array of search results, each with link, title, and snippet fields. The client validates the response schema, extracts the results array, and constructs a SearchResponse object containing 10 URLs with their associated metadata.
+
+
+        The Normalization Layer processes Serper's response format, extracting each organic[i].link into a consistent url field, parsing domain names, and preserving original positions. For example, if Serper returns {"link": "https://www.booking.com/searchresults.html?city=orlando", "title": "Orlando Hotels from $89/night"} at position 2, the normalizer creates a SearchResult object with url="https://www.booking.com/searchresults.html", domain="booking.com", title="Orlando Hotels from $89/night", original_position=2. This process repeats for all 10 results, producing a normalized list of SearchResult objects ready for ranking.
+
+
+        The RankingEngine takes in the normalized SearchResult list and applies its weighted scoring algorithm. For the booking.com URL, the engine calculates: DomainTrust=1.0 (booking.com has 92% historical success rate), TitleRelevance=0.85 (4 query keywords match the title), PositionScore=0.90 (original position 2 earns high score), SnippetQuality=0.90 (snippet contains "$" price indicator). The weighted combination yields OverallScore = 0.4×1.0 + 0.3×0.85 + 0.2×0.90 + 0.1×0.90 = 0.91. This computation repeats for all 10 URLs, producing scores ranging from 0.91 (booking.com) to 0.52 (unknown blog site). The engine sorts results by descending score and outputs a RankedResults object with the reordered list.
+
+
+        The OutputFormatter receives the RankedResults object along with timing metadata from previous stages. It constructs the final JSON response by assembling the query section (original="hotels in orlando under $200", optimized="hotels in orlando under $200 booking sites", schema_type="HotelListing"), the results array (top 3-5 URLs with full score breakdowns and metadata), the metrics section (query_optimization_ms=12, serper_api_call_ms=1247, url_ranking_ms=23, total_ms=1282, serper_api_usd=0.0003), and the debug section (ranking_algorithm_version="1.2", domain_trust_registry_version="2025-01-10"). The formatter validates the output against the JSON schema specification, ensures all required fields exist, and returns the complete response payload.
+
+
+        The formatted JSON response returns to the calling system with HTTP 200 status. Other people in the Information Gathering steps will parse the response according to their needs. The search subsystem's work concludes upon successful response delivery, and the extraction pipeline's next stages (DOM scraping, schema validation) begin.
+
+
+
+
+The decomposition into six specialized components rather than a monolithic search handler reflects several deliberate engineering trade-offs. Modularity enables parallel development. Separate developers can work on query rewriting and ranking algorithms simultaneously without merge conflicts. Independent testing becomes feasible because the RankingEngine unit tests mock the SearchResponse object rather than requiring live Serper API calls, accelerating test execution from minutes to milliseconds. 
+
+
+        The data flow's linear progression (parse, rewrite, call, normalize, rank, format) minimizes state management complexity. Each component operates as a pure function (given inputs, produce deterministic outputs without side effects), simplifying reasoning about system behavior and enabling functional testing strategies. The pipeline's stateless nature supports horizontal scaling as we could have multiple SearchOrchestrator instances that can handle concurrent requests without coordination, as no shared mutable state exists between runs. Now we will go in depth on the exact query rewriting algorithm that we have experimented with for the next step.
+
+
+4.6 - Query Rewriting 
+
+
+Query rewriting addresses a fundamental challenge in web search for extraction pipelines: raw user queries often return content optimized for human browsing rather than automated data extraction. When a user searches "hotels in orlando under $200", traditional search engines prioritize review sites, travel blogs, and comparison articles because these pages provide comprehensive information for humans making booking decisions. However, extraction agents need direct access to booking platforms with structured pricing data and availability information.
+
+
+        The optimization objective balances two competing information retrieval metrics. Precision measures what fraction of returned results are actually relevant, we want to eliminate travel blogs and review sites from results. Recall measures what fraction of all relevant results are captured, we don't want to miss legitimate booking platforms. Naive keyword addition can hurt recall by being too restrictive, while overly broad queries reduce precision. The challenge lies in finding transformations that improve precision without sacrificing recall. We evaluated three distinct approaches to query optimization, each with different theoretical properties and practical trade-offs. This exploration helped identify which strategy best fit the constraints of our generalized DOM extraction platform.
+
+
+        The first approach adds domain-specific terms to the original query based on schema type. For HotelListing queries, we add "booking sites"; for ProductListing queries, we add "buy online"; for ContactListing queries, we add "official website contact". The transformation is deterministic and rule-based: if the schema is known, the keyword addition is already decided. The primary advantage is simplicity and speed. Keyword injection requires only string combining, adding effectively zero latency (measured at <1ms). The approach is completely deterministic, meaning the same query always produces the same rewritten version, which simplifies debugging and makes behavior predictable. However, the approach has notable limitations. Language specificity is a major constraint as the current implementation only works for English queries because keyword lists are English-only. Query length becomes an issue when original queries are long because adding keywords can exceed API character limits, requiring truncation logic. This method works best for queries that already contain clear intent but need disambiguation. For straightforward searches like "hotels orlando" or "macbook pro", simple keyword addition provides substantial improvement without complexity.
+
+
+        The second approach is synonym expansion that broadens queries by adding semantically related terms using either a thesaurus database or word embeddings. For a query like "hotels orlando", the system might add synonyms: "lodging", "accommodation", "inn", "motel". The theoretical advantage is improved recall as synonym expansion helps match pages using different vocabulary, addressing the classic "vocabulary mismatch problem" in information retrieval. If booking sites use the term "lodging" but the user said "hotels", the synonym expansion approach bridges that gap. However, synonym expansion introduces several problems. Query oversight is the primary issue since adding 3-5 synonyms per keyword can triple query length, potentially overwhelming the search API and actually reducing precision because too many terms dilute the signal. This approach is optimal for very short, ambiguous queries where a single word needs clarification. For example, "apple" benefits from expansion to "apple computer technology" to separate from the fruit. However, for longer, specific queries typical of extraction tasks, synonym expansion typically hurts more than it helps by introducing noise.
+
+
+        The third and final approach we looked at was large language model rewriting uses models like GPT-4 to understand query intent and generate optimized versions. The system prompts the LLM with instructions like: "Rewrite this query to find booking websites with available inventory: {user_query}". The LLM can restructure syntax, add context-appropriate keywords, expand abbreviations, correct misspellings, and apply domain knowledge about what makes queries effective for finding transactional pages. LLMs handle linguistic variations naturally. The query "looking for affordable lodging downtown" gets rewritten similarly to "cheap hotels city center" because the model understands these are semantically equivalent. This eliminates the need to maintain exhaustive synonym lists or keyword templates. The approach does have trade-offs in cost and latency. Each rewrite costs approximately $0.0008 (using GPT-4o-mini with ~150 tokens input, 50 tokens output), which at 10,000 queries per month adds $8 in rewriting costs.
+
+
+
+
+Original Query
+	Keyword Addition
+	Synonym Expansion
+	LLM Rewriting
+	“Hotels orlando cheap”
+	“Hotels orlando cheap booking sites”
+	“Hotels lodging accommodation orlando cheap inexpensive”
+	“Orlando budget hotels booking availability”
+	“Macbook”
+	“Macbook buy online”
+	“Macbook laptop computer buy”
+	“Macbook pro official purchase apple authorized”
+	“Plumber near me”
+	“Plumber near me official website contact”
+	“Plumber plumbing tradesman near me”
+	“Licensed plumber official business contact phone”
+	
+
+
+
+
+
+The above examples illustrate LLM rewriting's advantages. For "hotels orlando cheap", the LLM rewrites to "budget hotels" (more professional terminology) and adds "availability" (transactional signal), while keyword injection just appends "booking sites" and synonym expansion creates overloaded queries. For "macbook", the LLM adds "official purchase apple authorized" showing understanding that users want legitimate sources, not third-party resellers. For "plumber near me", the LLM adds "licensed" and "business" to prioritize professional services over directories.
+
+
+  
+
+
+
+
+
+
+
+        
+The system prompt establishes the assistant's role and general guidelines that apply across all queries. It emphasizes three principles: optimize for transactional pages (not informational), maintain semantic meaning (don't add irrelevant terms), and keep queries concise (respect length constraints). The prompt uses few-shot examples to demonstrate desired behavior, showing 2-3 examples of good rewrites per schema type.
+
+
+Query rewriting transforms natural language user inputs into search engine queries optimized for automated data extraction. After evaluating three approaches such as the schema-specific keyword injection, synonym expansion, and LLM-powered rewriting—we selected LLM rewriting using GPT-4o-mini based on its superior performance, strong semantic understanding, and reduced maintenance burden. 
+
+
+4.7 - Title Relevance
+After query rewriting optimizes our search terms and Serper returns 10 URLs, we face a critical resource allocation problem: Playwright can only scrape 3-5 URLs concurrently due to memory and timeout constraints. Choosing the wrong URLs wastes 6-10 seconds of scraping time and increases extraction failure rates. The ranking engine's job is to reorder Serper's results to prioritize URLs most likely to yield successful data extraction. We identified two categories of features that predict extraction success. These features were selected for their simplicity, computational efficiency, and availability directly from Serper's response without requiring additional API calls or expensive processing.
+
+
+Title relevance measures how well the page title matches the user's query intent. This feature operates on the assumption that pages whose titles contain query keywords are more likely to have relevant, extractable content about that topic. We compute title relevance using keyword overlap: count how many terms from the optimized query appear in the URL's title, normalized by the number of query terms to produce a score between 0 and 1. The normalization prevents bias toward long titles—a title matching 3 out of 4 query terms should score higher than one matching 3 out of 10 terms.
+
+
+Calculation Process:
+1. Extract keywords from the optimized query (after removing stop words like "the", "a", "in")
+2. Extract keywords from the page title (after removing stop words)
+3. Count exact and partial matches (case-insensitive)
+4. Compute overlap ratio: matches / total_query_keywords
+
+
+Here is a walkthrough of an example calculation. 
+  
+
+
+
+In the example above, the title contains "$89" (price indicator) and "Book Now" (availability language), so the final adjusted score becomes: 0.60 + 0.10 + 0.10 = 0.80 (but we cap it at 1.0 if bonuses push it over). This feature is valuable because it captures semantic alignment between what the user is looking for and what the page likely contains.
+
+
+Google's original ranking provides a valuable signal even if it's not optimized for extraction purposes. Search engines invest billions in ranking algorithms that surface relevant, authoritative pages. While Google optimizes for human browsing, there's substantial overlap with extraction needs as they both benefit from authoritative sources and on-topic content. We preserve position information but apply logarithmic decay since top-3 positions are significantly more valuable than positions 7-10. This reflects the well-documented reality that search result relevance drops sharply after the first few positions, but the rate of decline decreases as you move further down the list.
+
+
+Position Score Formula: score = 1.0 / log₂(position + 1)
+Position 1: 1.0 / log₂(2) = 1.0 / 1.0 = 1.00 (highest possible score)
+Position 2: 1.0 / log₂(3) = 1.0 / 1.58 = 0.63
+Position 3: 1.0 / log₂(4) = 1.0 / 2.0 = 0.50
+Position 5: 1.0 / log₂(6) = 1.0 / 2.58 = 0.39
+Position 10: 1.0 / log₂(11) = 1.0 / 3.46 = 0.29
+
+
+This logarithmic decay reflects diminishing returns. The difference between positions 1 and 2 (1.00 vs 0.63 = 0.37 gap) is much larger than the difference between positions 8 and 9 (0.33 vs 0.30 = 0.03 gap). This aligns with user behavior studies showing that most clicks concentrate in the top few results. Rather than completely discarding Google's ranking work, we incorporate it as a prior belief about URL quality. However, we weight it equally with title relevance (rather than dominant) because Google's ranking optimizes for different objectives than extraction success.
+
+
+We chose a weighted linear combination model for its simplicity and speed. The algorithm must execute in under 50ms to avoid becoming a bottleneck in the overall search pipeline (where Serper API calls already consume 1-2 seconds and LLM rewriting adds 400ms). Final Ranking Score Formula: score(url) = 0.5 × title_relevance + 0.5 × position_score. 
+
+
+The equal weighting (50/50) reflects a balanced approach: we trust Google's ranking judgment about as much as we trust our own title-based relevance assessment. Neither signal is perfect, but together they provide reasonable prediction of extraction success.
+
+
+4.8 - Standardized Output
+After ranking URLs, we need to transform Serper's response format into a standardized output schema that downstream systems can consume reliably. Serper returns JSON with nested structures like organic[].link, organic[].title, organic[].snippet but our Playwright controller, evidence storage, and monitoring dashboard each need different subsets of this data in different formats. The normalization layer applies several data cleaning transformations to ensure consistency and quality.
+
+
+  
+
+
+
+The first method is URL canonicalization which serves multiple purposes. First, it improves cache efficiency, two URLs differing only in tracking parameters should be treated as the same resource. Second, it protects user privacy by removing tracking identifiers that could leak search context. Third, it enables better deduplication since if the same hotel page appears twice with different tracking parameters, we recognize them as duplicates.
+  
+
+
+
+The second method is Site branding in titles is redundant since we already capture the domain separately in the domain field. HTML entities break downstream text processing if not decoded because they can interfere with keyword matching or display incorrectly in UIs. Title truncation prevents payload bloat and ensures consistent formatting.
+
+
+  
+
+
+
+Consistent domain extraction enables several downstream features. The domain field is used for grouping results by source, displayed in UIs to show result diversity, and could be used in future versions for domain-based filtering or domain trust scoring. Normalizing subdomains (m.booking.com and www.booking.com both become booking.com) ensures we treat mobile and desktop versions of the same site consistently. The normalization layer is implemented as a pure function: given Serper's response and ranking scores, produce the canonical output JSON. This stateless design enables easy testing and parallelization.
+
+
+The ranking engine and normalization layer work together to transform raw search results into prioritized, structured output optimized for extraction success. The ranking algorithm uses two equally-weighted features, title relevance (50%) measuring keyword overlap with bonuses and position score (50%) applying logarithmic decay to Google's organic ranking so that we can reorder URLs.
+
+
+4.9 - Finalized Outputs
+
+
+The build and prototype process for this search subsystem will follow an iterative, evidence-driven output designed to validate functionality early and refine quality over time. We begin by constructing a minimal end-to-end pipeline that moves a query through rewriting, ranking, and normalization so we can confirm the architectural flows behave as intended. This first baseline uses deliberately simple logic such as hard-coded rewrite rules and keyword-only ranking just to expose integration issues, test schema boundaries, and create a stable point of comparison for every improvement we introduce afterward. Alongside this baseline, we create a controlled benchmarking harness with a fixed set of representative search queries, giving us a repeatable evaluation environment we can re-run throughout the project.
+
+
+The final phase focuses on large-scale evaluation and qualitative validation. We run the system across hundreds of diverse queries to measure ranking stability, schema adherence, and rewrite accuracy at scale. Manual audits complement the quantitative results by catching subtler issues like contextual relevance or stylistic inconsistencies that automated metrics often overlook. This repeated build-test-refine loop ensures the architecture not only functions technically but also produces stable, accurate, and predictable outputs consistent with the overall goals of the search subsystem.
+
+
+
+
+
+
+
+
+
+
+
+
+5. Data Processing Module
+5.1 Purpose of the Module
+The Processing Module is the part of our system that takes all the information collected from different tools and turns it into one clean and organized format. The information that comes into the system can look very different depending on where it came from. Some data comes from the raw DOM of a webpage. Some data comes from the search tool. Other pieces come from the DOM understanding agent or from text inputs on a website. Because of this, the incoming information is often messy, inconsistent, or incomplete.
+The Processing Module solves this problem. It converts all of this noisy and mixed information into one unified representation that the rest of the system can understand. This step is very important because the modules that come after us depend on clean and structured information. The verification pipeline needs organized data in order to confirm if the system found the correct information. The logging module needs standardized fields so it can keep accurate records. The decision making agents rely on consistent formats so they can act confidently.
+My main responsibilities inside this module include four key tasks:
+Normalize extracted data
+This means taking text, attributes, and structures from different tools and cleaning them so everything follows one simple standard.
+Unify structure across tools
+Even if two tools return similar information, the structure might be different. The Processing Module makes sure that the final output has the same fields every time.
+Assign confidence scores
+Each piece of information gets a confidence score. This shows how reliable the information is. These scores are based on the quality of the data source and other factors.
+Prepare data for verification
+The cleaned and scored information is then prepared in a ready to use format so the verification pipeline can check it.
+At the end of this step, the information that leaves the Processing Module is clean, structured, scored, and ready for the next part of the system.
+5.2 Position Within Team Workflow
+The Processing Module sits in the middle of the entire team pipeline. It receives information from multiple upstream tools and prepares everything so that downstream components can use it without confusion.
+The module receives input from the following upstream sources:
+DOM Extraction created by Greg
+ This provides raw HTML structure and visible text chunks. It can include headings, XPaths, and surrounding context from the page.
+DOM Understanding Agent
+ This provides semantic understanding of webpage components. It marks elements like buttons, text fields, and headers and may also describe their purpose.
+Search Results prepared by Kush
+ These come from search engine outputs such as Google or Bing. They often contain titles, snippets, links, and ranking scores. The structure varies with each provider, so they must be normalized.
+Form Input Scraping Tools made by Aridsondez
+ These tools capture information from text fields or forms within a webpage. They may also detect labels, placeholder values, and any text provided by the user.
+After the Processing Module transforms and scores the data, the output is passed to downstream components:
+Logging Module maintained by Jordan
+ This module receives the final structured objects and records them along with tool status, confidence results, and supporting evidence for review.
+Verification Pipeline
+ This module checks whether the structured information is accurate, complete, and ready for use in the final agent action.
+  
+
+This figure reporesents the visual picture of where my module is situated at
+
+
+5.3 Upstream Data Sources and Challenges
+The Processing Data module receives information that has already been extracted and labeled by the earlier components in our system. The only input that enters this module is the processed and annotated DOM representation created by the DOM Extraction component and refined further by the DOM Understanding Agent. Even though this data has been partially cleaned and analyzed before reaching the Processing Data module, it still contains many inconsistencies that require structured processing. Because of this, an understanding of the characteristics and challenges of this incoming data is necessary to explain why the Processing Data module plays such an important role in the overall pipeline.
+5.3.1 Labeled and Processed DOM Data
+The primary input to this module is the processed DOM data. This data includes visible text segments that have been extracted from the webpage, the associated node identifiers, and the contextual labels added by the DOM Understanding Agent. These labels may describe what type of component each element represents such as a button, an input field, a header, or a content block. The processed DOM also contains structural information such as the location of each element inside the document and relational context that helps describe how elements are connected within the page. Although the data is processed, it still contains a number of challenges that must be corrected before the system can safely work with it.
+One major issue is that spacing inside the DOM is often inconsistent. Many websites include large amounts of formatting code that produces unnecessary or repeated whitespace. There may also be leftover fragments from scripts or hidden elements that the earlier modules extract along with the useful content. The DOM can include duplicated text blocks especially when the same piece of text appears in multiple responsive layout versions or template sections. Another problem comes from dynamic elements that update or reload during page rendering which can lead to incomplete or partially captured content. All of these issues must be addressed in the Processing Data module so that the final structured representation is consistent and predictable.
+5.3.2 Output from the DOM Understanding Agent
+The DOM Understanding Agent adds semantic insight to the extracted DOM by classifying elements into meaningful categories and making predictions about how each element is used. These classifications are extremely helpful for the system because they provide context that raw text alone cannot offer. However the output from the agent is probabilistic and therefore not always fully accurate. The predictions may occasionally assign uncertain or conflicting labels to an element. In some cases the agent may not have enough information to determine the intended role of a component which leads to missing or incomplete context. Overlapping or ambiguous interpretations are also common, especially for elements that serve multiple visual or functional purposes such as a header that also behaves like a navigation link. The Processing Data module must resolve these inconsistencies by standardizing and validating the semantic output before it can be used downstream.
+5.3.3 Summary of Input Challenges
+Although the Processing Data module only receives DOM based information, that input is far from uniform. Each tool that works on the DOM before it reaches this stage adds new structure to the data but also introduces new forms of variability. The DOM Extraction component produces text and nodes that follow the layout of the webpage, while the DOM Understanding Agent produces semantic labels that rely on learned patterns and may include uncertainty. These tools use different naming conventions, different confidence formats, and different metadata representations. As a result the incoming data is a mixture of many formats that do not line up with each other.
+Without the Processing Data module to normalize and unify these varied inputs, the pipelines later stages would have no reliable way to interpret or verify the extracted information. The downstream modules depend on a consistent schema and a predictable structure, and the Processing Data module provides that stability by converting all incoming DOM information into a single clean format. This makes the entire workflow more dependable and prevents errors that would otherwise occur due to mismatched structures or inconsistent metadata.
+5.4 Functional Requirements of the Processing Module
+5.4.1 Core Requirements
+The Processing Module converts raw HTML DOM into a structured form that can be used to answer questions. It begins by normalizing the DOM into Chunk objects that contain cleaned text, heading context, XPath information, and any available node identifiers. During this step, the module removes hidden elements, standardizes whitespace, extracts visible text from block level elements, and splits long text into manageable segments using sentence boundaries. After producing clean and consistent chunks, the module runs retrieval and question answering. The BM25 retriever ranks relevant chunks, and the QA model identifies the most likely answer within those chunks. Their scores are combined into a single confidence value. Finally, the module produces an AnswerResponse object that contains the extracted answer, a confidence score between zero and one, and source metadata such as XPath, node_id, and a text snippet. This allows the system to trace exactly where the answer came from. The module serves as the bridge between raw HTML and answer generation by producing structured, scored, and traceable outputs.
+5.4.2 Non Functional Requirements
+The module must be reliable and able to handle malformed HTML, empty DOMs, and cases where no meaningful match is found. It must degrade gracefully by falling back to empty answers rather than failing. It must also be scalable enough to process DOM inputs up to ten megabytes, supported by chunking long text and using a single shared QA model instance to avoid repeated loading. Interpretability is required, so every answer must include its XPath, node_id, and a text snippet to show the source of the information. Runtime efficiency is important, so BM25 retrieval is used for fast relevance scoring, the QA model is loaded only once, and chunking ensures that only relevant text is evaluated. These requirements ensure that the module runs smoothly, efficiently, and transparently within the overall pipeline.
+5.5 Confidence Scoring System
+5.5.1 Motivation for Confidence Scores
+Confidence scoring is needed because both BM25 retrieval and QA extraction are probabilistic and can produce uncertain results. Text quality, clarity, and structure affect how reliable an extracted answer is, and metadata such as XPath and heading context provide signals about how trustworthy a chunk is. The confidence score combines these signals into one value that represents how certain the system is about the answer, and it also allows the module to abstain when the confidence is too low.
+5.5.2 Components of the Confidence Score
+The confidence score is built from four parts. The retriever score is the normalized BM25 value that shows how relevant a chunk is to the question. The QA score is the model probability for the extracted answer. Span checks apply penalties to answers that are too short or too long. Multiple abstain thresholds are applied to catch weak matches early so the system does not produce unreliable answers. Each component adds a layer of safety and improves overall reliability.
+5.5.3 Final Scoring Formula
+confidence = 0.35 * retriever_score + 0.65 * qa_score
+confidence = max(0.0, min(1.0, confidence))  
+The module blends the retriever and QA scores using weighted addition and clamps the value between zero and one. A penalty is applied if the answer length is below two characters or above two hundred characters. If the final confidence falls below the configured abstain threshold, the system returns an empty answer with the computed confidence value. This formula keeps scoring simple, predictable, and consistent with the thresholds defined earlier.
+5.4.4 Example Scoring Walkthrough
+To illustrate how the confidence score is computed, consider an example where the retrieval step returns a BM25 score of 0.92, indicating a strong keyword match between the query and the retrieved chunk. The QA model then processes this chunk and produces a QA score of 0.78, which reflects the model’s confidence that it can extract a meaningful answer. Using the default weights of 0.35 for the retriever score and 0.65 for the QA score, the system computes the blended confidence as follows: (0.35 × 0.92) + (0.65 × 0.78) = 0.322 + 0.507 = 0.829. This result of 0.829 falls within the [0, 1] range and needs no clamping. The higher weight on the QA score means the model’s assessment has more influence, though the strong retriever match still contributes. In this example, the final confidence is 0.829, which exceeds the default abstain threshold of 0.5, so the system would return the answer with that confidence value.
+6. Log Result of Action 
+The Log Result of Action module is the final operational step within the Information Gathering (IG) subsystem. It is responsible for recording the outcomes of all IG tool executions, validating their success or failure, and packaging the results into a structured, machine-readable format for the Verification Agent. While other modules perform the physical or logical tasks of gathering and processing information, the Log Result of Action module ensures accountability, transparency, and traceability across every agent interaction.
+This module acts as the “record keeper” of the multi-agent architecture. Every click, input, extraction, or data transformation that occurs during a task is logged in a standardized format. The resulting log contains not only the final result of the action but also detailed evidence of how it was achieved. This evidence includes DOM snapshots, screenshots, metadata, timestamps, and confidence scores. The purpose of this design is to make every agentic decision reproducible and verifiable, creating a reliable bridge between the Execution Agent and the Verification Agent.
+In practical terms, this subsystem allows the entire architecture to be audited. It ensures that when the system claims to have found an email, submitted a form, or located a button, there is verifiable proof to support that claim. The Log Result of Action module represents the checkpoint between execution and validation, the point where computation transitions from “action performed” to “action confirmed.”
+6.1 System Role and Motivation
+The primary motivation behind developing the Log Result of Action module is to close the feedback loop between the agent’s behavior and its evaluation. Earlier modules, DOM Extraction, DOM Understanding, Processing Data, and Action Execution, focus on “what” and “how” actions are performed. However, without a reliable mechanism to document and verify each step, the system cannot improve its accuracy or detect points of failure.
+In an agentic pipeline where multiple subsystems execute asynchronously, a consistent logging process is crucial. When one tool’s output becomes another’s input, the lack of clear result records can cause cascading errors that are difficult to diagnose. The Log Result of Action module addresses this by serving as the single source of truth for all outcomes within the Information Gathering pipeline.
+From a system-level perspective, this module plays three key roles:
+1. Verification Support: It provides the Verification Agent with structured evidence to confirm whether each step succeeded or failed.
+2. Accountability and Debugging: It produces reproducible data that can be traced back to the original task and execution state, enabling error analysis and iterative improvement.
+3. Consistency and Schema Enforcement: It ensures that every IG tool follows the same output format, preventing data inconsistency between teams and subsystems.
+Without this module, the broader agentic architecture would operate in a “black box” manner, actions would occur, but their results would not be explicitly tied to evidence. The Information Gathering team’s goal is to ensure that every tool output can be validated independently of reasoning logic. The Log Result of Action module achieves this through schema standardization, structured metadata, and detailed contextual reporting.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+6.2 Design Goals 
+The design of this module was guided by several overarching goals:
+* Universality: It must handle outputs from any IG tool, regardless of whether the tool performs DOM extraction, form input, searching, or button interaction.
+* Evidence-first Design: Every log entry must include both machine-readable data and human-verifiable evidence such as screenshots or DOM fragments.
+* Structured Schema: Results must conform to a strict JSON schema validated through Pydantic models, ensuring type safety and interoperability.
+* Traceability: Each log must include unique identifiers that link it to specific execution steps, agents, and timestamps.
+* Error Transparency: Failed actions must be logged with detailed contextual information, not just failure codes. This enables better debugging and reasoning by upstream agents.
+* Performance Efficiency: The logging process must not slow down the real-time execution of browser actions or introduce unnecessary latency.
+By combining these requirements, the Log Result of Action module supports both functional and diagnostic purposes. It transforms unstructured raw data from tools into a form that can be stored, visualized, and compared across sessions.
+
+
+
+
+
+
+
+
+
+
+6.3 Technical Architecture
+The Log Result of Action module is built as an internal service that listens to outputs from the Information Gathering API Layer. It receives structured responses from modules such as Input Text, Identify/Click Button, and Processing Data. Each response includes basic information about the action performed, its raw output, and an immediate success flag.
+6.3.1. Core Components
+a. Result Listener
+ The Result Listener is a lightweight asynchronous service that receives the output payload from the previous tool in the pipeline. It acts as an entry point into the logging subsystem, parsing the incoming JSON and ensuring all mandatory fields are present before processing.
+b. Schema Validator
+ Using the Pydantic library, this component validates the structure and types of every log entry. Fields such as tool_name, status, timestamp, confidence_score, and evidence are mandatory. If any field fails validation, the log is sent to an error-handling queue for reprocessing.
+c. Metadata Enricher
+ The Metadata Enricher supplements each record with system-level data. This includes the task ID, agent name, session ID, and trace ID linking the result to a specific step in the orchestration plan. It also records execution latency and memory usage to support performance monitoring.
+d. Evidence Collector
+ This component retrieves supporting artifacts from the previous module, including DOM snapshots, screenshots, and any extracted values. The evidence is stored in a local directory with hashed filenames for security. The log then references these artifacts through file paths or encoded metadata links.
+e. Formatter and Dispatcher
+ The Formatter prepares the final log record for downstream transmission. It compresses large evidence payloads, normalizes field names, and encodes the complete result as a validated JSON object. The Dispatcher then sends the formatted result to both the Verification Agent and the system’s centralized log database.
+6.3.2. Schema Structure
+The Information Gathering team defined a standardized schema for all logs.
+{
+  "tool_name": "IdentifyClickButton",
+  "task_id": "uuid",
+  "trace_id": "uuid",
+  "status": "success",
+  "timestamp": "2025-10-29T13:05:00Z",
+  "confidence_score": 0.95,
+  "evidence": {
+    "screenshot_path": "evidence/uuid.png",
+    "dom_snapshot": "<html>...</html>"
+  },
+  "output": {
+    "data": {
+      "field_value": "example",
+      "confirmation_message": "Submitted successfully"
+    }
+  },
+  "metadata": {
+    "execution_time_ms": 152,
+    "memory_usage_mb": 8.4,
+    "agent": "IG"
+  }
+}
+
+
+This format ensures that every log entry contains both operational context and verifiable data.
+6.3.3. Storage and Transmission
+Logs are stored in a lightweight PostgreSQL database for structured querying, while evidence files remain in a secured local storage directory. The database schema mirrors the JSON model, allowing for direct queries on attributes such as tool_name, status, or timestamp.
+For inter-agent communication, the module uses an internal API endpoint (/ig/log) to send result summaries to the Verification Agent. This communication is asynchronous, using event-driven callbacks rather than blocking requests.
+
+
+6.4 Evidence Management and Security
+The Log Result of Action module deals with sensitive data, screenshots, DOM structures, and user session traces. To protect privacy and integrity, all evidence is stored locally with encryption at rest. Access is restricted by agent identity. Each file name is generated using a hash of the task ID and timestamp to prevent direct user inference.
+Additionally, evidence is versioned. When a single action is retried or re-executed, a new version of the evidence is created with incremental numbering (for example, evidence_1.html, evidence_2.html). This allows the Verification Agent to compare multiple attempts and determine whether the retry led to improvement or degradation in results.
+All stored evidence expires after a defined retention period (typically one week in development environments), preventing storage overflow.
+
+
+
+
+6.5 Communication and Synchronization
+The Log Result of Action module operates in close coordination with both the Execution and Verification Agents. The communication is event-based, using WebSocket messages to push updates in real time.
+Each log event includes a trace_id shared with the Execution Agent’s original command. This allows the Verification Agent to join records across different system layers. The synchronization process ensures that for every action the Execution Agent performs, there is exactly one corresponding result log and one verification response.
+If a mismatch occurs, such as a missing verification response, the system flags the trace as incomplete. These incomplete traces are highlighted in the development dashboard for debugging.
+6.6 Testing and Validation
+The testing process for the Log Result of Action module focuses on correctness, schema compliance, and reliability under load. The team uses a combination of unit tests, integration tests, and stress tests to validate behavior across various scenarios.
+* Unit Tests: Validate individual functions such as schema validation, timestamp generation, and evidence linking.
+* Integration Tests: Simulate complete workflows from IG tools through the logging layer to the Verification Agent. These tests ensure the entire pipeline remains consistent.
+* Stress Tests: Evaluate system performance by generating hundreds of simultaneous log entries. The goal is to verify that the module maintains throughput without exceeding latency thresholds.
+
+Each log entry is checked against its corresponding evidence to confirm that the file paths are valid and the JSON structure matches expectations. Continuous Integration (CI) pipelines automatically re-run these test suites after every major change to maintain stability.
+Log Result of Action: Metrics and Performance Monitoring
+To evaluate long-term performance, the team tracks several key metrics:
+Metric
+	Description
+	Target
+	Log Throughput
+	Number of entries processed per second
+	> 50 entries/sec
+	Schema Compliance Rate
+	Percentage of logs that pass validation
+	100%
+	Evidence Link Validity
+	Percentage of logs with valid file references
+	99%+
+	Average Log Latency
+	Time between tool completion and log confirmation
+	< 150 ms
+	Storage Utilization
+	Disk usage growth rate
+	< 1 GB/week
+	
+
+6.7 Tools and Libraries
+The Log Result of Action module is implemented in Python 3.11, using the following libraries:
+   * Pydantic: For schema enforcement and validation.
+   * Playwright: For interacting with browser data and screenshot capture (through upstream tools).
+   * Asyncio: For non-blocking event handling during high-volume logging.
+   * FastAPI: For serving the /ig/log endpoint and enabling asynchronous API communication.
+   * PostgreSQL: For structured log storage and querying.
+   * Python Logging / Rich: For formatted console output and colorized developer debugging.
+
+Together, these tools allow the module to process, store, and deliver structured results efficiently while maintaining compatibility with the rest of the IG architecture.
+
+
+6.8 Timeline
+Week Range
+	Milestone Description / Deliverable
+	Weeks 1–2
+	Defined initial schema using Pydantic; designed JSON model for tool logs.
+	Weeks 3–4
+	Implemented basic listener and formatter components.
+	Weeks 5–6
+	Added metadata enrichment and evidence collection capabilities.
+	Weeks 7–8
+	Integrated with Processing Data and Action Execution tools for end-to-end flow.
+	Week 9
+	Implemented local storage and database persistence.
+	Week 10
+	Conducted validation and stress testing; established CI pipeline.
+	Week 11–12
+	Finalized communication with Verification Agent via API.
+	Week 13–14
+	Documented architecture, test results, and updated evidence lifecycle design.
+	Week 15
+	Delivered working demonstration integrated with the complete agent flow.
+	
+
+6.9 Architectural Benefits
+
+
+
+
+The inclusion of a dedicated logging subsystem provides several significant benefits to the multi-agent framework:
+      1. Transparency: Every action is paired with verifiable evidence, reducing ambiguity in validation and debugging.
+      2. Scalability: The same logging architecture supports multiple concurrent tasks without interference.
+      3. Standardization: A single schema ensures all teams use consistent data formats.
+      4. Accountability: Each agent’s contribution can be independently verified, preventing untraceable failures.
+      5. Auditability: Sponsors and developers can replay completed tasks using stored evidence.
+
+
+
+
+6.10 Future Work and Integration
+In future development cycles, the team plans to expand the Log Result of Action subsystem with additional capabilities:
+      1. Real-Time Dashboard Integration: Display ongoing agent actions and their statuses in a live interface for debugging and sponsor demos.
+      2. Automated Error Categorization: Use rule-based tagging to automatically classify failures into categories such as “network,” “selector mismatch,” or “timeout.”
+      3. Adaptive Confidence Scoring: Dynamically adjust confidence values based on historical success rates of similar tools or actions.
+      4. Long-Term Data Analytics: Aggregate logs to analyze recurring errors and measure improvement over time.
+      5. Cross-Agent Replay: Allow full task replay using recorded logs and evidence for end-to-end validation.
+The long-term vision is for the logging layer to become a central observability platform for the entire Interactive Browser Agent ecosystem. Rather than being a passive recorder, it will evolve into an intelligent feedback component that actively contributes to improving reliability and reasoning accuracy across all agents.
+References
+Rajput, A. (2025). DOM-Tree1. geeksforgeeks. Retrieved November 19, 2025, from https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.geeksforgeeks.org%2Fjavascript%2Fdom-document-object-model%2F&psig=AOvVaw2SyaakHZwWbZgULnIqCqyv&ust=1763676181067000&source=images&cd=vfe&opi=89978449&ved=0CBYQjRxqFwoTCOirwfWb_5ADFQAAAAAdAAAAABAE.
