@@ -41,7 +41,7 @@ htmlcov/
 .hypothesis/
 
 # Local test files
-test_*.py
+
 tests/
 debug_*.py
 
