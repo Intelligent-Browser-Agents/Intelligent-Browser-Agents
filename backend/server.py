@@ -29,6 +29,7 @@ import secrets
 
 """
 To-DO List:
+-Create Verify Email endpoint, using app.get and token sent as query param
 """
 
 
