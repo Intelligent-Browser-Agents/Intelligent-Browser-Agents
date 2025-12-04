@@ -9,6 +9,8 @@ import pyautogui
 from playwright.async_api import async_playwright
 import random
 from pathlib import Path
+# from agentic-tools import * # for tools for the agent to call for future implementation
+
 
 # ensures each letter is typed at random intervals
 async def type_in_random_intervals(message):

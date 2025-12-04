@@ -1,7 +1,7 @@
 # Edwin Villanueva
-#-------------------------------------------------------------------------#@
+#-------------------------------------------------------------------------#
 # This program acts as a starting point for retrieving DOM from a website #
-#-------------------------------------------------------------------------#@
+#-------------------------------------------------------------------------#
 
 import asyncio
 import json
@@ -25,7 +25,7 @@ async def extract_dom(url: str, save_as: str, output_dir = "DOM_output", ):
         html_content = await page.content()
 
         # this is long as shit, but proof if you wanna see the DOM for yourself...      
-        # print(f"=======================DOM content======================\n{html_content}")
+        print(f"=======================DOM content======================\n{html_content}")
 
         # TODO: feed 'html_content' to openai or whatever we use to decide which actions to take from there
     
