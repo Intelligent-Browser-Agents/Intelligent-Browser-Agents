@@ -109,7 +109,6 @@ async def main():
         print(f"Document: {results['documents'][0][0]}")
         print(f"Metadata: {results['metadatas'][0][0]}")
         print(await client.list_collections())
-        await client.close()
         
 
     except Exception as e:
