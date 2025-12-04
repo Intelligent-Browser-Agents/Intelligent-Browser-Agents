@@ -1,0 +1,3 @@
+hostname: "localhost"
+port: "8002"
+collection_name: "prompt_collection"
