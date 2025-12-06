@@ -82,35 +82,33 @@ Now generate the steps for the provided goal.
 
 # prompts the agent to choose the best tools from the tools_to_call list based on all information provided
 current_step_prompt = """
-You are the Action Selection Agent for an intelligent web browser agent.
+You are the Action Selection Agent for an intelligent web browser.
 
-Inputs you receive:
-- The user's original request.
-- The clarified main goal.
-- The high-level plan for achieving the goal.
-- A compressed accessibility-based DOM snapshot of the CURRENT page.
-- A list of available browser tools (click, type, search, scroll, etc.).
+You MUST output ONE JSON object with the following fields:
 
-Your job:
-- Decide the SINGLE next action the agent should take.
-- The action must be realistic based on the DOM you see.
-- If the next step from the plan is not yet possible, determine the action required to move toward it.
-- If needed, extract information from the page.
-
-Output format (JSON ONLY):
 {
-  "action": "<click | type | navigate | scroll | press_key | wait>",
-  "target": "<human-readable element name OR url OR text to type>",
-  "reasoning": "<one short sentence explaining why>"
+  "action": "<click | type | navigate | search | scroll | press_key | wait>",
+  "role": "<ARIA role to target, or null>",
+  "name": "<Accessible name or text to target, or null>",
+  "target": "<Used ONLY for navigate() or type() or search() text>",
+  "done": <true | false>,
+  "reasoning": "<one concise sentence>"
 }
 
+Semantics:
+- "done": false  → this step is NOT finished, more actions are needed.
+- "done": true   → this step is complete; no more actions for this step are needed.
+
 Rules:
-- Only describe ONE action and its target.
-- Base your choice on what is actually present in the DOM.
-- Do NOT hallucinate elements that do not appear.
+- For CLICK actions: use ("role", "name") to describe the exact DOM element to click.
+- For TYPE or NAVIGATE or SEARCH: use "target" instead of name/role.
+- Base your choice ONLY on elements that appear in the DOM snapshot.
+- Do NOT hallucinate selectors.
 - Keep reasoning short and factual.
+- If the current high-level step already appears satisfied based on the DOM, you may set "done": true and choose a no-op action like "wait".
 
 Begin.
+
 """
 
 # list of tools and functions this agent is able to perform on the web browser (by name, not functionality)
@@ -161,11 +159,7 @@ def parse_numbered_steps(text):
 
 # === execute action function ===
 # executes action that model decided on
-async def execute_action(page, action, target):
-    """
-    Executes the LLM-selected action using Playwright.
-    More actions will be developed in future versions of Intelligent Browser Agents
-    """
+async def execute_action(page, action, role, name, target):
 
     # 1. NAVIGATE
     if action == "navigate":
@@ -174,19 +168,32 @@ async def execute_action(page, action, target):
 
     # 2. CLICK
     if action == "click":
-        # We search for an element by ROLE or NAME
-        try:
-            await page.get_by_role("button", name=target).click(timeout=3000)
-            return
-        except:
-            pass
-        try:
-            await page.get_by_role("link", name=target).click(timeout=3000)
-            return
-        except:
-            pass
 
-        print(f"[!] Could not click target: {target}")
+        # Preferred: explicit role + name
+        if role and name:
+            try:
+                await page.get_by_role(role, name=name).click(timeout=3000)
+                return
+            except:
+                print(f"[!] Failed role+name click, trying fallback...")
+
+        # Try role alone
+        if role:
+            try:
+                await page.get_by_role(role).click(timeout=3000)
+                return
+            except:
+                pass
+
+        # Try name alone (visible text)
+        if name:
+            try:
+                await page.get_by_text(name).click(timeout=3000)
+                return
+            except:
+                pass
+
+        print(f"[!] Could not click element: role={role}, name={name}")
         return
 
     # 3. TYPE
@@ -196,7 +203,6 @@ async def execute_action(page, action, target):
 
     # 4. SEARCH
     if action == "search":
-        # Focus the primary search box if available
         try:
             search_box = page.get_by_role("combobox", name="Search")
             await search_box.click()
@@ -204,7 +210,6 @@ async def execute_action(page, action, target):
             await page.keyboard.press("Enter")
             return
         except:
-            # fallback: type in whatever is focused
             await page.keyboard.type(target)
             await page.keyboard.press("Enter")
             return
@@ -212,10 +217,8 @@ async def execute_action(page, action, target):
     # 5. SCROLL
     if action == "scroll":
         direction = target.lower()
-        if direction == "down":
-            await page.mouse.wheel(0, 800)
-        else:
-            await page.mouse.wheel(0, -800)
+        delta = 800 if direction == "down" else -800
+        await page.mouse.wheel(0, delta)
         return
 
     # 6. PRESS_KEY
@@ -229,7 +232,6 @@ async def execute_action(page, action, target):
         return
 
     print(f"[!] Unknown action: {action}")
-
 
 
 # === generate llm input function ===
@@ -252,7 +254,7 @@ async def main():
     user_input = input("What would you like out of this browsing session?\nYour input: ")
 
     # initialize site to start from. the site which will change over time as we continue to navigate the internet
-    web_url = "https://google.com"
+    web_url = "https://google.com" # this will be referred to as "page.url" from now on
     
     # generate the main goal of the session based on the user's initial input 
     main_goal = client.responses.create(
@@ -301,7 +303,7 @@ async def main():
             compressed_dom = await page.accessibility.snapshot(root=None, interesting_only=True)
             compressed_dom_str = json.dumps(compressed_dom, indent=2)
             # print(compressed_dom)
-            print(f"Compressed DOM recieved from {web_url}!")
+            print(f"Compressed DOM recieved from {page.url}!")
 
             # based on the current page we are on, generate a list of actions (in order from first to last) that will bring us to the next step of completion
             # todo: come up with a list of actions to take to complete this current step
@@ -309,34 +311,45 @@ async def main():
             # once compressed DOM is recieved, feed it to LLM and ask it, based on the user's initial query, what the next steps are going to be?
             current_step = client.responses.create(
                 model = "o4-mini-2025-04-16",
-                input = [
+                input=[
                     {"role": "system", "content": current_step_prompt},
                     {"role": "system", "content": tools_to_call},
                     {"role": "system", "content": f"MAIN GOAL: {main_goal.output_text}"},
                     {"role": "system", "content": f"PLAN: {step}"},
                     {"role": "system", "content": f"DOM: {compressed_dom_str}"},
-                    {"role": "user",   "content": user_input}
+                    {"role": "user",     "content": user_input}
                 ]
             )
 
             # Parse JSON
             try:
                 action_data = json.loads(current_step.output_text)
+                
             except:
                 print("[!] LLM output is not valid JSON")
                 print(current_step.output_text)
                 continue
 
             action = action_data.get("action")
-            target = action_data.get("target")
+            role   = action_data.get("role")
+            name   = action_data.get("name")
+            target = action_data.get("target")   # text or URL for type/navigate
             reasoning = action_data.get("reasoning")
+            done = action_data.get("done", False)
+
+            # Normalize role to lowercase (Playwright requirement)
+            if role:
+                role = role.lower()
 
             print(f"[*] TOOL: {action}")
+            print(f"[*] ROLE: {role}")
+            print(f"[*] NAME: {name}")
             print(f"[*] TARGET: {target}")
+            print(f"[*] DONE?: {done}")
             print(f"[*] REASONING: {reasoning}")
 
             # EXECUTE THE ACTION
-            await execute_action(page, action, target)
+            await execute_action(page, action, role, name, target)
 
             # optional: small wait to let the page update
             await asyncio.sleep(2)
