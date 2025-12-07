@@ -1,3 +1,6 @@
+back/*
+backend/__pycache__
+backend/.env
 # stuff the program makes currently
 output/
 chrome_profile/
@@ -19,3 +22,6 @@ chrome_profile/
 
 # DOM Output
 DOM_output/
+
+back/*
+backend/__pycache__
