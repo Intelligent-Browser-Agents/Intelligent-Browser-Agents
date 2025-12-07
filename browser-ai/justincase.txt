@@ -1,0 +1,160 @@
+/* Whole Page Layout */
+.dashboard-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+
+  display: flex;
+  flex-direction: row;
+
+  margin: 0;
+  padding: 0;
+
+  background-color: #89a0af;
+  overflow: hidden;
+}
+
+/* Sidebar on the LEFT — flush against the edge */
+.dashboard-sidebar {
+  position: absolute;   /* <-- FORCES it to the left */
+  top: 0;
+  left: 0;
+
+  width: 260px;
+  height: 100vh;
+
+  background-color: #ffffff;
+  padding: 30px 20px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+
+  box-shadow: 4px 0 15px rgba(0,0,0,0.15);
+  z-index: 10;
+}
+.dashboard-title {
+  font-size: 32px;
+  margin-bottom: 20px;
+  color: #3A5275;
+}
+
+/* Sidebar buttons */
+.sidebar-btn {
+  background-color: #3A5275;
+  color: #fff;
+  border: none;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: 0.2s ease;
+}
+
+.sidebar-btn:hover {
+  transform: scale(1.02);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+}
+
+/* Main content area */
+.dashboard-main {
+  flex: 1;
+  padding: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: white;
+}
+
+/* Input bar at bottom */
+.dashboard-input-bar {
+  position: absolute;
+  bottom: 25px;
+  left: 300px;
+  right: 40px;
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  background-color: white;
+  border-radius: 14px;
+  box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+}
+
+.dashboard-input {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  border: 2px solid #3A5275;
+  font-size: 16px;
+}
+
+.dashboard-input-btn {
+  background-color: #3A5275;
+  color: white;
+  border: none;
+  padding: 12px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dashboard-input:focus {
+  outline: 2px solid #3A5275;
+  background-color: #e4e6eb;
+}
+
+/* Buttons in the input bar */
+.dashboard-bar-btn {
+  background: none;
+  border: none;
+  font-size: 26px;
+  margin-left: 14px;
+  cursor: pointer;
+  color: #3A5275;
+  transition: 0.2s ease;
+}
+
+.dashboard-bar-btn:hover {
+  transform: scale(1.1);
+}
+
+/* Fade-in animation (same as login) */
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+
+
+import React from "react";
+import "./Dashboard.css";
+
+export default function Dashboard() {
+  return (
+    <div className="dashboard-container">
+      
+      {/* LEFT SIDEBAR */}
+      <aside className="dashboard-sidebar">
+        <h1 className="dashboard-title">Browser AI</h1>
+
+        <button className="sidebar-btn">＋ New Browse</button>
+        <button className="sidebar-btn">⚙️ Settings</button>
+        <button className="sidebar-btn">👤 User Credentials</button>
+        <button className="sidebar-btn">↪ Logout</button>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <main className="dashboard-main">
+        <h2>Welcome Guest</h2>
+      </main>
+
+      {/* INPUT BAR */}
+      <div className="dashboard-input-bar">
+        <input className="dashboard-input" placeholder="Start browsing..." />
+        <button className="dashboard-input-btn">＋</button>
+        <button className="dashboard-input-btn">🎤</button>
+      </div>
+    </div>
+  );
+}
