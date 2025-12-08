@@ -1,6 +1,6 @@
 # Intelligent Browser Agents
 
-*A Senior Design Project — University of Central Florida*
+*Senior Design Project — University of Central Florida*
 
 
 Overview
