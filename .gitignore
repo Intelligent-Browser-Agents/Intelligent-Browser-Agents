@@ -1,0 +1,27 @@
+back/*
+backend/__pycache__
+backend/.env
+# stuff the program makes currently
+output/
+chrome_profile/
+
+# dotenv
+.env
+
+# virtual environments
+env/
+.venv/
+venv/
+
+# IDE stuff
+.vscode/
+.idea/
+
+# chrome profile 
+chrome_profile/
+
+# DOM Output
+DOM_output/
+
+back/*
+backend/__pycache__
