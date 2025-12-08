@@ -31,5 +31,6 @@ Developers (Information Gathering)
 - Aridsondez Jerome, CS
 - Vignesh Sundararajan, CS
 
+Sponsored by Dr. Liqiang Wang and Dr. Zihang Zou
 
 **This README will expand as development becomes more stable.**
