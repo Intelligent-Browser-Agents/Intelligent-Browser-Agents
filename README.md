@@ -5,10 +5,10 @@ SD2 Tasks:
 User Query → Query Optimization → API Call → Ranking → Normalization → Output
 
 
-Query Optimization → Transforms raw user queries into search-optimized versions
-API Call → Serper.dev (DONE)
-Ranking → Reorders the 10 URLs to prioritize best extraction targets using Title Relevance and Position Score
-Normalization → Cleans and standardizes data for downstream agents
+- Query Optimization → Transforms raw user queries into search-optimized versions
+- API Call → Serper.dev (DONE)
+- Ranking → Reorders the 10 URLs to prioritize best extraction targets using Title Relevance and Position Score
+- Normalization → Cleans and standardizes data for downstream agents
 
 
 Output to be sent to other agents.
