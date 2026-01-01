@@ -302,7 +302,7 @@ async def main():
             # print("Getting DOM elements from current page...")
             compressed_dom = await page.accessibility.snapshot(root=None, interesting_only=True)
             compressed_dom_str = json.dumps(compressed_dom, indent=2)
-            # print(compressed_dom)
+            print(compressed_dom)
             print(f"Compressed DOM recieved from {page.url}!")
 
             # based on the current page we are on, generate a list of actions (in order from first to last) that will bring us to the next step of completion
