@@ -1,160 +1,332 @@
-/* Whole Page Layout */
-.dashboard-container {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
-
-  display: flex;
-  flex-direction: row;
-
-  margin: 0;
-  padding: 0;
-
-  background-color: #89a0af;
-  overflow: hidden;
-}
-
-/* Sidebar on the LEFT — flush against the edge */
-.dashboard-sidebar {
-  position: absolute;   /* <-- FORCES it to the left */
-  top: 0;
-  left: 0;
-
-  width: 260px;
-  height: 100vh;
-
-  background-color: #ffffff;
-  padding: 30px 20px;
-
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-
-  box-shadow: 4px 0 15px rgba(0,0,0,0.15);
-  z-index: 10;
-}
-.dashboard-title {
-  font-size: 32px;
-  margin-bottom: 20px;
-  color: #3A5275;
-}
-
-/* Sidebar buttons */
-.sidebar-btn {
-  background-color: #3A5275;
-  color: #fff;
-  border: none;
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 16px;
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
-  transition: 0.2s ease;
-}
-
-.sidebar-btn:hover {
-  transform: scale(1.02);
-  box-shadow: 0 3px 10px rgba(0,0,0,0.25);
-}
-
-/* Main content area */
-.dashboard-main {
-  flex: 1;
-  padding: 60px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  color: white;
-}
-
-/* Input bar at bottom */
-.dashboard-input-bar {
-  position: absolute;
-  bottom: 25px;
-  left: 300px;
-  right: 40px;
-  display: flex;
-  gap: 10px;
-  padding: 10px;
-  background-color: white;
-  border-radius: 14px;
-  box-shadow: 0 5px 20px rgba(0,0,0,0.2);
-}
-
-.dashboard-input {
-  flex: 1;
-  padding: 12px;
-  border-radius: 8px;
-  border: 2px solid #3A5275;
-  font-size: 16px;
-}
-
-.dashboard-input-btn {
-  background-color: #3A5275;
-  color: white;
-  border: none;
-  padding: 12px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.dashboard-input:focus {
-  outline: 2px solid #3A5275;
-  background-color: #e4e6eb;
-}
-
-/* Buttons in the input bar */
-.dashboard-bar-btn {
-  background: none;
-  border: none;
-  font-size: 26px;
-  margin-left: 14px;
-  cursor: pointer;
-  color: #3A5275;
-  transition: 0.2s ease;
-}
-
-.dashboard-bar-btn:hover {
-  transform: scale(1.1);
-}
-
-/* Fade-in animation (same as login) */
-@keyframes fadeIn {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-
-
-import React from "react";
+import React, { useState, useRef, useEffect } from "react";
 import "./Dashboard.css";
 
 export default function Dashboard() {
+  const [input, setInput] = useState("");
+
+  const [showSettings, setShowSettings] = useState(false); // ⬅ NEW STATE
+
+  const [conversations, setConversations] = useState([
+    { id: crypto.randomUUID(), title: "Browse 1", messages: [] }
+  ]);
+
+  const [activeChatId, setActiveChatId] = useState(conversations[0].id);
+
+  const bottomRef = useRef(null);
+  const chatListRef = useRef(null);
+
+  const activeChat = conversations.find((c) => c.id === activeChatId);
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+
+    setConversations((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChatId
+          ? {
+              ...chat,
+              messages: [...chat.messages, { text: input, isUser: true }],
+              title:
+                chat.messages.length === 0
+                  ? input.slice(0, 20) || "New Chat"
+                  : chat.title,
+            }
+          : chat
+      )
+    );
+
+    setInput("");
+  };
+
+  const handleNewChat = () => {
+    const newChat = {
+      id: crypto.randomUUID(),
+      title: `Browse ${conversations.length + 1}`,
+      messages: [{ text: "New chat started.", isUser: false }]
+    };
+
+    setConversations((prev) => [...prev, newChat]);
+    setActiveChatId(newChat.id);
+
+    setTimeout(() => {
+      chatListRef.current?.scrollTo({
+        top: chatListRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }, 50);
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === "Enter") handleSend();
+  };
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeChat.messages]);
+
   return (
     <div className="dashboard-container">
       
-      {/* LEFT SIDEBAR */}
+      {/* Sidebar */}
       <aside className="dashboard-sidebar">
         <h1 className="dashboard-title">Browser AI</h1>
 
-        <button className="sidebar-btn">＋ New Browse</button>
-        <button className="sidebar-btn">⚙️ Settings</button>
+        <button className="sidebar-btn" onClick={handleNewChat}>
+          ＋ New Browse
+        </button>
+        
+        {/* Open modal when clicked */}
+        <button className="sidebar-btn" onClick={() => setShowSettings(true)}>
+          ⚙️ Settings
+        </button>
+
         <button className="sidebar-btn">👤 User Credentials</button>
         <button className="sidebar-btn">↪ Logout</button>
+
+        <div className="chat-list" ref={chatListRef}>
+          {conversations.map((chat) => (
+            <div
+              key={chat.id}
+              className={`chat-item ${
+                chat.id === activeChatId ? "active-chat" : ""
+              }`}
+              onClick={() => setActiveChatId(chat.id)}
+            >
+              {chat.title}
+            </div>
+          ))}
+        </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
+      {/* Main Chat Window */}
       <main className="dashboard-main">
-        <h2>Welcome Guest</h2>
+        {activeChat.messages.length === 0 && (
+          <h2 className="welcome-text">Welcome Guest</h2>
+        )}
+
+        {activeChat.messages.map((msg, index) => (
+          <div key={index} className={msg.isUser ? "chat-user" : "chat-system"}>
+            {msg.text}
+          </div>
+        ))}
+        <div ref={bottomRef}></div>
       </main>
 
-      {/* INPUT BAR */}
+      {/* Input Bar */}
       <div className="dashboard-input-bar">
-        <input className="dashboard-input" placeholder="Start browsing..." />
-        <button className="dashboard-input-btn">＋</button>
-        <button className="dashboard-input-btn">🎤</button>
+        <input
+          className="dashboard-input"
+          placeholder="Start browsing..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyPress}
+        />
+        <button className="dashboard-bar-btn" onClick={handleSend}>➤</button>
       </div>
+
+      {/* ---------- SETTINGS MODAL ---------- */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={() => setShowSettings(false)}>✖</button>
+            <h2>Settings</h2>
+
+            <label>Agent’s Prompt</label>
+            <textarea placeholder="Type here..." />
+
+            <button className="save-btn">Save</button>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+
+
+/* PAGE LAYOUT */
+.dashboard-container {
+position: relative;
+width: 100vw;
+height: 100vh;
+display: flex;
+background-color: #89a0af;
+overflow: hidden;
+font-family: "Inter", sans-serif;
+}
+.dashboard-content {
+margin-left: 250px;
+padding: 20px;
+display: flex;
+flex-direction: column;
+height: 100vh;
+}
+/* SIDEBAR */
+.dashboard-sidebar {
+position: fixed;
+top: 0;
+left: 0;
+width: 260px;
+height: 100vh;
+background-color: #ffffff;
+padding: 30px 20px;
+box-shadow: 4px 0 15px rgba(0,0,0,0.15);
+z-index: 20;
+display: flex;
+flex-direction: column;
+gap: 15px;
+}
+.dashboard-title {
+font-size: 30px;
+font-weight: 700;
+color: #3A5275;
+margin-bottom: 15px;
+}
+.welcome-text {
+  max-width: 800px;
+
+  
+  position: absolute;
+  top: 5%;          
+  left: calc(260px + 42%);
+  transform: translate(-50%, -50%);
+
+  text-align: center;
+  font-size: 42px;
+  font-weight: 800;
+  color: white;
+  text-shadow: 0px 5px 15px rgba(0,0,0,0.25);
+  pointer-events: none; 
+}
+/* SIDEBAR BUTTONS */
+.sidebar-btn {
+background-color: #3A5275;
+color: #ffffff;
+border: none;
+padding: 12px;
+border-radius: 8px;
+font-size: 16px;
+cursor: pointer;
+width: 100%;
+transition: 0.2s;
+text-align: left;
+}
+.sidebar-btn:hover {
+transform: scale(1.03);
+box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+}
+/* MAIN CHAT AREA */
+.dashboard-main {
+  position: absolute;
+  top: 0;
+  left: 260px;
+  right: 0;
+  bottom: 120px; /* match space for input bar */
+  
+  padding: 30px;
+  overflow-y: auto;
+
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+.chat-system, .chat-user {
+max-width: 70%;
+padding: 14px 18px;
+border-radius: 16px;
+font-size: 17px;
+line-height: 1.5;
+width: fit-content;
+word-wrap: break-word;
+animation: fadeIn 0.3s ease-out;
+}
+/* System bubble (left) */
+.chat-system {
+background: white;
+color: #2c2c2c;
+margin-right: auto;
+border-bottom-left-radius: 4px;
+box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+/* User bubble (right) */
+.chat-user {
+background: #3A5275;
+color: white;
+margin-left: auto;
+border-bottom-right-radius: 4px;
+box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+/* INPUT BAR */
+.dashboard-input-bar {
+position: fixed;
+bottom: 30px;
+left: 290px;
+width: calc(100vw - 360px);
+background: #1e1e1e;
+border: 1px solid rgba(255,255,255,0.12);
+border-radius: 20px;
+display: flex;
+align-items: center;
+padding: 12px 16px;
+box-shadow: 0px 4px 18px rgba(0,0,0,0.25);
+transition: border-color 0.25s ease;
+z-index: 10;
+}
+.dashboard-input-bar:focus-within {
+border-color: #3A5275;
+}
+/* Input text field */
+.dashboard-input {
+flex: 1;
+font-size: 16px;
+color: white;
+background: transparent;
+border: none;
+outline: none;
+padding: 8px;
+font-family: "Inter", sans-serif;
+}
+.dashboard-input::placeholder {
+color: #888;
+}
+/* Send button */
+.dashboard-bar-btn {
+background: none;
+border: none;
+font-size: 22px;
+cursor: pointer;
+color: #c7c7c7;
+padding: 6px 10px;
+border-radius: 8px;
+transition: 0.18s ease;
+}
+.dashboard-bar-btn:hover {
+background: rgba(255,255,255,0.1);
+transform: scale(1.1);
+}
+/* SMOOTH MESSAGE FADE IN */
+@keyframes fadeIn {
+from {
+opacity: 0;
+transform: translateY(10px);
+}
+to {
+opacity: 1;
+transform: translateY(0);
+}
+}
+/* SCROLLBAR STYLING */
+.dashboard-main::-webkit-scrollbar {
+width: 8px;
+}
+.dashboard-main::-webkit-scrollbar-track {
+background: transparent;
+}
+.dashboard-main::-webkit-scrollbar-thumb {
+background: rgba(255,255,255,0.3);
+border-radius: 4px;
+}
+.dashboard-main::-webkit-scrollbar-thumb:hover {
+background: rgba(255,255,255,0.5);
 }

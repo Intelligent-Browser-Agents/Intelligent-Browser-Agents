@@ -165,9 +165,9 @@
 */
 .dashboard-input-bar {
   position: fixed;
-  bottom: 30px; /* distance from bottom of viewport */
-  left: 320px;  /* slightly inside the sidebar (sidebar is 260px + padding) */
-  width: calc(100vw - 380px); /* leaves room on right for spacing */
+  bottom: 30px; 
+  left: 320px;  
+  width: calc(100vw - 380px); 
   background: #1e1e1e;
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 20px;
@@ -264,9 +264,6 @@
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
-/* ===========================
-   Modal Overlay Background
-=========================== */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -280,9 +277,6 @@
   z-index: 999; /* HIGHER THAN EVERYTHING ELSE */
 }
 
-/* ===========================
-   Modal Window Box
-=========================== */
 .modal-content {
   background: #3A5275;
   width: 65%;
