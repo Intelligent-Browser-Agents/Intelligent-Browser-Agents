@@ -1,7 +1,12 @@
-fastapi==0.121.2
+chromadb==1.4.1
+fastapi==0.128.0
+openai==2.15.0
+playwright==1.55.0
 psycopg2==2.9.11
+pyautogui==0.9.54
 PyJWT==2.10.1
-PyJWT==2.10.1
+pytest==9.0.2
 python-dotenv==1.2.1
 python_bcrypt==0.3.2
+pywhatkit==5.4
 PyYAML==6.0.3
