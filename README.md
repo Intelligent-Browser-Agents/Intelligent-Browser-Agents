@@ -4,11 +4,23 @@ Kush Havinal
 SD2 Tasks:
 User Query → Query Optimization → API Call → Ranking → Normalization → Output
 
+TO DO:
+- Query Optimization:
+    //1. Using LLM agent to optimize the query for better search results
+    //2. Iterate w/ diffrent system prompts to improve search relevance
 
-- Query Optimization → Transforms raw user queries into search-optimized versions
+
 - API Call → Serper.dev (DONE)
-- Ranking → Reorders the 10 URLs to prioritize best extraction targets using Title Relevance and Position Score
-- Normalization → Cleans and standardizes data for downstream agents
+
+- Ranking:
+    //1. Title relevance
+    //2. Google SEO ranking w/ logarithmic decay
+    //Final Ranking = 0.50(title relevance) + 0.50(Google SEO ranking)
+
+
+- Normalization:
+    //1. URL canonicalization
+    //2. Title truncation
 
 
 Output to be sent to other agents.

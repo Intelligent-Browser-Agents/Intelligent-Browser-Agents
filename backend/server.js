@@ -18,10 +18,14 @@ app.post('/api/search', async (req, res) => {
     console.log('Received search request:', req.body);
     
     const { q } = req.body;
+
+    // Query optimization:
+    // 1. Using LLM agent to optimize the query for better search results
+    // 2. Iterate w/ diffrent system prompts to improve search relevance
     
     if (!q) {
         return res.status(400).json({ 
-            error: true, 
+            error:  true, 
             message: 'Query parameter required' 
         });
     }
@@ -37,6 +41,18 @@ app.post('/api/search', async (req, res) => {
         });
 
         const data = await response.json();
+
+        // Ranking:
+        // 1. Title relevance
+        // 2. Google SEO ranking w/ logarithmic decay
+        // Final Ranking = 0.50(title relevance) + 0.50(Google SEO ranking)
+
+
+
+        // Normalization:
+        // 1. URL canonicalization 
+        // 2. Title truncation
+
         
         if (!response.ok) {
             throw new Error(`Serper API error: ${response.statusText}`);
