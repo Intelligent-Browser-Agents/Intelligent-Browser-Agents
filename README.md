@@ -5,7 +5,7 @@ SD2 Tasks:
 User Query → Query Optimization → API Call → Ranking → Normalization → Output
 
 TO DO:
-- Query Optimization:
+- Query Optimization (DONE)
     //1. Using LLM agent to optimize the query for better search results
     //2. Iterate w/ diffrent system prompts to improve search relevance
 
