@@ -16,6 +16,10 @@ import json
 load_dotenv()
 client = OpenAI()
 
+#
+#
+#* PROMPTING
+#! ===== PROMPTING START =====
 system_prompt = """
 You are a web browsing agent. You will recieve input from a user who would like to perform an action on the internet. 
 Listen to the user's input and based on their request, generate a response that you think reflects the best next step within the web browser using available tools.
@@ -138,7 +142,11 @@ Available browser tools:
 
 The agent may only choose from these tools.
 """
-
+#! ===== PROMPTING END =====
+#
+#
+#* SUPPORT FUNCTIONS
+#! ===== SUPPORT FUNCTIONS START =====
 # === type in random intervals function ===
 # ensures each letter is typed at random intervals
 async def type_in_random_intervals(message):
@@ -232,8 +240,11 @@ async def execute_action(page, action, role, name, target):
         return
 
     print(f"[!] Unknown action: {action}")
-
-
+#! ===== SUPPORT FUNCTIONS END =====
+#
+#
+#* ORCHESTRATION SUPPORT
+#! ===== ORCHESTRATION SUPPORT START =====
 # === generate llm input function ===
 # generates response to the current page and state through OpenAI's gpt o4 mini model API
 def generate_llm_input(current_page):
@@ -244,12 +255,18 @@ def generate_llm_input(current_page):
     
     print(response.output_text)
     return response.output_text
-
+#! ===== ORCHESTRATION SUPPORT END =====
+#
+#
+#
 
 # === (driver) main function ===
 # asks the user for initial input
 async def main():
-
+    #
+    #
+    #* ORCHESTRATION
+    #! ===== ORCHESTRATION START =====    
     # take initial user input and send it to the model
     user_input = input("What would you like out of this browsing session?\nYour input: ")
 
@@ -278,7 +295,10 @@ async def main():
             {"role": "user", "content": main_goal.output_text},
         ]
     )
-
+    #! ===== ORCHESTRATION END =====
+    #
+    #
+    #
 
     # start browser off at Google.com
     async with async_playwright() as p:
@@ -290,8 +310,10 @@ async def main():
         steps_list = parse_numbered_steps(llm_steps.output_text)
         print("Parsed steps: ", steps_list)
 
-        #! == step performing loop ==
-
+        #
+        #
+        #* EXECUTION
+        #! ===== EXECUTION START =====
         i = 0   # step index
         for step in steps_list:
 
@@ -356,6 +378,19 @@ async def main():
             print()
 
             i += 1
+            #! ===== EXECUTION END =====
+    #
+    #
+    #* VERIFICATION
+    #! ===== VERIFICATION START =====
+    #todo: insert verification code here...
+    #! ===== VERIFICATION END =====
+    #
+    #
+    #* FALLBACK
+    #! ===== FALLBACK START =====
+    #todo: insert fallback code here...
+    #! ===== FALLBACK END =====
 
 if __name__ == "__main__": 
     asyncio.run(main())
