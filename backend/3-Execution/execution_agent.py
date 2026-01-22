@@ -147,6 +147,3 @@ response = client.responses.create(
 # TEST PRINT 
 print(response.output_text)
 
-
-
-
