@@ -94,7 +94,7 @@ def user_exists(username: str, email: str) -> bool:
 
 def user_exists_id(userId: int) -> bool:
     query = 'SELECT * FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId)))
+    cur.execute(query, (str(userId),))
     results = cur.fetchone()
     return results is not None
 
@@ -146,7 +146,7 @@ async def get_user(request: Request):
         return {'error' : error}
     
     query = 'SELECT * FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId)))
+    cur.execute(query, (str(userId),))
     results = cur.fetchone()
     
     if results is not None:
@@ -220,7 +220,7 @@ async def delete_user(request: Request):
     
     # Deleting the user
     query = 'DELETE FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId)))
+    cur.execute(query, (str(userId),))
     
     return {'error': error}
 
@@ -284,7 +284,7 @@ async def update_user(request: Request):
         pass_updated = True
     
     query = 'SELECT * FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId)))
+    cur.execute(query, (str(userId),))
     results = cur.fetchone()
     if results is not None:
         user_id, username, firstname, lastname, email, _, _, _, _ = results
@@ -387,4 +387,3 @@ async def forgot_password(request: Request):
 """
 Placeholder for Agent API Endpoints
 """
-
