@@ -1,9 +1,8 @@
-# === Execution agent - Edwin Villanueva ===
+# Where Edwin would put the code for the execution agent. Can either rely on tools in utilities, or define a separate folder for tools.# === Execution agent - Edwin Villanueva ===
 
 # === imports ===
 import mock_orchestration # replace this with the real orchestration agent
 import IG_DOM_Extraction  # replace with real dom extraction agent 
-# from google import genai
 from ollama import chat, ChatResponse
 from dotenv import load_dotenv
 # ===============
@@ -13,64 +12,47 @@ load_dotenv()
 
 
 
-# step 1: Recieve Input from Orchestration Agent - 
+#! step 1: Recieve Input from Orchestration Agent - 
 # take input from the orchestration agent
 # -----------------------------------------------
 orchestration_output = mock_orchestration.main() # rewrite so that output is useful
 
-# step 2: Tool Selection - 
+#! step 2: Tool Selection - 
 # based on input from orchestration agent, 
 # first, request DOM elements from IG team. Then, select tools to use
 # -----------------------------------------------
 
-# extract DOM elements
-DOM_elements = IG_DOM_Extraction.main() # rewirte for valid test output
 
 # select tools to call
 # TODO: [ ] Make tool list for API to refer to
 IG_TOOLS = [
+
+    # DOM EXTRACTION
     {
-        "name": "SearchOrchestrator",
-        "category": "discovery",
-        "description": "Searches the web to identify the most relevant target URL",
-        "used_when": "Target URL is unknown or ambiguous",
-        "outputs": ["ranked_urls"]
-    },
-    {
-        "name": "DOMExtraction",
+        "name": "dom_extraction",
         "category": "extraction",
-        "description": "Loads a webpage and retrieves raw DOM and page metadata",
+        "description": "Extract all data from a webpage to develop a plan for executing the user's prompt.",
         "used_when": "Page needs to be analyzed or refreshed",
-        "outputs": ["dom_snapshot", "page_metadata"]
+        "outputs": ["function_metadata", "filtered_DOM_tree", "raw_DOM_tree", "page_screenshot", "errors"]
     },
+    
+    # LINKS SEARCHER
     {
-        "name": "DOMUnderstandingAgent",
-        "category": "understanding",
-        "description": "Analyzes DOM to identify semantic elements (buttons, forms, inputs)",
-        "used_when": "Need to locate interactive or meaningful elements",
-        "outputs": ["interactive_elements", "form_fields"]
+        "name": "links_searcher",
+        "category": "discovery",
+        "description": "Take the user query, use serper.dev to get relevant links for the other tools to search the web, rank urls, and normalize output.",
+        "used_when": "Searching for relevant pages to move into.",
+        "outputs": ["results"] # 5+ relevant websites (ranked)
     },
-    {
-        "name": "IdentifyClickButton",
-        "category": "action",
-        "description": "Clicks a specific interactive DOM element",
-        "used_when": "Navigation or submission is required",
-        "outputs": ["post_action_url"]
+
+    # DATA PROCESSING TOOL
+        {
+        "name": "data_processing_tool",
+        "category": "processing",
+        "description": "Evaluate browser agent task execution by comparing agent action summaries against the original prompt to determine task success and quality.",
+        "used_when": "",
+        "outputs": ["Task level confidence score"]
     },
-    {
-        "name": "InputText",
-        "category": "action",
-        "description": "Types text into a form field",
-        "used_when": "Form fields require user input",
-        "outputs": ["field_confirmation"]
-    },
-    {
-        "name": "DataProcessingModule",
-        "category": "verification",
-        "description": "Extracts and validates answers from the page",
-        "used_when": "Need to confirm task completion",
-        "outputs": ["answer"]
-    }
 ]
 
 # register the tools
@@ -78,6 +60,10 @@ tool_registry_text = "\n".join(
     f"- {tool['name']} ({tool['category']}: {tool['description']})"
     for tool in IG_TOOLS
 )
+
+
+#! step 3: extract DOM elements
+DOM_elements = IG_DOM_Extraction.main() # rewirte for valid test output
 
 #!==========================================ATTENTION===============================================!#
 #!                                                                                                  !#
