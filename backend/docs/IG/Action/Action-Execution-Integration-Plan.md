@@ -3,18 +3,26 @@
 ## Scope Clarification
 
 **What Action Execution Does:**
-- Receives plan step from orchestration (e.g., "Search for Nike shoes")
-- Receives DOM snapshot from Information Gathering
-- Translates plan step into specific browser action (e.g., `search("Nike shoes")`)
-- Executes action via Playwright
-- Reports result to Data Processing Tool for validation
+- Provides a **tool** that BI team's orchestration calls
+- Receives ExecutionInput (plan step + DOM snapshot) from BI orchestration
+- Translates plan step into specific browser action (e.g., "Search for Nike shoes" → `search("Nike shoes")`)
+- Executes action via Playwright on browser managed by BI team
+- Returns ExecutionOutput with result
 
 **What Action Execution Does NOT Do:**
-- Does NOT create multi-step plans (orchestration's job)
-- Does NOT decide what the next step should be (orchestration's job)
-- Does NOT retry or implement fallback strategies (fallback agent's job)
+- Does NOT manage the browser (BI team provides Page instance)
+- Does NOT call DOM extraction (BI team provides DOM snapshot)
+- Does NOT call Data Processing Tool (BI team handles verification)
+- Does NOT create multi-step plans (BI orchestration's job)
+- Does NOT decide next steps (BI orchestration's job)
+- Does NOT retry or implement fallback strategies (handled upstream)
 
-**LLM Usage Note**: LLM is used ONLY to translate a high-level step like "Search for Python" into a specific action like `{"action": "search", "text": "Python"}` with proper DOM element targeting. It does NOT generate plans.
+**LLM Usage Note**: LLM is used ONLY to translate a high-level step like "Search for Nike shoes" into a specific action like `{"action": "search", "text": "Nike shoes"}` with proper DOM element targeting. It does NOT generate plans.
+
+**Integration Model**:
+```
+BI Orchestration → execute_step(ExecutionInput, Page) → ExecutionOutput
+```
 
 ---
 
@@ -22,16 +30,18 @@
 ```
 backend/
 ├── execution/
-│   ├── __init__.py
-│   ├── models.py           # Data models
+│   ├── __init__.py         # Module exports
+│   ├── models.py           # Data models (ExecutionInput/Output, Action)
 │   ├── handlers.py         # Playwright action handlers
 │   ├── dispatcher.py       # Action routing
 │   ├── translator.py       # LLM step → action translator
-│   └── reporter.py         # Report to Data Processing Tool
+│   └── executor.py         # Main entry point
 └── tests/execution/
-    ├── test_handlers.py
-    ├── test_dispatcher.py
-    └── test_integration.py
+    ├── conftest.py         # Test fixtures
+    ├── test_handlers.py    # Handler unit tests
+    ├── test_dispatcher.py  # Dispatcher unit tests
+    ├── test_translator.py  # Translator unit tests
+    └── test_integration.py # End-to-end integration tests
 ```
 
 ---
@@ -66,14 +76,14 @@ class Action(BaseModel):
     args: ActionArgs
 
 class ExecutionInput(BaseModel):
-    """Input from orchestration agent"""
+    """Input from BI orchestration agent"""
     plan_step: str              # e.g., "Search for Nike shoes"
-    dom_snapshot: dict          # From IG DOM extraction
+    dom_snapshot: dict          # From IG DOM extraction (provided by BI)
     url: str
     main_goal: str              # Context only
 
 class ExecutionOutput(BaseModel):
-    """Output to Data Processing Tool"""
+    """Output returned to BI orchestration"""
     action: str
     args: dict
     status: Literal["success", "failure"]
@@ -83,6 +93,8 @@ class ExecutionOutput(BaseModel):
 ```
 
 **Tests**: Model validation
+
+**Status**: ✅ Completed
 
 ---
 
@@ -183,6 +195,8 @@ async def handle_wait(page: Page, seconds: float) -> ExecutionOutput:
 
 **Tests**: Mock Playwright page, test each handler with success/failure cases
 
+**Status**: ✅ Completed
+
 ---
 
 ## PR #3: Action Dispatcher
@@ -229,6 +243,8 @@ async def dispatch_action(page: Page, action: Action) -> ExecutionOutput:
 ```
 
 **Tests**: Verify correct routing, handle unknown actions
+
+**Status**: ✅ Completed
 
 ---
 
@@ -387,209 +403,92 @@ async def execute_step(
         )
 ```
 
-**Tests**: E2E with mock LLM and real Playwright browser
+**Tests**: Integration tests with mock LLM and real Playwright browser
 
 ---
 
-## PR #6: Data Processing Tool Reporter
+## PR #6: Integration Tests
 
-**Core Logic**: Report execution results to IG Data Processing Tool
+**Core Logic**: Test the complete execute_step() flow end-to-end
 
 **Files**:
 ```
-+ backend/execution/reporter.py
-+ backend/tests/execution/test_reporter.py
++ backend/tests/execution/test_integration.py
 ```
 
 **Implementation**:
 ```python
-# backend/execution/reporter.py
-from .models import ExecutionOutput
+# backend/tests/execution/test_integration.py
+import pytest
+from backend.execution import execute_step, ExecutionInput
+from backend.execution.translator import ActionTranslator
 
-class DataProcessingReporter:
-    """Report execution results to Data Processing Tool"""
-
-    async def report_execution(
-        self,
-        result: ExecutionOutput,
-        original_prompt: str,
-        action_summary: str
-    ) -> dict:
-        """
-        Send execution result to Data Processing Tool.
-
-        Args:
-            result: Execution output
-            original_prompt: User's original task request
-            action_summary: Summary of actions taken
-
-        Returns:
-            Data Processing Tool response with:
-            - task_level_confidence_score
-            - identified_failure_points
-            - proposed_corrective_fix
-        """
-
-        # Format for Data Processing Tool
-        report = {
-            "agent_execution_summary": {
-                "action": result.action,
-                "args": result.args,
-                "status": result.status,
-                "error_type": result.error_type,
-                "message": result.message,
-                "execution_time_ms": result.execution_time_ms
-            },
-            "original_user_prompt": original_prompt,
-            "action_summary": action_summary
-        }
-
-        # TODO: Replace with actual IG Data Processing Tool API call
-        # For now, return mock response
-        response = await self._call_data_processing_tool(report)
-
-        return response
-
-    async def _call_data_processing_tool(self, report: dict) -> dict:
-        """Call IG Data Processing Tool API"""
-        # Integration with IG team's Data Processing Tool
-        # Replace with actual API call
-        pass
-```
-
-**Tests**: Mock Data Processing Tool API
-
----
-
-## PR #7: Orchestration Interface
-
-**Core Logic**: Receive plan steps from orchestration agent
-
-**Files**:
-```
-+ backend/execution/orchestration_interface.py
-+ backend/tests/execution/test_orchestration_interface.py
-```
-
-**Implementation**:
-```python
-# backend/execution/orchestration_interface.py
-from .models import ExecutionInput
-
-class OrchestrationInterface:
-    """Interface to receive plan steps from orchestration agent"""
-
-    def parse_orchestration_output(self, orchestrator_data: dict) -> ExecutionInput:
-        """
-        Convert orchestration agent output to ExecutionInput.
-
-        Orchestration provides:
-        - main_goal: Overall task goal
-        - current_step: Single step to execute
-        - dom_snapshot: From IG DOM extraction
-        - url: Current page URL
-        """
-        return ExecutionInput(
-            main_goal=orchestrator_data["main_goal"],
-            plan_step=orchestrator_data["current_step"],
-            dom_snapshot=orchestrator_data["dom_snapshot"],
-            url=orchestrator_data["url"]
-        )
-```
-
-**Tests**: Parse various orchestrator output formats
-
----
-
-## PR #8: DOM Extraction Interface
-
-**Core Logic**: Get DOM snapshots from IG DOM Extraction tool
-
-**Files**:
-```
-+ backend/execution/dom_interface.py
-+ backend/tests/execution/test_dom_interface.py
-```
-
-**Implementation**:
-```python
-# backend/execution/dom_interface.py
-from typing import Dict, Any
-
-class DOMInterface:
-    """Interface to IG DOM Extraction tool"""
-
-    async def get_dom_snapshot(self, page) -> Dict[str, Any]:
-        """
-        Request DOM snapshot from IG DOM Extraction tool.
-
-        Returns:
-            {
-                "function_metadata": {...},
-                "filtered_DOM_tree": {...},
-                "raw_DOM_tree": {...},
-                "page_screenshot": "base64...",
-                "errors": [...]
-            }
-        """
-        # TODO: Replace with actual IG DOM Extraction API call
-        # For now, use Playwright accessibility tree as fallback
-        snapshot = await page.accessibility.snapshot(
-            root=None,
-            interesting_only=True
-        )
-        return snapshot
-```
-
-**Tests**: Mock IG DOM Extraction API
-
----
-
-## PR #9: End-to-End Integration
-
-**Core Logic**: Test full pipeline with all components
-
-**Files**:
-```
-+ backend/tests/integration/test_full_pipeline.py
-```
-
-**Test Flow**:
-```python
-# Test: Google search flow
-async def test_google_search_flow():
-    # 1. Setup
-    browser = await playwright.chromium.launch()
-    page = await browser.new_page()
+@pytest.mark.asyncio
+async def test_google_search_integration(page):
+    """Test complete flow: translate → dispatch → execute"""
+    # Setup
     await page.goto("https://google.com")
+    dom_snapshot = await page.accessibility.snapshot()
 
-    # 2. Mock orchestration input
-    orchestrator_data = {
-        "main_goal": "Find Python tutorials",
-        "current_step": "Search for 'Python programming'",
-        "dom_snapshot": await dom_interface.get_dom_snapshot(page),
-        "url": page.url
-    }
-
-    # 3. Execute
-    input_data = orchestration_interface.parse_orchestration_output(orchestrator_data)
-    result = await execute_step(input_data, page, translator)
-
-    # 4. Report to Data Processing Tool
-    dp_response = await reporter.report_execution(
-        result=result,
-        original_prompt="Find Python tutorials",
-        action_summary="Searched for 'Python programming' on Google"
+    # Create input
+    input_data = ExecutionInput(
+        plan_step="Search for 'Python programming'",
+        dom_snapshot=dom_snapshot,
+        url=page.url,
+        main_goal="Find Python tutorials"
     )
 
-    # 5. Assert
+    # Create translator
+    translator = ActionTranslator(api_key="test-key", model="gpt-4o-mini")
+
+    # Execute
+    result = await execute_step(input_data, page, translator)
+
+    # Verify
     assert result.status == "success"
     assert result.action == "search"
-    assert dp_response["task_level_confidence_score"] > 0.8
+    assert "Python programming" in result.message
+
+@pytest.mark.asyncio
+async def test_navigate_and_click_integration(page):
+    """Test sequential actions work correctly"""
+    # Navigate
+    input1 = ExecutionInput(
+        plan_step="Go to example.com",
+        dom_snapshot={},
+        url="",
+        main_goal="Test navigation"
+    )
+    result1 = await execute_step(input1, page, translator)
+    assert result1.status == "success"
+
+    # Click
+    dom_snapshot = await page.accessibility.snapshot()
+    input2 = ExecutionInput(
+        plan_step="Click the 'More information' link",
+        dom_snapshot=dom_snapshot,
+        url=page.url,
+        main_goal="Test clicking"
+    )
+    result2 = await execute_step(input2, page, translator)
+    assert result2.action == "click"
+
+@pytest.mark.asyncio
+async def test_error_handling_integration(page):
+    """Test error handling in complete flow"""
+    input_data = ExecutionInput(
+        plan_step="Click a button that doesn't exist",
+        dom_snapshot={},
+        url="data:text/html,<div>No buttons</div>",
+        main_goal="Test error handling"
+    )
+
+    result = await execute_step(input_data, page, translator)
+    assert result.status == "failure"
+    assert result.error_type in ["element_not_found", "ambiguous_step"]
 ```
 
-**Tests**: Complete user flows, error scenarios, integration validation
-
+**Tests**: Full flow with real browser, mock LLM responses
 
 ---
 
@@ -597,29 +496,51 @@ async def test_google_search_flow():
 
 | Component | Owner | Interface |
 |-----------|-------|-----------|
-| **Orchestration Agent** | Browser Interaction | Sends plan steps → Action Execution |
-| **DOM Extraction** | Information Gathering | Provides DOM snapshots → Action Execution |
-| **Data Processing Tool** | Information Gathering | Receives execution results ← Action Execution |
-| **Playwright Browser** | Shared | Managed by Action Execution |
+| **BI Orchestration** | Browser Interaction | Calls `execute_step(ExecutionInput, Page)` → Action Execution |
+| **DOM Extraction** | Information Gathering | Provides DOM snapshots → BI Orchestration → Action Execution |
+| **Data Processing Tool** | Information Gathering | Receives ExecutionOutput ← BI Orchestration |
+| **Playwright Browser** | Browser Interaction | BI manages browser, provides Page instance to Action Execution |
+
+**Key Point**: Action Execution is a **tool** called by BI's orchestration. It does not directly interface with IG's DOM Extraction or Data Processing Tool.
 
 ---
 
 ## Definition of Done (Each PR)
 
+- [x] **PR-1**: Data Models ✅ Completed
+- [x] **PR-2**: Action Handlers ✅ Completed
+- [x] **PR-3**: Action Dispatcher ✅ Completed
+- [ ] **PR-4**: LLM Action Translator (In Progress)
+- [ ] **PR-5**: Main Entry Point
+- [ ] **PR-6**: Integration Tests
+
+**Per-PR Checklist**:
 - [ ] Core logic implemented
 - [ ] Unit tests passing (90%+ coverage)
 - [ ] Integration tests passing (if applicable)
 - [ ] Code reviewed by 1+ team member
+- [ ] Documentation updated
 - [ ] PR merged to main
 
 ---
 
 ## Notes
 
-**Scope Reminder**: Action Execution is a pure executor. It does NOT:
-- Create plans (orchestration does this)
-- Decide next steps (orchestration does this)
-- Retry failures (fallback agent does this)
-- Validate task completion (verification agent does this)
+**Scope Reminder**: Action Execution provides a **tool** for BI's orchestration. It does NOT:
+- Manage the browser (BI provides Page instance)
+- Call DOM extraction (BI provides DOM snapshot)
+- Call Data Processing Tool (BI handles verification)
+- Create multi-step plans (BI orchestration does this)
+- Decide next steps (BI orchestration does this)
+- Retry failures (handled by BI orchestration or fallback agents)
 
 **LLM Clarification**: LLM is used ONLY to translate high-level plan steps into specific actions with DOM element targeting. It is NOT used for planning or strategy.
+
+**API Surface**: The tool exports a single function:
+```python
+async def execute_step(
+    input_data: ExecutionInput,
+    page: Page,
+    translator: ActionTranslator
+) -> ExecutionOutput
+```

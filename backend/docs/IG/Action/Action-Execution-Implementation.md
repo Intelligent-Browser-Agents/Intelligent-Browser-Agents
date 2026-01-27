@@ -1,45 +1,52 @@
 # Action Execution: Technical Implementation
 
+## Scope Clarification
+
+**What Action Execution Does:**
+- Provides a tool that receives plan steps from BI's orchestration system
+- Translates high-level plan steps into specific browser actions
+- Executes actions via Playwright
+- Returns structured execution results
+
+**What Action Execution Does NOT Do:**
+- Does NOT manage the browser (BI team provides the Page instance)
+- Does NOT call DOM extraction (BI team provides DOM snapshot)
+- Does NOT call Data Processing Tool (BI team handles verification)
+- Does NOT orchestrate multi-step plans (BI team's orchestration handles this)
+
+**Integration Model:**
+BI team's orchestration → calls `execute_step()` → returns `ExecutionOutput`
+
 ## Technology Stack
 
 ### Core Technologies
 - **Python 3.13**: Runtime environment
 - **Playwright 1.55.0**: Browser automation framework
-- **OpenAI API / Ollama**: LLM inference for tool selection
+- **OpenAI API / Ollama**: LLM inference for plan step translation
 - **AsyncIO**: Asynchronous execution model
 - **Pydantic 2.12.0**: Data validation and schema enforcement
 
 ### Supporting Libraries
-- **PyAutoGUI 0.9.54**: Fallback input simulation
 - **python-dotenv**: Environment variable management
-- **httpx**: Async HTTP client for API calls
+- **pytest**: Testing framework
+- **pytest-asyncio**: Async test support
 
 ## Architecture
-
 
 ### Execution Flow
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  1. Receive Inputs                              │
-│     • Plan step from orchestrator               │
-│     • DOM snapshot from extraction              │
-│     • Current URL and context                   │
+│  1. Receive Inputs from BI Orchestration        │
+│     • ExecutionInput with plan_step             │
+│     • DOM snapshot (from IG team)               │
+│     • Page instance (managed by BI)             │
 └───────────────────┬─────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────────┐
-│  2. Build LLM Prompt                            │
-│     • Inject execution prompt template          │
-│     • Include main goal (context)               │
-│     • Include current plan step                 │
-│     • Include DOM snapshot (JSON)               │
-│     • Include tool registry                     │
-└───────────────────┬─────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────┐
-│  3. LLM Tool Selection                          │
+│  2. Translate Plan Step → Action (LLM)          │
+│     • Build prompt with DOM context             │
 │     • Model: gpt-4o-mini or Ollama              │
 │     • Output: JSON action specification         │
 │     • Validation: Pydantic schema               │
@@ -47,89 +54,89 @@
                     │
                     ▼
 ┌─────────────────────────────────────────────────┐
-│  4. Parse Action                                │
-│     • Extract action type                       │
-│     • Extract arguments                         │
-│     • Normalize role names (lowercase)          │
-│     • Validate required fields                  │
+│  3. Dispatch Action to Handler                  │
+│     • Route based on action type                │
+│     • Pass to appropriate handler               │
 └───────────────────┬─────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────────┐
-│  5. Execute Browser Action                      │
-│     • Route to action handler                   │
+│  4. Execute Browser Action                      │
 │     • Execute via Playwright API                │
-│     • Capture execution errors                  │
+│     • Measure execution time                    │
+│     • Capture any errors                        │
 └───────────────────┬─────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────────┐
-│  6. Return Structured Result                    │
+│  5. Return ExecutionOutput to BI                │
 │     • Status: success or failure                │
 │     • Error type classification                 │
-│     • Message description                       │
+│     • Execution timing                          │
+│     • Human-readable message                    │
 └─────────────────────────────────────────────────┘
 ```
 
 ## Implementation Details
 
-### 1. Main Execution Function
+### 1. Main Entry Point Function
 
-**File**: `backend/3-Execution/execution_agent.py`
+**File**: `backend/execution/executor.py`
 
 **Signature**:
 ```python
 async def execute_step(
-    plan_step: str,
-    dom_snapshot: dict,
-    url: str,
-    main_goal: str,
-    page: playwright.async_api.Page
-) -> dict:
+    input_data: ExecutionInput,
+    page: playwright.async_api.Page,
+    translator: ActionTranslator
+) -> ExecutionOutput:
     """
     Execute a single plan step using browser automation.
 
+    This is the main entry point called by BI team's orchestration.
+
     Args:
-        plan_step: High-level step description from orchestrator
-        dom_snapshot: Accessibility tree of current page
-        url: Current page URL
-        main_goal: Overall task objective (context)
-        page: Playwright page instance
+        input_data: ExecutionInput containing:
+            - plan_step: High-level step from orchestrator
+            - dom_snapshot: DOM from IG team
+            - url: Current page URL
+            - main_goal: Overall task objective (context)
+        page: Playwright page instance (managed by BI team)
+        translator: ActionTranslator instance (with LLM client)
 
     Returns:
-        Structured execution result with status and metadata
+        ExecutionOutput with execution result and metadata
     """
 ```
 
 **Implementation**:
 ```python
-async def execute_step(plan_step, dom_snapshot, url, main_goal, page):
-    # Build LLM prompt
-    prompt = build_execution_prompt(
-        plan_step=plan_step,
-        dom_snapshot=dom_snapshot,
-        url=url,
-        main_goal=main_goal
-    )
+async def execute_step(input_data, page, translator):
+    """Execute one plan step."""
+    try:
+        # Step 1: Translate high-level step to specific action (using LLM)
+        action = await translator.translate(
+            plan_step=input_data.plan_step,
+            dom_snapshot=input_data.dom_snapshot,
+            url=input_data.url,
+            main_goal=input_data.main_goal
+        )
 
-    # Get action from LLM
-    response = await llm_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": EXECUTION_PROMPT_TEMPLATE},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"}
-    )
+        # Step 2: Dispatch action to handler and execute
+        result = await dispatch_action(page, action)
 
-    # Parse and validate
-    action_data = json.loads(response.choices[0].message.content)
-    action = Action(**action_data)  # Pydantic validation
+        return result
 
-    # Execute action
-    result = await execute_action(page, action)
-
-    return result
+    except Exception as e:
+        # Handle unexpected errors
+        return ExecutionOutput(
+            action="unknown",
+            args={},
+            status="failure",
+            error_type="unknown",
+            message=f"Execution failed: {str(e)}",
+            execution_time_ms=0
+        )
 ```
 
 ### 2. Action Handlers
