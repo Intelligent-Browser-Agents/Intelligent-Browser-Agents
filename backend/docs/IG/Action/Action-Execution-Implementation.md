@@ -16,19 +16,6 @@
 
 ## Architecture
 
-### Component Structure
-
-```
-backend/
-├── 3-Execution/
-│   ├── execution_agent.py          # Main execution logic
-│   ├── mock_orchestration.py       # Orchestration interface (stub)
-│   └── IG_DOM_Extraction.py        # DOM extraction interface (stub)
-└── Prototype/
-    ├── agentic-browser.py          # End-to-end integration
-    └── agents/
-        └── executor.py              # Executor agent implementation
-```
 
 ### Execution Flow
 
