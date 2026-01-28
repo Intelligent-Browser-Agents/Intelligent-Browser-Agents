@@ -1,90 +1,207 @@
+"""
+Schema definitions for all agents.
+These Pydantic models define the structured output format for each agent,
+aligned with the prompts in the prompts/ directory.
+"""
+
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 
 
-
-
-# This is preliminary schema for the agents. We will consider a dynamic approach to loading prompts based on the website context.
-
-# Note that all prompts are placeholders. 
-
-
+# =============================================================================
 # ORCHESTRATION LAYER
+# Aligned with: prompts/orchestration.prompt.md
+# =============================================================================
 
 class OrchestratorPlan(BaseModel):
-    """The schema for the primary reasoning node."""
-    chain_of_thought: str = Field(
-        description="Detailed analysis of the current page state, DOM elements, and progress toward the user goal."
+    """
+    Schema for the Orchestration Agent's plan output.
+    Converts user requests into ordered high-level subtasks.
+    """
+    needs_clarification: bool = Field(
+        description="True if essential information is missing and clarification is needed before planning."
     )
-    high_level_goal: str = Field(
-        description="The current objective (e.g., 'Navigate to the checkout page')."
+    clarifying_questions: List[str] = Field(
+        default_factory=list,
+        description="1-3 targeted questions to ask if clarification is needed. Empty if needs_clarification is false."
     )
-    next_task_for_executor: str = Field(
-        description="Discrete instruction for Execution agent (e.g., 'Click the red button with ID cart-01')."
+    goal: str = Field(
+        description="One-sentence clarified browsing goal based on the user's request."
     )
-    is_mission_complete: bool = Field(
-        description="True only if the user's ultimate request is finished."
+    steps: List[str] = Field(
+        default_factory=list,
+        description="Ordered list of 3-8 high-level steps to achieve the goal. Empty if needs_clarification is true."
     )
 
+
+# =============================================================================
 # EXECUTION LAYER
+# Aligned with: prompts/execution.prompt.md
+# =============================================================================
 
-class BrowserAction(BaseModel):
-    """The schema to turn intent into browser commands."""
-    action_type: Literal["click", "type", "scroll", "wait", "navigate"] = Field(
-        description="The low-level browser operation to perform."
+class ExecutionArgs(BaseModel):
+    """Arguments for browser actions."""
+    url: Optional[str] = Field(default=None, description="URL for navigation actions.")
+    role: Optional[str] = Field(default=None, description="ARIA role for element targeting.")
+    name: Optional[str] = Field(default=None, description="Accessible name for element targeting.")
+    text: Optional[str] = Field(default=None, description="Text to type or search query.")
+    direction: Optional[Literal["up", "down"]] = Field(default=None, description="Scroll direction.")
+    key: Optional[str] = Field(default=None, description="Key to press (e.g., 'Enter', 'Escape').")
+    seconds: Optional[float] = Field(default=None, description="Duration for wait actions.")
+
+
+class ExecutionResult(BaseModel):
+    """
+    Schema for the Execution Agent's action output.
+    Translates plan steps into specific browser actions.
+    """
+    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait"] = Field(
+        description="The browser action to perform."
     )
-    selector: Optional[str] = Field(
-        description="The CSS or XPath selector for the element."
+    args: ExecutionArgs = Field(
+        description="Arguments for the action."
     )
-    text_input: Optional[str] = Field(
-        description="The string to type, if action is 'type'."
+    status: Literal["success", "failure"] = Field(
+        description="Whether the action can be attempted or not."
     )
-    local_reasoning: str = Field(
-        description="CoT on why this specific action implements the Orchestrator's command."
+    error_type: Literal[
+        "none", 
+        "element_not_found", 
+        "ambiguous_step", 
+        "tool_limit", 
+        "navigation_blocked", 
+        "unknown"
+    ] = Field(
+        default="none",
+        description="Type of error if status is failure."
+    )
+    message: str = Field(
+        description="One concise sentence describing what was done or why it failed."
     )
 
+
+# =============================================================================
 # VERIFICATION LAYER
+# Aligned with: prompts/verification.prompt.md
+# =============================================================================
 
 class VerificationResult(BaseModel):
-    """The schema for the 'Meta' CoT checking correctness."""
-    was_action_successful: bool = Field(
-        description="Did the page change as expected after the execution?"
+    """
+    Schema for the Verification Agent's output.
+    Evaluates whether the execution satisfied the plan step.
+    """
+    verdict: Literal["success", "failure"] = Field(
+        description="Whether the action successfully completed the step."
     )
-    visual_confirmation: str = Field(
-        description="Description of what was seen in the screenshot to verify the result."
+    step_complete: bool = Field(
+        description="True if the current plan step is fully satisfied."
     )
-    error_detected: Optional[str] = Field(
-        description="If things went wrong, describe the error (e.g., 'Overlay blocked the click')."
+    goal_complete: bool = Field(
+        description="True if the overall goal has been achieved."
+    )
+    error_type: Literal[
+        "none",
+        "execution_failure",
+        "mismatch",
+        "blocked",
+        "insufficient_evidence",
+        "unexpected_state"
+    ] = Field(
+        default="none",
+        description="Type of error if verdict is failure."
+    )
+    message: str = Field(
+        description="One concise sentence explaining the verdict."
+    )
+    handoff: Literal["orchestration", "fallback"] = Field(
+        description="Which agent should handle the next step."
     )
 
+
+# =============================================================================
 # FALLBACK LAYER
+# Aligned with: prompts/fallback.prompt.md
+# =============================================================================
 
 class FallbackStrategy(BaseModel):
-    """The schema for alternative reasoning when the first attempt fails."""
-    failure_analysis: str = Field(
-        description="CoT: Why did the previous action fail? (e.g., 'Element was obscured', 'Timeout')."
+    """
+    Schema for the Fallback Agent's recovery output.
+    Diagnoses failures and proposes revised instructions.
+    """
+    update_type: Literal["revise_step", "insert_step_before", "request_context", "abort"] = Field(
+        description="The type of plan modification needed."
     )
-    alternative_approach: str = Field(
-        description="A new tactical plan (e.g., 'Try scrolling first' or 'Use XPath instead of CSS selector')."
+    diagnosis: str = Field(
+        description="One short sentence describing the failure cause."
     )
-    retry_instruction: str = Field(
-        description="The specific directive to attempt next."
+    proposed_step: Optional[str] = Field(
+        default=None,
+        description="A single revised high-level step if update_type is 'revise_step'."
     )
-
-# INTERACTION LAYER
-
-class UserResponse(BaseModel):
-    """The final, user-facing response schema."""
-    final_answer: str = Field(
-        description="The elevated prose response to the user. No internal technical jargon."
+    insert_step: Optional[str] = Field(
+        default=None,
+        description="A prerequisite step to insert before the failed step if update_type is 'insert_step_before'."
     )
-    summary_of_actions: Optional[str] = Field(
-        description="A brief, high-level list of what was done (e.g., 'I successfully booked your flight')."
-    )
-    suggested_next_steps: List[str] = Field(
+    requested_context: List[str] = Field(
         default_factory=list,
-        description="Any further actions the user might want to take."
+        description="Specific pieces of missing information needed if update_type is 'request_context'."
     )
+    message_to_orchestration: str = Field(
+        description="One concise instruction describing what to change next."
+    )
+
+
+# =============================================================================
+# INTERACTION LAYER
+# Aligned with: prompts/interaction.prompt.md
+# =============================================================================
+
+class InteractionResponse(BaseModel):
+    """
+    Schema for the Interaction Agent's user-facing output.
+    Formats internal results into clear user responses.
+    """
+    type: Literal["finish", "request"] = Field(
+        description="'finish' for completed tasks, 'request' for clarification needed."
+    )
+    message: str = Field(
+        description="Clean, user-facing summary or clarification request."
+    )
+    data: Optional[str] = Field(
+        default=None,
+        description="Final result or summary data if type is 'finish'."
+    )
+    requested_fields: List[str] = Field(
+        default_factory=list,
+        description="Specific missing information needed if type is 'request'."
+    )
+
+
+# =============================================================================
+# LEGACY SCHEMAS (kept for backwards compatibility)
+# =============================================================================
+
+class OrchestratorDecision(BaseModel):
+    """
+    Legacy schema for orchestrator decision-making.
+    Used for step-by-step plan execution tracking.
+    """
+    chain_of_thought: str = Field(
+        description="Analysis of current progress, what just happened, and what should happen next."
+    )
+    plan_status: Literal["MAINTAIN", "UPDATE", "CREATE"] = Field(
+        description="MAINTAIN: continue with current plan. UPDATE: modify the plan. CREATE: make a new plan."
+    )
+    current_step_index: int = Field(
+        description="The index (0-based) of the step we're currently on or about to execute."
+    )
+    next_task_for_executor: str = Field(
+        description="The specific instruction for the Executor."
+    )
+    is_mission_complete: bool = Field(
+        description="True only if ALL planned steps are done and the user's goal is achieved."
+    )
+
 
 class HumanInterrupt(BaseModel):
     """Schema for when the agent needs to pause and ask the user for help."""
@@ -98,4 +215,16 @@ class HumanInterrupt(BaseModel):
     
     internal_reasoning: str = Field(description="CoT: Why are we stopping?")
     user_facing_question: str = Field(description="The elevated prose to show the user.")
-    suggested_options: Optional[list[str]] = Field(description="Pre-defined buttons for the user to click.")
+    suggested_options: Optional[List[str]] = Field(
+        default=None,
+        description="Pre-defined buttons for the user to click."
+    )
+
+
+# =============================================================================
+# LEGACY ALIASES (for backwards compatibility)
+# =============================================================================
+
+# These aliases allow existing code to work while transitioning to new schemas
+BrowserAction = ExecutionResult  # Old name -> New name
+UserResponse = InteractionResponse  # Old name -> New name

@@ -14,17 +14,22 @@ def append_plan(old_plans: List[List[str]], new_plan: List[str]) -> List[List[st
     return old_plans + [new_plan]
 
 class ProjectState(TypedDict):
-    # Conversation history
+    # Standard conversation history
     messages: Annotated[list, add_messages]
 
     # Browser-specific context
     current_url: str
-    screenshot: Optional[str]
+    screenshot: Optional[str]  # Base64 encoded
 
+    # Plan tracking
+    plan_history: Annotated[List[List[str]], append_plan]  # History of all plan versions
+    current_plan: List[str]  # The active plan steps
+    current_step_index: int  # Which step we're on (0-based)
+    number_of_transactions: int  # Number of transactions completed
+    
     # Coordination fields
-    plan_history: Annotated[List[List[str]], append_plan]
     plan_status: Literal["MAINTAIN", "UPDATE", "CREATE"]
-    current_task: str
+    current_task: str  # The specific task for executor
     reasoning_log: List[str]
     is_complete: bool
     needs_fallback: bool
