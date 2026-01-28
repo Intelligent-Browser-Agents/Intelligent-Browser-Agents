@@ -188,9 +188,8 @@
 /* Input field */
 .dashboard-input {
   flex: 1;
-  font-size: 16px;
-  font-family: 'Courier', Courier, monospace;
-  color: rgb(56, 84, 105);
+  font-size: 20px;
+  color: rgb(98, 111, 120);
   background: transparent;
   border: none;
   outline: none;
@@ -198,16 +197,16 @@
   font-family: "Inter", sans-serif;
 }
 .dashboard-input::placeholder {
-  color: #888;
+  color: #7d7b7b;
 }
 
 /* Send button */
 .dashboard-bar-btn {
   background: none;
   border: none;
-  font-size: 22px;
+  font-size: 26px;
   cursor: pointer;
-  color: #c7c7c7;
+  color: #5faffb;
   padding: 6px 10px;
   border-radius: 8px;
   transition: 0.18s ease;
