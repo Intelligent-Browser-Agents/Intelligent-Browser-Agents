@@ -14,7 +14,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Match your dev environment
+          node-version: '24' # Match your dev environment
 
       - name: Install and Build
         run: |
@@ -29,7 +29,7 @@ jobs:
           SOURCE: "dist/" # Or 'build/' depending on your vite/webpack config
           REMOTE_HOST: ${{ secrets.SERVER_IP }}
           REMOTE_USER: ${{ secrets.SERVER_USER }}
-          TARGET: "/var/www/html/your-project-folder"
+          TARGET: "/opt/bitnami/apache/htdocs"
           EXCLUDE: "/node_modules/"
 
       - name: Restart Apache
@@ -39,4 +39,4 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            sudo systemctl restart apache2
+            sudo /opt/bitnami/ctlscript.sh restart apache
