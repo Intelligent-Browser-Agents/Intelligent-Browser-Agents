@@ -27,11 +27,7 @@ export default function Dashboard() {
   const handleSend = async() => {
     if (!input.trim()) return;
 
-    // send input to server to start app.py using this prompt
-    await axios.post("http://localhost:8000/start_agent", {
-      user_input: input
-    });
-
+    // handle user chat
     setConversations((prev) =>
       prev.map((chat) =>
         chat.id === activeChatId
@@ -46,8 +42,38 @@ export default function Dashboard() {
           : chat
       )
     );
-
     setInput("");
+
+    // send input to server to start app.py using this prompt
+    var response = await axios.post("http://localhost:8000/start_agent", {
+      user_input: input
+    });
+
+
+    
+
+    //! test
+
+    console.log(response);
+
+
+
+    // make a agent chat bubble with output  
+    setConversations((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChatId
+          ? {
+              ...chat,
+              messages: [...chat.messages, { text: response.data?.STDOUT, isUser: false }],
+              title:
+                chat.messages.length === 0
+                  ? response.data?.STDOUT.slice(0, 20) || "New Chat"
+                  : chat.title,
+            }
+          : chat
+      )
+    );
+
   };
 
   const handleNewChat = () => {

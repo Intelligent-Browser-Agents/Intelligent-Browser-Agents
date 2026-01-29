@@ -12,9 +12,6 @@ from agents.executor import Executor
 client = genai.Client()
 
 
-# prompts for each agent from their respective files
-# === prompts start ===
-
 # helper to grab text from the md files in the prompts folder
 def read_markdown_file(file_path): 
     try: 
@@ -24,6 +21,7 @@ def read_markdown_file(file_path):
     except FileNotFoundError:
         return f"Error: {file_path} was not found."
 
+# prompts
 orchestration_prompt = read_markdown_file('backend\\prototype\\prompts\\orchestration.prompt.md')
 execution_prompt = read_markdown_file('backend\\prototype\\prompts\\execution.prompt.md')
 verification_prompt = read_markdown_file('backend\\prototype\prompts\\verification.prompt.md')
@@ -57,9 +55,12 @@ workflow.add_conditional_edges(
         "execution": "execution"
     }
 )
+# todo: send logs to server
 
 # Execution -> Verification
 workflow.add_edge("execution", "verification")
+# todo: send logs to server
+
 
 # Verification Logic: Path based on success/failure
 workflow.add_conditional_edges(
@@ -70,12 +71,15 @@ workflow.add_conditional_edges(
         "orchestrator": "orchestrator"
     }
 )
+# todo: send logs to server
 
 # Fallback -> Back to Orchestration for new planning
 workflow.add_edge("fallback", "orchestrator")
+# todo: send logs to server
 
 # Interaction ends the process
 workflow.add_edge("interaction", END)
+# todo: send logs to server
 
 # Compile
 app = workflow.compile()

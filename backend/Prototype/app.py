@@ -1,6 +1,7 @@
 from langgraph.checkpoint.memory import MemorySaver
 from main import workflow
 from agents.verifier import Verifier
+import sys
 
 # Reset verifier counter for consistent simulation
 Verifier.reset_simulation()
@@ -24,8 +25,8 @@ This is a TEST SIMULATION. No real browser is connected.
 - Do NOT repeatedly trigger fallback for the same issue.
 - Verification steps (like "verify login") succeed by observing the simulated page state shows success indicators.
 """
-
-user_request = "I want to log into my UCF student account."
+user_input = str(sys.argv[1])
+user_request = user_input
 
 initial_input = {
     "messages": [{"role": "user", "content": f"{SIMULATION_CONTEXT}\n\nUSER REQUEST: {user_request}"}],
