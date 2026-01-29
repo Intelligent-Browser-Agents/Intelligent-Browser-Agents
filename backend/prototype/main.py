@@ -24,11 +24,11 @@ def read_markdown_file(file_path):
     except FileNotFoundError:
         return f"Error: {file_path} was not found."
 
-orchestration_prompt = read_markdown_file('backend\prototype\prompts\orchestration.prompt.md')
-execution_prompt = read_markdown_file('backend\prototype\prompts\execution.prompt.md')
-verification_prompt = read_markdown_file('backend\prototype\prompts\\verification.prompt.md')
-fallback_prompt = read_markdown_file('backend\prototype\prompts\\fallback.prompt.md')
-interaction_prompt = read_markdown_file('backend\prototype\prompts\interaction.prompt.md')
+orchestration_prompt = read_markdown_file('backend\\prototype\\prompts\\orchestration.prompt.md')
+execution_prompt = read_markdown_file('backend\\prototype\\prompts\\execution.prompt.md')
+verification_prompt = read_markdown_file('backend\\prototype\prompts\\verification.prompt.md')
+fallback_prompt = read_markdown_file('backend\\prototype\\prompts\\fallback.prompt.md')
+interaction_prompt = read_markdown_file('backend\\prototype\\prompts\\interaction.prompt.md')
 # === prompts end ===
 
 # TODO: Add human-in-the-loop. Make sure to finish current first.

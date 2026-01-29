@@ -18,6 +18,9 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 
+# For starting main or app
+import subprocess
+
 # For password hashing
 import bcrypt
 
@@ -416,9 +419,19 @@ async def start_agent(requests: Request):
     user_input = body.get("user_input")
     print("TEST: ", user_input) 
 
+
     # send user input to app.py
     #! start the agent on the SERVER
     # todo: start main with subprocess
+
+    result = subprocess.run(
+        ['python', 'Prototype\\app.py'],
+        capture_output=True,
+        text=True
+    )
+    print("STDOUT:", result.stdout)
+    print("STDERR:", result.stderr)
+    # command: python -m module_name [arguments]
 
 # generate response for user to see the progress of the main script as it runs (as chat bubbles)
 @app.get('/send_logs')
