@@ -17,6 +17,7 @@ jobs:
           node-version: '24' # Match your dev environment
 
       - name: Install and Build
+        working-directory: ./frontend
         run: |
           npm install
           npm run build
