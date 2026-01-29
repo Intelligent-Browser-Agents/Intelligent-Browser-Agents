@@ -69,6 +69,8 @@ jobs:
             # 1. Kill the old backend session if it exists
             screen -S uvicorn-backend -X quit || true
 
+            source main_venv/bin/activate
+
             # 2. Navigate to backend folder
             cd /home/bitnami/Intelligent-Browser-Agents/backend
 
