@@ -29,6 +29,7 @@ from email.mime.multipart import MIMEMultipart
 # Random Password Generation
 import secrets
 
+
 """
 To-DO List:
 -Create Verify Email endpoint, using app.get and token sent as query param
@@ -410,12 +411,16 @@ Endpoints for frontend/backend interaction
 @app.post('/start_agent')
 async def start_agent(requests: Request): 
 
-    # convert the request to readable json and store the user's input
+
+
+    # get user's input from frontend
     body = await requests.json()
     user_input = body.get("user_input")
-
-    #! test print
     print("TEST: ", user_input) 
+
+    # send user input to app.py
+    #? Do we start the agent on the SERVER or on the USER'S COMPUTER?
+
 
 @app.get('/')
 def test():
