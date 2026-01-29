@@ -53,7 +53,7 @@
   color: #000000;
   border:  3px, solid, rgb(147, 212, 255);
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 30px;
   font-size: 20px;
   font-family: 'Consolas';
   cursor: pointer;
@@ -173,7 +173,7 @@
   width: calc(100vw - 380px); /* leaves room on right for spacing */
   background: #f4f2f2;
   border: 1px solid rgb(186, 231, 255);
-  border-radius: 20px;
+  border-radius: 30px;
   display: flex;
   align-items: center;
   padding: 12px 16px;
@@ -328,7 +328,7 @@
   width: 140px;
   padding: 12px;
   border: 3px solid, rgb(148, 216, 255);
-  border-radius: 16px;
+  border-radius: 30px;
   background: hsl(0, 0%, 100%);
   color: black;
   cursor: pointer;
