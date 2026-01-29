@@ -417,7 +417,8 @@ async def start_agent(requests: Request):
     print("TEST: ", user_input) 
 
     # send user input to app.py
-    #? Do we start the agent on the SERVER or on the USER'S COMPUTER?
+    #! start the agent on the SERVER
+    # todo: start main with subprocess
 
 # generate response for user to see the progress of the main script as it runs (as chat bubbles)
 @app.get('/send_logs')
