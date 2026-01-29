@@ -32,6 +32,9 @@ from email.mime.multipart import MIMEMultipart
 # Random Password Generation
 import secrets
 
+# For copying sys env variables
+import sys
+
 
 """
 To-DO List:
@@ -424,8 +427,12 @@ async def start_agent(requests: Request):
     #! start the agent on the SERVER
     # todo: start main with subprocess
 
+    current_env = os.environ.copy()
+    python_path = sys.executable
+
     result = subprocess.run(
-        ['python', 'Prototype\\app.py'],
+        [python_path, 'Prototype\\app.py'],
+        env=current_env,
         capture_output=True,
         text=True
     )
