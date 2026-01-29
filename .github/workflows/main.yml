@@ -42,7 +42,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             # Ensure permissions are correct for the bitnami user
-            #sudo chown -R bitnami:daemon /opt/bitnami/apache/htdocs
-            #sudo chmod -R 775 /opt/bitnami/apache/htdocs
+            sudo chown -R bitnami:daemon /opt/bitnami/apache/htdocs
+            sudo chmod -R 775 /opt/bitnami/apache/htdocs
             # Restart the service
             sudo /opt/bitnami/ctlscript.sh restart apache
