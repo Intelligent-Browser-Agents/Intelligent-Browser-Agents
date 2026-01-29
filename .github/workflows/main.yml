@@ -22,22 +22,27 @@ jobs:
           npm install
           npm run build
 
-      - name: Deploy to Server via SSH
-        uses: easingthemes/ssh-deploy@main
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_KEY }}
-          ARGS: "-rlgoDzvc -i --delete"
-          SOURCE: "dist/" # Or 'build/' depending on your vite/webpack config
-          REMOTE_HOST: ${{ secrets.SERVER_IP }}
-          REMOTE_USER: ${{ secrets.SERVER_USER }}
-          TARGET: "/opt/bitnami/apache/htdocs"
-          EXCLUDE: "/node_modules/"
+      - name: Deploy to Bitnami via SCP
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          # Path to your build output (e.g., frontend/dist or frontend/build)
+          source: "frontend/dist/*" 
+          target: "/opt/bitnami/apache/htdocs"
+          # This removes 'frontend/dist/' from the path so files land in htdocs root
+          strip_components: 2 
 
-      - name: Restart Apache
+      - name: Restart Bitnami Apache
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            # Ensure permissions are correct for the bitnami user
+            #sudo chown -R bitnami:daemon /opt/bitnami/apache/htdocs
+            #sudo chmod -R 775 /opt/bitnami/apache/htdocs
+            # Restart the service
             sudo /opt/bitnami/ctlscript.sh restart apache
