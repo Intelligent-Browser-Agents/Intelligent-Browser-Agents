@@ -21,6 +21,18 @@ jobs:
         run: |
           npm install
           npm run build
+          
+      - name: Pre-Deploy (Clean and Prep)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            # Remove old files so SCP has a clean, empty directory to write to
+            sudo rm -rf /opt/bitnami/apache/htdocs/*
+            # Ensure the folder itself is owned by you for the transfer
+            sudo chown bitnami:bitnami /opt/bitnami/apache/htdocs
 
       - name: Deploy to Bitnami via SCP
         uses: appleboy/scp-action@master
