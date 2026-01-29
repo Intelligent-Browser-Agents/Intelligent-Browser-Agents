@@ -411,8 +411,6 @@ Endpoints for frontend/backend interaction
 @app.post('/start_agent')
 async def start_agent(requests: Request): 
 
-
-
     # get user's input from frontend
     body = await requests.json()
     user_input = body.get("user_input")
@@ -421,7 +419,15 @@ async def start_agent(requests: Request):
     # send user input to app.py
     #? Do we start the agent on the SERVER or on the USER'S COMPUTER?
 
+# generate response for user to see the progress of the main script as it runs (as chat bubbles)
+@app.get('/send_logs')
+async def send_logs(requests: Request): 
+    
+    # get output from app.py
+    # send app.py output to the frontend
+    pass 
 
+# test endpoint
 @app.get('/')
 def test():
     return {"message": "This works!"}

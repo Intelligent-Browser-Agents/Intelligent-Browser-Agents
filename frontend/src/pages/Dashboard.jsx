@@ -27,7 +27,7 @@ export default function Dashboard() {
   const handleSend = async() => {
     if (!input.trim()) return;
 
-    // todo: send input to server to start app.py using this prompt
+    // send input to server to start app.py using this prompt
     await axios.post("http://localhost:8000/start_agent", {
       user_input: input
     });
