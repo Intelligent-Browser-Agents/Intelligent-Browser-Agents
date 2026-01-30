@@ -1,6 +1,8 @@
 # stuff the program makes currently
 output/
 chrome_profile/
+screenshots/
+.png
 
 # dotenv
 .env

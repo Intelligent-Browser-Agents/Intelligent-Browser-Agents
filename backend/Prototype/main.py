@@ -17,7 +17,6 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
 
-
         # todo: make this work in execution agent file.
         result = await DOMExtractionUnderstanding.main(browser)
         action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
