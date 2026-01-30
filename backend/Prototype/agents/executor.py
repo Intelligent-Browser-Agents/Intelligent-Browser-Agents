@@ -8,6 +8,7 @@ from schema import ExecutionResult
 from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt
+# import DOMExtractionUnderstanding
 
 
 class Executor:
@@ -105,28 +106,28 @@ Translate this plan step into a specific browser action.
         
         if "ucf" in url.lower() or "login" in task.lower():
             return """
-            [role="navigation"] "Main Navigation"
-            [role="link"] "Home"
-            [role="link"] "myUCF Login"
-            [role="link"] "Academics"
-            [role="link"] "Student Services"
+[role="navigation"] "Main Navigation"
+  [role="link"] "Home"
+  [role="link"] "myUCF Login"
+  [role="link"] "Academics"
+  [role="link"] "Student Services"
 
-            [role="main"]
-            [role="heading"] "Welcome to UCF"
-            [role="textbox"] "username" placeholder="Enter your NID"
-            [role="textbox"] "password" placeholder="Enter your password"
-            [role="button"] "Sign In"
-            [role="link"] "Forgot Password?"
-            """
+[role="main"]
+  [role="heading"] "Welcome to UCF"
+  [role="textbox"] "username" placeholder="Enter your NID"
+  [role="textbox"] "password" placeholder="Enter your password"
+  [role="button"] "Sign In"
+  [role="link"] "Forgot Password?"
+"""
         else:
             return f"""
-            [role="navigation"] "Site Navigation"
-            [role="link"] "Home"
-            [role="link"] "About"
-            [role="link"] "Contact"
+[role="navigation"] "Site Navigation"
+  [role="link"] "Home"
+  [role="link"] "About"
+  [role="link"] "Contact"
 
-            [role="main"]
-            [role="heading"] "Page Content"
-            [role="button"] "Submit"
-            [role="textbox"] "Search"
-            """
+[role="main"]
+  [role="heading"] "Page Content"
+  [role="button"] "Submit"
+  [role="textbox"] "Search"
+"""

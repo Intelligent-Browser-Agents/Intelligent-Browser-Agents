@@ -5,6 +5,8 @@ import json
 import time
 from pympler import asizeof
 from pydantic import BaseModel, ValidationError
+from typing import Any
+
 
 class GetDOMTreeData(BaseModel):
     tool_name: str
@@ -83,7 +85,7 @@ async def get_dom_tree_and_page_screenshot(browser: Browser, url: str) -> tuple[
             data = GetDOMTreeData(tool_name = 'get_dom_tree_and_page_screenshot', status = 'success', url = url, title = title, execution_time = time.perf_counter() - start, 
                     total_memory_usage = asizeof.asizeof(dom_tree) + asizeof.asizeof(page_screenshot), dom_tree_memory_usage = asizeof.asizeof(dom_tree), 
                     page_screenshot_memory_usage = asizeof.asizeof(page_screenshot), page_screenshot_path = file_path, 
-                    dom_tree = dom_tree)
+                    dom_tree = dom_tree, page = page)
         except ValidationError as e:
             data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e.json(), execution_time = time.perf_counter() - start)
             return data.model_dump_json(indent = 4)
@@ -152,11 +154,13 @@ def retrieve_interactive_elements(page_data: str) -> str:
         data = FuncFailed(tool_name = 'retrieve_interactive_elements', status = 'failed', error = e, execution_time = time.perf_counter() - start)
         return data.model_dump_json(indent = 4)
 
-async def main():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, slow_mo=50)
+async def main(browser):
+    # async with async_playwright() as p:
+        # browser = await p.chromium.launch(headless=False, slow_mo=50)
+    print("testing main working")
+    result = await get_dom_tree_and_page_screenshot(browser, 'https://www.target.com/')
+    print(retrieve_interactive_elements(result[0]))
 
-        result = await get_dom_tree_and_page_screenshot(browser, 'https://www.target.com/')
-        print(retrieve_interactive_elements(result[0]))
 
-asyncio.run(main())
+if __name__ == "__main__": 
+    asyncio.run(main())
