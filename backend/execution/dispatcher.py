@@ -2,7 +2,7 @@
 Action dispatcher for routing browser actions to appropriate handlers.
 
 This module routes validated Action objects to their corresponding
-Playwright handler functions based on the action type.
+Playwright handler functions based on the action type.g
 """
 
 from playwright.async_api import Page
