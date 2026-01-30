@@ -158,8 +158,8 @@ async def main(browser):
     # async with async_playwright() as p:
         # browser = await p.chromium.launch(headless=False, slow_mo=50)
     print("testing main working")
-    result = await get_dom_tree_and_page_screenshot(browser, 'https://www.target.com/')
-    print(retrieve_interactive_elements(result[0]))
+    return await get_dom_tree_and_page_screenshot(browser, 'https://www.target.com/') 
+    # print(retrieve_interactive_elements(result[0]))
 
 
 if __name__ == "__main__": 

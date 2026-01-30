@@ -8,7 +8,9 @@ Verifier.reset_simulation()
 
 # Initialize memory to track the thread
 checkpointer = MemorySaver()
+
 app = workflow.compile(checkpointer=checkpointer)
+
 
 # 1. Setup the initial mission
 config = {"configurable": {"thread_id": "simulation_001"}}

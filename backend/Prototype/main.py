@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright, Browser, Error as PlaywrightE
 import json
 from agents.executor import Executor
 from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
-from execution import Action, dispactch_action, ActionArgs
+from execution import Action, dispatch_action, ActionArgs
 
 async def main():
     print("before ")
@@ -18,10 +18,10 @@ async def main():
         browser = await p.chromium.launch(headless=False)
 
 
-        page_data= await DOMExtractionUnderstanding.main(browser)[2]
-        print(f"what does page data return {page_data}")
+        # todo: make this work in execution agent file.
+        result = await DOMExtractionUnderstanding.main(browser)
         action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
-        result = await dispactch_action(page_data, action)
+        result = await dispatch_action(result[2], action)
         print(result)
         
 
