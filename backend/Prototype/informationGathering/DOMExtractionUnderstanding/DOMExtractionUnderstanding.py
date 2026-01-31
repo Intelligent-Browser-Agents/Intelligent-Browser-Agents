@@ -1,5 +1,5 @@
 import asyncio
-from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
+from playwright.async_api import async_playwright, Browser, Page, Error as PlaywrightError
 from bs4 import BeautifulSoup
 import json
 import time
@@ -34,7 +34,7 @@ class FuncFailed(BaseException):
     error: Exception
     execution_time: float
 
-async def get_dom_tree_and_page_screenshot(browser: Browser, url: str) -> tuple[str, bytes]:
+async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
     """
     Retrieves a webpage's DOM Tree and takes a screenshot of webpage.
     
@@ -58,8 +58,13 @@ async def get_dom_tree_and_page_screenshot(browser: Browser, url: str) -> tuple[
 
         #Goes to webpage and extracts title and DOM tree
         try: 
-            page = await browser.new_page()
-            await page.goto(url)
+            
+            # #! Removed page because now page is passed across agents, NOT the whole browser!
+            # #  This is because passing the whole browser would create new tabs for every action. 
+            # #  Passing page in will allow new actions to be performed on already existing pages.
+            # page = await browser.new_page()
+            # await page.goto(url)
+            
             title = await page.title()
             dom_tree = await page.content()
         except PlaywrightError as e:
@@ -82,7 +87,7 @@ async def get_dom_tree_and_page_screenshot(browser: Browser, url: str) -> tuple[
 
         #Packages function webpage data with function metadata into a Pydantic object
         try: 
-            data = GetDOMTreeData(tool_name = 'get_dom_tree_and_page_screenshot', status = 'success', url = url, title = title, execution_time = time.perf_counter() - start, 
+            data = GetDOMTreeData(tool_name = 'get_dom_tree_and_page_screenshot', status = 'success', url = page.url, title = title, execution_time = time.perf_counter() - start, 
                     total_memory_usage = asizeof.asizeof(dom_tree) + asizeof.asizeof(page_screenshot), dom_tree_memory_usage = asizeof.asizeof(dom_tree), 
                     page_screenshot_memory_usage = asizeof.asizeof(page_screenshot), page_screenshot_path = file_path, 
                     dom_tree = dom_tree, page = page)
@@ -154,12 +159,11 @@ def retrieve_interactive_elements(page_data: str) -> str:
         data = FuncFailed(tool_name = 'retrieve_interactive_elements', status = 'failed', error = e, execution_time = time.perf_counter() - start)
         return data.model_dump_json(indent = 4)
 
-async def main(browser):
-    # async with async_playwright() as p:
-        # browser = await p.chromium.launch(headless=False, slow_mo=50)
-    print("testing main working")
-    return await get_dom_tree_and_page_screenshot(browser, 'https://www.target.com/') 
-    # print(retrieve_interactive_elements(result[0]))
+async def main(page: Page):
+
+    print("DOM EXTRACTION CALLED!")
+    # uses page (includes url) to extract DOM
+    return await get_dom_tree_and_page_screenshot(page)
 
 
 if __name__ == "__main__": 

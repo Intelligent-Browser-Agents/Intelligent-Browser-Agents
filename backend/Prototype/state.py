@@ -1,6 +1,7 @@
 from typing import Annotated, List, TypedDict, Optional, Literal
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel
+from playwright.async_api import Page
 
 def append_plan(old_plans: List[List[str]], new_plan: List[str]) -> List[List[str]]:
     """
@@ -33,3 +34,6 @@ class ProjectState(TypedDict):
     reasoning_log: List[str]
     is_complete: bool
     needs_fallback: bool
+    
+    # store the page being passed around
+    # page: Optional[Page]

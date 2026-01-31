@@ -3,6 +3,7 @@ Execution Agent
 Translates high-level plan steps into specific browser actions.
 """
 
+from execution import Action, dispatch_action, ActionArgs
 from langchain_core.messages import SystemMessage, HumanMessage
 from schema import ExecutionResult
 from state import ProjectState
@@ -18,14 +19,24 @@ class Executor:
     Uses the execution prompt from the prompts directory.
     """
     
-    def __init__(self):
+    # sets up agent's llm and prompt to be used
+    def __init__(self, runtime):
         print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: __init__=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
         self.llm = Models.executor(ExecutionResult)
         # Load the execution prompt from the prompts directory
         self.system_prompt = get_execution_prompt()
+        self.runtime = runtime
 
-    def __call__(self, state: ProjectState) -> dict:
+
+    async def __call__(self, state: ProjectState) -> dict:
         print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: __call__=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+        
+        # get page instance for executor to use
+        page = self.runtime.get("page")
+        if page is None: 
+            raise RuntimeError("[ERROR]: Executor called without a Playwright page!")
+        
+        # initialize status values
         current_task = state.get("current_task", "No task specified")
         current_url = state.get("current_url", "unknown")
         current_plan = state.get("current_plan", [])
@@ -85,6 +96,14 @@ class Executor:
         new_url = current_url
         if action.action == "navigate" and action.args.url:
             new_url = action.args.url
+            
+            # run navigate action using DOMExtractionUnderstanding
+            result = await DOMExtractionUnderstanding.main(page)
+            action = Action(action="navigate", args=ActionArgs(url=new_url))
+            result = await dispatch_action(result[2], action)
+            print("[executor - navigation result]: ", result) # test print
+
+            
         elif action.action == "click" and "login" in current_task.lower():
             if "my.ucf" in current_url:
                 new_url = "https://my.ucf.edu/dashboard"

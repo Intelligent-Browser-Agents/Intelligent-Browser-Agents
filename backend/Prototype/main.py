@@ -11,6 +11,7 @@ from playwright.async_api import async_playwright, Browser, Error as PlaywrightE
 import json
 from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
 from execution import Action, dispatch_action, ActionArgs
+# from app_prototype import runtime
 
     
 # setting agent client
@@ -36,13 +37,13 @@ interaction_prompt = read_markdown_file('backend\\prototype\\prompts\\interactio
 # grab user input from frontend
 user_input = "example text"
 
-def build_workflow():
+def build_workflow(runtime):
     # Initialize the graph
     workflow = StateGraph(ProjectState)
 
     # Add nodes
     workflow.add_node("orchestrator", Orchestrator())
-    workflow.add_node("execution", Executor())
+    workflow.add_node("execution", Executor(runtime))
     workflow.add_node("verification", Verifier())
     workflow.add_node("fallback", Fallback())
     workflow.add_node("interaction", InteractionAgent())
@@ -80,23 +81,6 @@ def build_workflow():
     # Interaction ends the process
     workflow.add_edge("interaction", END)
 
-    # Compile
-    # app = workflow.compile()
     print("Created agent workflow!")
     return workflow
 
-
-async def main():
-    
-    print("Running main...")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-
-        # todo: make this work in execution agent file.
-        result = await DOMExtractionUnderstanding.main(browser)
-        action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
-        result = await dispatch_action(result[2], action)
-        print(result)
-
-if __name__ == "__main__":
-    asyncio.run(main()) 

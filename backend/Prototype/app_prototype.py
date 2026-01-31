@@ -33,11 +33,6 @@ import sys
 # Reset verifier counter for consistent simulation
 Verifier.reset_simulation()
 
-# Initialize memory to track the thread
-checkpointer = MemorySaver()
-workflow = build_workflow()
-app = workflow.compile(checkpointer=checkpointer)
-
 async def main():
     
     # 1. Setup the initial mission
@@ -64,7 +59,7 @@ async def main():
 
     initial_input = {
         "messages": [{"role": "user", "content": f"{SIMULATION_CONTEXT}\n\nUSER REQUEST: {user_request}"}],
-        "current_url": "https://my.ucf.edu",
+        "current_url": "https://google.com",
         # Plan tracking
         "plan_history": [],
         "current_plan": [],  # Will be populated by orchestrator
@@ -88,18 +83,36 @@ async def main():
     
     # create browser instance which will persist across agents
     async with async_playwright() as p:
+        
+        #initialize the browser instance
         browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
+        
+       # save page to runtime object
+        runtime =  {
+            "page": page
+        }
+        
+        # Initialize memory to track the thread
+        checkpointer = MemorySaver()
+        # initialize workflow using page as runtime across agents
+        workflow = build_workflow(runtime)
+        app = workflow.compile(checkpointer=checkpointer)
+    
 
 
-        #! THIS GOES INSIDE OF EXECUTION AGENT
-        # todo: make this work in execution agent file.
-        # todo: WHEN WE CALL THE PROPER FUNCTION IN ==EXECUTOR==, THIS SHOULD RUN 
-        result = await DOMExtractionUnderstanding.main(browser)
-        action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
-        result = await dispatch_action(result[2], action)
-        print(result)
+        # # todo: WHEN WE CALL THE PROPER FUNCTION IN ==EXECUTOR==, THIS SHOULD RUN 
+        # result = await DOMExtractionUnderstanding.main(browser)
+        # action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
+        # result = await dispatch_action(result[2], action)
+        # print(result)
 
-        for event in app.stream(initial_input, config):
+        # runs langgraph asynchronously
+        async for event in app.astream(initial_input, config):
+            
+            print("[=LOG=] NEW EVENT STARTED IN APP FROM FOR LOOP")
+            
             
             for node_name, state_update in event.items():
                 print(f"\n{'-' * 40}")
