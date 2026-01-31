@@ -80,15 +80,15 @@ class Orchestrator:
         
         # Build the context for the planner
         context = f"""
-USER REQUEST: {user_intent}
+        USER REQUEST: {user_intent}
 
-CURRENT URL: {state.get('current_url', 'https://google.com')}
+        CURRENT URL: {state.get('current_url', 'https://google.com')}
 
-PAGE STATE:
-{page_state}
+        PAGE STATE:
+        {page_state}
 
-Based on this request, create a plan following the output format specified.
-"""
+        Based on this request, create a plan following the output format specified.
+        """
                 
         messages = [
             SystemMessage(content=self.planning_prompt),
@@ -146,23 +146,23 @@ Based on this request, create a plan following the output format specified.
         last_result = reasoning_log[-1] if reasoning_log else "No previous action"
         
         context = f"""
-USER GOAL: {user_intent}
+        USER GOAL: {user_intent}
 
-CURRENT PLAN:
-{plan_display}
+        CURRENT PLAN:
+        {plan_display}
 
-CURRENT STEP INDEX: {current_step}
+        CURRENT STEP INDEX: {current_step}
 
-LAST ACTION RESULT:
-{last_result}
+        LAST ACTION RESULT:
+        {last_result}
 
-PAGE STATE AFTER LAST ACTION:
-{page_state}
+        PAGE STATE AFTER LAST ACTION:
+        {page_state}
 
-NEEDS FALLBACK: {state.get('needs_fallback', False)}
+        NEEDS FALLBACK: {state.get('needs_fallback', False)}
 
-Based on this, decide what to do next.
-"""
+        Based on this, decide what to do next.
+        """
         
         messages = [
             SystemMessage(content=DECISION_SYSTEM_PROMPT),

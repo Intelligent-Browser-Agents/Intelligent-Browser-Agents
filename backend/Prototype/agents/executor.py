@@ -8,8 +8,9 @@ from schema import ExecutionResult
 from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt
-# import DOMExtractionUnderstanding
+from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
 
+print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: GENERAL=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
 class Executor:
     """
@@ -18,11 +19,13 @@ class Executor:
     """
     
     def __init__(self):
+        print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: __init__=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
         self.llm = Models.executor(ExecutionResult)
         # Load the execution prompt from the prompts directory
         self.system_prompt = get_execution_prompt()
 
     def __call__(self, state: ProjectState) -> dict:
+        print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: __call__=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
         current_task = state.get("current_task", "No task specified")
         current_url = state.get("current_url", "unknown")
         current_plan = state.get("current_plan", [])
@@ -30,19 +33,19 @@ class Executor:
         
         # Build the context following the prompt's expected inputs
         context = f"""
-MAIN_GOAL: {user_intent}
+        MAIN_GOAL: {user_intent}
 
-PLAN_STEP: {current_task}
+        PLAN_STEP: {current_task}
 
-URL: {current_url}
+        URL: {current_url}
 
-DOM_SNAPSHOT:
-{self._get_simulated_dom(current_url, current_task)}
+        DOM_SNAPSHOT:
+        {self._get_simulated_dom(current_url, current_task)}
 
-ALLOWED_TOOLS: navigate, click, type, search, scroll, press_key, wait
+        ALLOWED_TOOLS: navigate, click, type, search, scroll, press_key, wait
 
-Translate this plan step into a specific browser action.
-"""
+        Translate this plan step into a specific browser action.
+        """
 
         messages = [
             SystemMessage(content=self.system_prompt),
@@ -93,6 +96,8 @@ Translate this plan step into a specific browser action.
         }
     
     def _get_user_intent(self, state: ProjectState) -> str:
+        print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: _get_user_intent=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
         """Extract user intent from messages."""
         user_message = state["messages"][0] if state["messages"] else None
         if isinstance(user_message, dict):
@@ -102,32 +107,34 @@ Translate this plan step into a specific browser action.
         return str(user_message) if user_message else "Unknown intent"
     
     def _get_simulated_dom(self, url: str, task: str) -> str:
+        print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: _get_simulated_dom=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
         """Generate simulated DOM snapshot for testing."""
         
         if "ucf" in url.lower() or "login" in task.lower():
             return """
-[role="navigation"] "Main Navigation"
-  [role="link"] "Home"
-  [role="link"] "myUCF Login"
-  [role="link"] "Academics"
-  [role="link"] "Student Services"
+            [role="navigation"] "Main Navigation"
+            [role="link"] "Home"
+            [role="link"] "myUCF Login"
+            [role="link"] "Academics"
+            [role="link"] "Student Services"
 
-[role="main"]
-  [role="heading"] "Welcome to UCF"
-  [role="textbox"] "username" placeholder="Enter your NID"
-  [role="textbox"] "password" placeholder="Enter your password"
-  [role="button"] "Sign In"
-  [role="link"] "Forgot Password?"
-"""
+            [role="main"]
+            [role="heading"] "Welcome to UCF"
+            [role="textbox"] "username" placeholder="Enter your NID"
+            [role="textbox"] "password" placeholder="Enter your password"
+            [role="button"] "Sign In"
+            [role="link"] "Forgot Password?"
+            """
         else:
             return f"""
-[role="navigation"] "Site Navigation"
-  [role="link"] "Home"
-  [role="link"] "About"
-  [role="link"] "Contact"
+            [role="navigation"] "Site Navigation"
+            [role="link"] "Home"
+            [role="link"] "About"
+            [role="link"] "Contact"
 
-[role="main"]
-  [role="heading"] "Page Content"
-  [role="button"] "Submit"
-  [role="textbox"] "Search"
-"""
+            [role="main"]
+            [role="heading"] "Page Content"
+            [role="button"] "Submit"
+            [role="textbox"] "Search"
+            """

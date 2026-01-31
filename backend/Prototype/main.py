@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from agents.orchestrator import Orchestrator
-from agents.executor import Executor
 from agents.verifier import Verifier
+from agents.executor import Executor
 from agents.fallback import Fallback
 from agents.interaction import InteractionAgent
 from state import ProjectState
@@ -59,14 +59,9 @@ def build_workflow():
             "execution": "execution"
         }
     )
-    # todo: send logs to server
-    print("Finshed orchestration, moving to Execution...")
 
     # Execution -> Verification
     workflow.add_edge("execution", "verification")
-    # todo: send logs to server
-    print("Finshed execution, moving to verification...")
-
 
     # Verification Logic: Path based on success/failure
     workflow.add_conditional_edges(
@@ -77,22 +72,17 @@ def build_workflow():
             "orchestrator": "orchestrator"
         }
     )
-    # todo: send logs to server
-    print("Finshed verification, moving to fallback...")
-
 
     # Fallback -> Back to Orchestration for new planning
     workflow.add_edge("fallback", "orchestrator")
-    # todo: send logs to server
-    print("Finshed finished fallback, moving to orchestration...")
+
 
     # Interaction ends the process
     workflow.add_edge("interaction", END)
-    # todo: send logs to server
-    print("Completed")
 
     # Compile
     # app = workflow.compile()
+    print("Created agent workflow!")
     return workflow
 
 

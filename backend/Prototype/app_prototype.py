@@ -1,0 +1,169 @@
+"""
+This file will act as the prototype of Intelligent Browser Agents (WORKING)
+
+Course of action: 
+
+[ ] app opens an instance of browser
+    [ ] keep for duration of program)
+    
+[ ] Execution agent will select actions from execution handler
+    [ ] Navigate(page, url) - (working example in main.py)
+    [ ] Click(page, role, name)
+    [ ] Type(page, text)
+    [ ] Search(page, query)
+    [ ] Scroll(page, direction)
+    [ ] Press Key(page, key)
+    [ ] Wait(page, seconds)
+    
+[ ] Get user input from the frontend and call this file from server passing in user input
+    [ ] Send this input to the orchestrator
+
+"""
+
+from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
+from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
+from execution import Action, dispatch_action, ActionArgs
+from langgraph.checkpoint.memory import MemorySaver
+from agents.verifier import Verifier
+from main import build_workflow
+import asyncio
+import sys
+
+
+# Reset verifier counter for consistent simulation
+Verifier.reset_simulation()
+
+# Initialize memory to track the thread
+checkpointer = MemorySaver()
+workflow = build_workflow()
+app = workflow.compile(checkpointer=checkpointer)
+
+async def main():
+    
+    # 1. Setup the initial mission
+    config = {"configurable": {"thread_id": "simulation_001"}}
+
+    # This is a sample initial input. Notice the fields we are passing in.
+
+
+    # Simulation context to guide agents - this makes it explicit that actions succeed
+    SIMULATION_CONTEXT = """
+    [SIMULATION MODE]
+    This is a TEST SIMULATION. No real browser is connected.
+    - All actions should be assumed to SUCCEED unless there's a clear logical error.
+    - The verifier should mark steps as complete when the action matches the plan step intent.
+    - After all plan steps are executed, mark goal_complete=True.
+    - Do NOT repeatedly trigger fallback for the same issue.
+    - Verification steps (like "verify login") succeed by observing the simulated page state shows success indicators.
+    """
+
+    # from frontend (use after backend testing)
+    # user_input = str(sys.argv[1])
+    # user_request = user_input
+    user_request = "go to https://my.ucf.edu and log into my ucf account"
+
+    initial_input = {
+        "messages": [{"role": "user", "content": f"{SIMULATION_CONTEXT}\n\nUSER REQUEST: {user_request}"}],
+        "current_url": "https://my.ucf.edu",
+        # Plan tracking
+        "plan_history": [],
+        "current_plan": [],  # Will be populated by orchestrator
+        "current_step_index": 0,
+        # Coordination
+        "plan_status": "CREATE",  # Start by creating a plan
+        "current_task": "",
+        "reasoning_log": [],
+        "is_complete": False,
+        "needs_fallback": False,
+        "screenshot": None,
+    }
+
+    # 2. Stream the execution
+    print("=" * 60)
+    print("INTELLIGENT BROWSER AGENT - SIMULATION")
+    print("=" * 60)
+    print(f"\nUser Request: {user_request}")
+    print(f"Starting URL: {initial_input['current_url']}")
+    print("=" * 60)
+    
+    # create browser instance which will persist across agents
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=False)
+
+
+        #! THIS GOES INSIDE OF EXECUTION AGENT
+        # todo: make this work in execution agent file.
+        # todo: WHEN WE CALL THE PROPER FUNCTION IN ==EXECUTOR==, THIS SHOULD RUN 
+        result = await DOMExtractionUnderstanding.main(browser)
+        action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
+        result = await dispatch_action(result[2], action)
+        print(result)
+
+        for event in app.stream(initial_input, config):
+            
+            for node_name, state_update in event.items():
+                print(f"\n{'-' * 40}")
+                print(f"[NODE]: {node_name.upper()}")
+                print(f"{'-' * 40}")
+                
+                # Show the plan if created/updated
+                if "current_plan" in state_update and state_update["current_plan"]:
+                    print("  PLAN:")
+                    for i, step in enumerate(state_update["current_plan"]):
+                        marker = ">>>" if i == state_update.get("current_step_index", 0) else "   "
+                        print(f"    {marker} {i+1}. {step}")
+                
+                # Check the Orchestrator's plan logic
+                if "plan_status" in state_update:
+                    print(f"  Plan Status: {state_update['plan_status']}")
+                
+                # Show step progress
+                if "current_step_index" in state_update:
+                    print(f"  Current Step: {state_update['current_step_index'] + 1}")
+                    
+                # Show reasoning if available
+                if "reasoning_log" in state_update and state_update["reasoning_log"]:
+                    latest_reasoning = state_update["reasoning_log"][-1]
+                    # Truncate long reasoning for display
+                    if len(latest_reasoning) > 200:
+                        print(f"  Reasoning: {latest_reasoning[:200]}...")
+                    else:
+                        print(f"  Reasoning: {latest_reasoning}")
+                    
+                # Check the Execution handoff
+                if "current_task" in state_update:
+                    print(f"  Current Task: {state_update['current_task']}")
+                    
+                # Check completion status
+                if "is_complete" in state_update:
+                    print(f"  Is Complete: {state_update['is_complete']}")
+                    
+                # Check fallback status
+                if "needs_fallback" in state_update:
+                    print(f"  Needs Fallback: {state_update['needs_fallback']}")
+                    
+                # Show final message if from interaction agent
+                if "messages" in state_update and node_name == "interaction":
+                    print(f"\n  {'*' * 30}")
+                    print("  FINAL RESPONSE TO USER:")
+                    print(f"  {'*' * 30}")
+                    for msg in state_update["messages"]:
+                        if isinstance(msg, dict):
+                            content = msg.get("content", "")
+                        else:
+                            content = str(msg)
+                        # Indent the final response
+                        for line in content.split("\n"):
+                            print(f"  {line}")
+                
+                # Show transaction count
+                if "number_of_transactions" in state_update:
+                    print(f"  Transactions Completed: {state_update['number_of_transactions']}")
+
+    print("\n" + "=" * 60)
+    print("SIMULATION COMPLETE")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

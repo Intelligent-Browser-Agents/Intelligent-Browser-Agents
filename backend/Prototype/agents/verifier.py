@@ -44,24 +44,24 @@ class Verifier:
         
         # Build context following the prompt's expected inputs
         context = f"""
-MAIN_GOAL: {user_intent}
+        MAIN_GOAL: {user_intent}
 
-PLAN_STEP: {current_task}
+        PLAN_STEP: {current_task}
 
-EXECUTION_OUTPUT:
-{last_execution}
+        EXECUTION_OUTPUT:
+        {last_execution}
 
-BEFORE_STATE:
-URL: {before_url}
+        BEFORE_STATE:
+        URL: {before_url}
 
-AFTER_STATE:
-URL: {after_url}
-{simulated_result}
+        AFTER_STATE:
+        URL: {after_url}
+        {simulated_result}
 
-IS_FINAL_STEP: {is_last_step}
+        IS_FINAL_STEP: {is_last_step}
 
-Verify if the action was successful based on this information.
-"""
+        Verify if the action was successful based on this information.
+        """
 
         messages = [
             SystemMessage(content=self.system_prompt),
