@@ -1,5 +1,5 @@
 from langgraph.checkpoint.memory import MemorySaver
-from main import workflow
+from main import build_workflow
 from agents.verifier import Verifier
 import sys
 
@@ -8,9 +8,8 @@ Verifier.reset_simulation()
 
 # Initialize memory to track the thread
 checkpointer = MemorySaver()
-
+workflow = build_workflow()
 app = workflow.compile(checkpointer=checkpointer)
-
 
 # 1. Setup the initial mission
 config = {"configurable": {"thread_id": "simulation_001"}}
@@ -27,9 +26,10 @@ This is a TEST SIMULATION. No real browser is connected.
 - Do NOT repeatedly trigger fallback for the same issue.
 - Verification steps (like "verify login") succeed by observing the simulated page state shows success indicators.
 """
+
+# from frontend (use after backend testing)
 # user_input = str(sys.argv[1])
 # user_request = user_input
-
 user_request = "go to https://my.ucf.edu and log into my ucf account"
 
 initial_input = {

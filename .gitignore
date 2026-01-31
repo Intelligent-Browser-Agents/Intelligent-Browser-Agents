@@ -2,7 +2,7 @@
 output/
 chrome_profile/
 screenshots/
-.png
+*.png
 
 # dotenv
 .env
@@ -24,3 +24,4 @@ DOM_output/
 
 back/*
 backend/__pycache__
+*.cpython-313.pyc
