@@ -31,7 +31,7 @@ class IntElementsData(BaseModel):
 class FuncFailed(BaseException):
     tool_name: str
     status: str
-    error: Exception
+    error: Any
     execution_time: float
 
 async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
@@ -66,6 +66,10 @@ async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
             # await page.goto(url)
             
             title = await page.title()
+
+            if not title or not title.strip():
+                title = "page"
+
             dom_tree = await page.content()
         except PlaywrightError as e:
             data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
