@@ -298,3 +298,483 @@ find me the best gift shops in orlando
   ],
   "credits": 1
 }
+
+Received search request: { q: 'iphone 17' }
+Optimized Query: iphone 17 release date rumors specs features 2026 apple news
+Optimized Query: iphone 17 release date rumors specs features 2026 apple news
+Query Keywords: [
+  'iphone',   '17',
+  'release',  'date',
+  'rumors',   'specs',
+  'features', '2026',
+  'apple',    'news'
+]
+Total Query Keywords: 10
+Ranked Results:  [
+  {
+    title: 'iPhone 17E Release Date, Price, and Specs - News & Rumors - CNET',
+    link: 'https://www.cnet.com/tech/mobile/iphone-17e-release-date-price-specs-features-rumors/',
+    snippet: 'Features: Apple might include MagSafe on the iPhone 17E. · Release date: Possibly as soon as February. · Price: There have been no leaks about ...',  
+    date: 'Jan 24, 2026',
+    position: 2,
+    ranking: {
+      titleRelevance: 0.65,
+      googleScore: 0.7109351736821121,
+      finalScore: 0.6804675868410561,
+      googlePosition: 2,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Apple unveils iPhone 17 Pro and iPhone 17 Pro Max',
+    link: 'https://www.apple.com/newsroom/2025/09/apple-unveils-iphone-17-pro-and-iphone-17-pro-max/',
+    snippet: "Pre-orders begin Friday, September 12, with availability beginning Friday, September 19. “iPhone 17 Pro is by far the most powerful iPhone we've ...",
+    date: 'Sep 9, 2025',
+    position: 1,
+    ranking: {
+      titleRelevance: 0.3,
+      googleScore: 1,
+      finalScore: 0.65,
+      googlePosition: 1,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Apple iPhone 17e: What to expect – release date, features & price',
+    link: 'https://www.macworld.com/article/2881175/iphone-17e-release-date-specs-features-price.html',
+    snippet: "Macworld explores the anticipated iPhone 17e, Apple's budget-friendly smartphone expected to launch in February or Spring 2026 with significant ...",
+    date: 'Jan 23, 2026',
+    position: 4,
+    ranking: {
+      titleRelevance: 0.55,
+      googleScore: 0.42187034736422435,
+      finalScore: 0.4859351736821122,
+      googlePosition: 4,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'iPhone 17: Everything We Know | MacRumors',
+    link: 'https://www.macrumors.com/roundup/iphone-17/',
+    snippet: "There's an upgraded 16-core Neural Engine, 8GB RAM, an updated display engine, and a new image signal processor. Apple didn't change the thermal ...",
+    date: 'Dec 17, 2025',
+    position: 3,
+    ranking: {
+      titleRelevance: 0.25,
+      googleScore: 0.5418430900086739,
+      finalScore: 0.39592154500433696,
+      googlePosition: 3,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: "iPhone Air 2: All the rumors so far - Tom's Guide",
+    link: 'https://www.tomsguide.com/phones/iphones/iphone-air-2-all-the-rumors-so-far',
+    snippet: "Apple launched its first slim iPhone in 2025, and we're expecting a sequel within the next year or so. Here's what's been said about the ...",
+    date: '17 hours ago',
+    position: 8,
+    ranking: {
+      titleRelevance: 0.45,
+      googleScore: 0.13280552104633658,
+      finalScore: 0.29140276052316827,
+      googlePosition: 8,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'iPhone 17 - Every SPEC REVEALED for You! - YouTube',
+    link: 'https://www.youtube.com/watch?v=lHt5lNl0qOU',
+    snippet: 'The iPhone 17 Normal is set to have a LOAD of BIG UPGRADES with the LEAKS and RUMORS we have heard, lets go over EVERY SPEC we have heard ...',
+    date: 'Aug 30, 2025',
+    position: 5,
+    ranking: {
+      titleRelevance: 0.25,
+      googleScore: 0.3288122585287604,
+      finalScore: 0.2894061292643802,
+      googlePosition: 5,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'iPhone 17 Rumors: Everything We Know So Far - MOFT',
+    link: 'https://www.moft.us/blogs/news/iphone-17-rumors?srsltid=AfmBOooXbkmE9fVBtlRt363ZrWxV5IgWD6GvMAvBWAYnRgF49iTvKWRX',
+    snippet: 'Yes, the iPhone 17 is out. Apple officially announced it on September 9, 2025, during its fall keynote, with pre-orders opening September 12. The phone became ...',
+    position: 6,
+    ranking: {
+      titleRelevance: 0.3,
+      googleScore: 0.25277826369078593,
+      finalScore: 0.27638913184539293,
+      googlePosition: 6,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Apple iPhone 17, Air And Pro Release Schedule: All New Details',
+    link: 'https://www.forbes.com/sites/davidphelan/2025/08/30/apple-iphone-17-air-iphone-17-pro-release-date-new-details-emerge/',
+    snippet: "“Apple will only be releasing the iPhone 18 Pro, iPhone 18 Pro Max, iPhone 18 Air and the all-new iPhone 18 Fold in September 2026. There won't ...",
+    date: 'Aug 30, 2025',
+    position: 10,
+    ranking: {
+      titleRelevance: 0.45,
+      googleScore: 0.03974743221087251,
+      finalScore: 0.24487371610543626,
+      googlePosition: 10,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Apple debuts iPhone 17',
+    link: 'https://www.apple.com/newsroom/2025/09/apple-debuts-iphone-17/',
+    snippet: 'iPhone 17 will be available in 22 other countries and regions beginning Friday, September 26. iOS 26 will be available as a free software update ...',
+    date: 'Sep 9, 2025',
+    position: 7,
+    ranking: {
+      titleRelevance: 0.3,
+      googleScore: 0.1884924370427511,
+      finalScore: 0.24424621852137554,
+      googlePosition: 7,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'iPhone 17 Pro Max - Every SPEC REVEALED! - YouTube',
+    link: 'https://www.youtube.com/watch?v=giCrHL6z2y4&vl=en',
+    snippet: '... iPhone 17 Pro models with all the rumors. Stay tuned for more Apple News about the iPhone 17 Pro Max Release Date and Price and more! GET ...',
+    date: 'Aug 28, 2025',
+    position: 9,
+    ranking: {
+      titleRelevance: 0.25,
+      googleScore: 0.08368618001734751,
+      finalScore: 0.16684309000867376,
+      googlePosition: 9,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  }
+]
+Ranking Done
+Search successful
+Search error: ReferenceError: True is not defined
+
+
+{
+  "searchParameters": {
+    "q": "nyc hoodie supreme champion bape streetwear 2025 2026",
+    "type": "search",
+    "engine": "google"
+  },
+  "organic": [
+    {
+      "title": "Supreme Nyc In Men's Sweats & Hoodies for Sale - eBay",
+      "link": "https://www.ebay.com/b/Supreme-Nyc-In-Mens-Sweats-Hoodies/155183/bn_7022973536",
+      "snippet": "2025 Supreme Box Logo Hooded Hoodie Sweatshirt SMALL Grey ON HAND SHIP FROM NYC.",
+      "position": 1,
+      "ranking": {
+        "titleRelevance": 0.375,
+        "googleScore": 1,
+        "finalScore": 0.6875,
+        "googlePosition": 1,
+        "titleKeywords": [
+          "supreme",
+          "nyc",
+          "men",
+          "s",
+          "sweats",
+          "hoodies",
+          "sale",
+          "ebay"
+        ],
+        "matchingKeywords": [
+          "nyc",
+          "hoodie",
+          "supreme",
+          "streetwear"
+        ]
+      }
+    },
+    {
+      "title": "Hoodie Brand : Supreme X Champion Size : M but a bit ... - Instagram",
+      "link": "https://www.instagram.com/p/DTfhGO8jr99/",
+      "snippet": "Supreme hoodies now available! Supreme League Champs Gray Zip Up Hoodie Size Medium Brand New $280 SOLD Supreme Knowledge Zip Up Hoodie Size ...",
+      "date": "Jan 14, 2026",
+      "position": 2,
+      "ranking": {
+        "titleRelevance": 0.375,
+        "googleScore": 0.7109351736821121,
+        "finalScore": 0.5429675868410561,
+        "googlePosition": 2,
+        "titleKeywords": [
+          "hoodie",
+          "brand",
+          "supreme",
+          "x",
+          "champion",
+          "size",
+          "m",
+          "but",
+          "bit",
+          "instagram"
+        ],
+        "matchingKeywords": [
+          "hoodie",
+          "supreme",
+          "champion"
+        ]
+      }
+    },
+    {
+      "title": "BAPE Champion Hoodie Black Men's - FW17 - US - StockX",
+      "link": "https://stockx.com/bape-champion-hoodie-black",
+      "snippet": "Product Details: Season: FW17. Color: Black. Release Date: 10/21/2017. Retail Price: $300. Product Description: Please note: BAPE runs approximately one size ...",
+      "position": 3,
+      "ranking": {
+        "titleRelevance": 0.5,
+        "googleScore": 0.5418430900086739,
+        "finalScore": 0.520921545004337,
+        "googlePosition": 3,
+        "titleKeywords": [
+          "bape",
+          "champion",
+          "hoodie",
+          "black",
+          "men",
+          "s",
+          "fw17",
+          "us",
+          "stockx"
+        ],
+        "matchingKeywords": [
+          "hoodie",
+          "supreme",
+          "champion",
+          "bape",
+          "streetwear"
+        ]
+      }
+    },
+    {
+      "title": "Supreme®/Champion® Hooded Sweatshirt",
+      "link": "https://supreme.com/previews/springsummer2025/all/24?=supreme-champion-hooded-sweatshirt-24&back=all",
+      "snippet": "Supreme®/Champion® Hooded Sweatshirt. Champion® reverse weave fleece with classic Champion® fit and tackle twill appliqué.",
+      "attributes": {
+        "Missing": "bape streetwear"
+      },
+      "position": 5,
+      "ranking": {
+        "titleRelevance": 0.25,
+        "googleScore": 0.3288122585287604,
+        "finalScore": 0.2894061292643802,
+        "googlePosition": 5,
+        "titleKeywords": [
+          "supreme",
+          "champion",
+          "hooded",
+          "sweatshirt"
+        ],
+        "matchingKeywords": [
+          "supreme",
+          "champion"
+        ]
+      }
+    },
+    {
+      "title": "BAPE x Champion Apparel – Shop Bold Collab Gear - Bape Hoodie",
+      "link": "https://thebapehoodie.us/bape-x-champion/",
+      "snippet": "Explore the BAPE x Champion collaboration featuring bold hoodies, tees, and sportswear essentials. Limited drop—secure your favorite pieces today.",
+      "position": 7,
+      "ranking": {
+        "titleRelevance": 0.375,
+        "googleScore": 0.1884924370427511,
+        "finalScore": 0.28174621852137555,
+        "googlePosition": 7,
+        "titleKeywords": [
+          "bape",
+          "x",
+          "champion",
+          "apparel",
+          "shop",
+          "bold",
+          "collab",
+          "gear",
+          "bape",
+          "hoodie"
+        ],
+        "matchingKeywords": [
+          "hoodie",
+          "champion",
+          "bape"
+        ]
+      }
+    },
+    {
+      "title": "BAPE - A BATHING APE®",
+      "link": "https://us.bape.com/?srsltid=AfmBOor8rjsb9wsUZUTAaASZYuc8EbJ4rK_90vaGwnfWF78FdibbGS3R",
+      "snippet": "The official website of BAPE®. A Bathing Ape. Online store updated Weekly. Discover Latest News, Collection and Locations!",
+      "attributes": {
+        "Missing": "supreme champion"
+      },
+      "currency": "$",
+      "price": 15,
+      "position": 4,
+      "ranking": {
+        "titleRelevance": 0.125,
+        "googleScore": 0.42187034736422435,
+        "finalScore": 0.2734351736821122,
+        "googlePosition": 4,
+        "titleKeywords": [
+          "bape",
+          "bathing",
+          "ape"
+        ],
+        "matchingKeywords": [
+          "bape"
+        ]
+      }
+    },
+    {
+      "title": "Buy Bape outerwear : New & Pre-Owned - GOAT",
+      "link": "https://www.goat.com/apparel/brand/bape/outerwear",
+      "snippet": "BAPE Hoodies, Jackets and Coats ; BAPE Shark Souvenir Jacket 'Black'. 2021. $499 ; GOAT Exclusive BAPE Pearl Shark Denim Jacket Type-02 'Black'. 2025. $345.",
+      "position": 6,
+      "ranking": {
+        "titleRelevance": 0.1875,
+        "googleScore": 0.25277826369078593,
+        "finalScore": 0.22013913184539297,
+        "googlePosition": 6,
+        "titleKeywords": [
+          "buy",
+          "bape",
+          "outerwear",
+          "new",
+          "pre",
+          "owned",
+          "goat"
+        ],
+        "matchingKeywords": [
+          "supreme",
+          "bape"
+        ]
+      }
+    },
+    {
+      "title": "Supreme Champion Hooded Sweatshirt (SS25) - $158",
+      "link": "https://www.supremecommunity.com/season/itemdetails/11626/spring-summer2025-supreme-supreme-champion-hooded-sweatshirt/",
+      "snippet": "Champion reverse weave fleece with classic Champion fit. Rib gussets and pouch pocket. Tackle twill logo appliqué at chest and embroidered logo on cuff.",
+      "date": "Apr 17, 2025",
+      "position": 10,
+      "ranking": {
+        "titleRelevance": 0.25,
+        "googleScore": 0.03974743221087251,
+        "finalScore": 0.14487371610543626,
+        "googlePosition": 10,
+        "titleKeywords": [
+          "supreme",
+          "champion",
+          "hooded",
+          "sweatshirt",
+          "ss25",
+          "158"
+        ],
+        "matchingKeywords": [
+          "supreme",
+          "champion"
+        ]
+      }
+    },
+    {
+      "title": "BAPE STORE®️ NEW YORK collection available Saturday ...",
+      "link": "https://www.instagram.com/p/DR465IcjL5_/",
+      "snippet": "BAPE ZIP HOODIE Iconic streetwear from A Bathing Ape • Full zip hoodie + matching pants • Premium thick fabric",
+      "date": "Dec 5, 2025",
+      "position": 8,
+      "ranking": {
+        "titleRelevance": 0.125,
+        "googleScore": 0.13280552104633658,
+        "finalScore": 0.1289027605231683,
+        "googlePosition": 8,
+        "titleKeywords": [
+          "bape",
+          "store",
+          "new",
+          "york",
+          "collection",
+          "available",
+          "saturday"
+        ],
+        "matchingKeywords": [
+          "bape"
+        ]
+      }
+    },
+    {
+      "title": "All – us.bape.com",
+      "link": "https://us.bape.com/collections/all?srsltid=AfmBOorFVBayuDfUOOen1xyde-gRu2nmTMEBYitHRJzG3hs0lg9unMLs",
+      "snippet": "ONE POINT APE HEAD SHARK RELAXED FIT FULL ZIP HOODIE MENS. Regular: $535.00. Sale: $535.00; Regular. Sold Out. Unit Price: /per.",
+      "currency": "$",
+      "price": 15,
+      "position": 9,
+      "ranking": {
+        "titleRelevance": 0.125,
+        "googleScore": 0.08368618001734751,
+        "finalScore": 0.10434309000867376,
+        "googlePosition": 9,
+        "titleKeywords": [
+          "all",
+          "us",
+          "bape",
+          "com"
+        ],
+        "matchingKeywords": [
+          "bape"
+        ]
+      }
+    }
+  ],
+  "peopleAlsoAsk": [
+    {
+      "question": "How much are BAPE hoodies worth?",
+      "snippet": "The resale value of BAPE hoodies ranges from $187-$493. Use alias' advanced seller data to see the current demand and predicted resale pricing for your BAPE hoodie. How much do Bapestas resell for? The resale value of Bapestas ranges from $167-$354.",
+      "title": "Sell BAPE on alias",
+      "link": "https://www.alias.org/sell/brand/bape"
+    }
+  ],
+  "relatedSearches": [
+    {
+      "query": "Nyc hoodie supreme champion bape streetwear 2025 2026 stores"
+    },
+    {
+      "query": "Nyc hoodie supreme champion bape streetwear 2025 2026 review"
+    },
+    {
+      "query": "Nyc hoodie supreme champion bape streetwear 2025 2026 price"
+    },
+    {
+      "query": "Men nyc hoodie supreme champion bape streetwear 2025 2026"
+    },
+    {
+      "query": "Nyc hoodie supreme champion bape streetwear 2025 2026 black"
+    },
+    {
+      "query": "BAPE Hoodie"
+    },
+    {
+      "query": "BAPE x Champion Hoodie"
+    },
+    {
+      "query": "BAPE x CHAMPION Zip Hoodie"
+    }
+  ],
+  "credits": 1,
+  "originalQuery": "nyc hoodie",
+  "optimizedQuery": "nyc hoodie supreme champion bape streetwear 2025 2026",
+  "rankingApplied": true
+}

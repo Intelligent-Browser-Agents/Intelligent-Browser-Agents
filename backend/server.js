@@ -203,7 +203,7 @@ app.post('/api/search', async (req, res) => {
             originalQuery: q,
             optimizedQuery: optimizedQuery,
             organic: rankedResults,
-            rankingApplied: True
+            rankingApplied: true
         });
 
     } catch (error) {

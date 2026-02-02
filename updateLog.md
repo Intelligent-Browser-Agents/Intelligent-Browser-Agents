@@ -1,3 +1,8 @@
+2/2:
+- looking to fix the error from last session
+
+
+
 1/26:
 - working on ranking, first title ranking.
 - title ranking + google seo ranking done
