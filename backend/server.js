@@ -141,6 +141,36 @@ async function getOptimizedQuery(userQuery) {
     }
 }
 
+function normalizeResults(results) {
+    return results.map(result => {
+        // URL canonicalization
+        try {
+            const url = new URL(result.link);
+
+            // Strip tracking params
+            const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'srsltid', 'fbclid', 'gclid'];
+            trackingParams.forEach(param => url.searchParams.delete(param));
+
+            // Extract root domain (strip www, m, etc.)
+            const domain = url.hostname.replace(/^(www\.|m\.|mobile\.)/, '');
+
+            result.link = url.origin + url.pathname + (url.search ? url.search : '');
+            result.domain = domain;
+        } catch (e) {
+            // If URL parsing fails, just extract domain best-effort
+            result.domain = result.link;
+        }
+
+        // Title truncation
+        const MAX_TITLE_LENGTH = 60;
+        if (result.title.length > MAX_TITLE_LENGTH) {
+            result.title = result.title.slice(0, MAX_TITLE_LENGTH).replace(/\s+\S*$/, '') + '…';
+        }
+
+        return result;
+    });
+}
+
 // API endpoint
 app.post('/api/search', async (req, res) => {
     console.log('Received search request:', req.body);
@@ -192,17 +222,15 @@ app.post('/api/search', async (req, res) => {
         // 1. URL canonicalization 
         // 2. Title truncation
 
-        
-        if (!response.ok) {
-            throw new Error(`Serper API error: ${response.statusText}`);
-        }
+        const normalizedResults = normalizeResults(rankedResults);
+        console.log('Normalization Done');
 
         console.log('Search successful');
         res.json({
             ...data,
             originalQuery: q,
             optimizedQuery: optimizedQuery,
-            organic: rankedResults,
+            organic: normalizedResults,
             rankingApplied: true
         });
 

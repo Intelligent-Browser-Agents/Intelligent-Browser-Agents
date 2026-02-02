@@ -1,5 +1,7 @@
 2/2:
 - looking to fix the error from last session
+- fixed the ranking error + implemented title cleaning up and normalization
+- final output is organic
 
 
 

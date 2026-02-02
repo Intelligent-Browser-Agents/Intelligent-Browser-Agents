@@ -778,3 +778,166 @@ Search error: ReferenceError: True is not defined
   "optimizedQuery": "nyc hoodie supreme champion bape streetwear 2025 2026",
   "rankingApplied": true
 }
+
+Received search request: { q: 'knicks hoodie' }
+Optimized Query: new york knicks hoodie mens womens youth official nba store 2025 2026
+Optimized Query: new york knicks hoodie mens womens youth official nba store 2025 2026
+Query Keywords: [      
+  'new',    'york',    
+  'knicks', 'hoodie',  
+  'mens',   'womens',  
+  'youth',  'official',
+  'nba',    'store',   
+  '2025',   '2026'
+]
+Total Query Keywords: 12
+Ranked Results:  [
+  {
+    title: 'Official New York Knicks Hoodies, Knicks Sweatshirts ... - NBA Store',
+    link: 'https://store.nba.com/new-york-knicks/hoodies-and-sweatshirts/t-14030742+d-6794951811+z-92-606224859',
+    snippet: "Men's New York Knicks Nike Blue 2025/26 City Edition Courtside Remix Premium Hoodie ... We have Knicks sweatshirts for all the top brands for men, women and kids, ...",
+    position: 1,
+    ranking: {
+      titleRelevance: 0.5416666666666666,
+      googleScore: 1,
+      finalScore: 0.7708333333333333,
+      googlePosition: 1,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Official New York Knicks Hoodies, Knicks Sweatshirts ... - NBA Store',
+    link: 'https://store.nba.com/new-york-knicks/hoodies-and-sweatshirts-crew/t-47036331+d-0194177411-899634+z-9-805560255',
+    snippet: "Men's New York Knicks New Era Tan 2025/26 City Edition Sweatshirt ... We have Knicks sweatshirts for all the top brands for men, women and kids, including ...",
+    position: 2,
+    ranking: {
+      titleRelevance: 0.5416666666666666,
+      googleScore: 0.7109351736821121,
+      finalScore: 0.6263009201743894,
+      googlePosition: 2,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Hoodies & Sweatshirts - New York Knicks - NBA Store',
+    link: 'https://store.nba.com/new-york-knicks/men-hoodies-and-sweatshirts/t-47035208+ga-67+d-780573184+z-8-217681415',
+    snippet: 'We have Mens Knicks sweatshirts for all the top brands for men, women and kids, including extended sizes and big and tall options. When the weather gets ...',
+    position: 3,
+    ranking: {
+      titleRelevance: 0.4583333333333333,
+      googleScore: 0.5418430900086739,
+      finalScore: 0.5000882116710036,
+      googlePosition: 3,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Official New York Knicks Nike Hoodies, Nike Knicks Sweatshirts ...',
+    link: 'https://store.nba.com/new-york-knicks/nike-hoodies-and-sweatshirts/t-25583053+br-3039+d-904906522+z-9-2483579901',
+    snippet: 'Browse our selection of Nike Knicks hoodies, Nike sweatshirts, Knicks sherpa pullovers, and other great apparel for men, women and children at store.nba.com.',
+    position: 4,
+    ranking: {
+      titleRelevance: 0.375,
+      googleScore: 0.42187034736422435,
+      finalScore: 0.3984351736821122,
+      googlePosition: 4,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Nike Adult 2025-26 City Edition New York Knicks Club Logo Hoodie',
+    link: 'https://www.dickssportinggoods.com/p/nike-adult-2025-26-city-edition-new-york-knicks-club-logo-hoodie-25nikmnbkncksrgc2nyk/25nikmnbkncksrgc2nyk?srsltid=AfmBOoooAh1V7d6YcxAv4VhcOW2rbXVWY6mpE9SQkYGDmwHFaYZ6Wd0n',
+    snippet: 'Design. Standard fit hoodie; Front pocket offers storage; Premium fleece fabric brushed along the interior feels soft and warm; Hood with drawstring closure ...',
+    rating: 5,
+    ratingCount: 1,
+    position: 5,
+    ranking: {
+      titleRelevance: 0.4583333333333333,
+      googleScore: 0.3288122585287604,
+      finalScore: 0.3935727959310469,
+      googlePosition: 5,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Official New York Knicks New Era Hoodies, New Era ... - NBA Store',
+    link: 'https://store.nba.com/new-york-knicks/new-era-hoodies-and-sweatshirts/t-36700753+br-566885+d-56723907+z-9-29123652',
+    snippet: "Men's New York Knicks New Era Tan 2025/26 City Edition Fleece Hoodie ... We have New Era Knicks sweatshirts for all the top brands for men, women and kids, ...",
+    attributes: { Missing: 'youth | Show results with:youth' },
+    position: 7,
+    ranking: {
+      titleRelevance: 0.5416666666666666,
+      googleScore: 0.1884924370427511,
+      finalScore: 0.36507955185470886,
+      googlePosition: 7,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'New York Knicks 2026 City Edition NBA Youth Hoodie',
+    link: 'https://www.basketballjerseyworld.com/products/new-york-knicks-2026-city-edition-nba-youth-hoodie?srsltid=AfmBOopOHGUE3MttGxF9TzKFw3sM-684rYDbSecsY-qLXRbDWK961EKi',
+    snippet: 'Keep your Knicks fandom cozy in this 2025/26 Nike City Edition Orange NBA Youth Hoodie. The hoodie features brushed-back fleece fabric for incredible ...',
+    priceRange: 'A$45 delivery 14-day returns',
+    position: 9,
+    ranking: {
+      titleRelevance: 0.5833333333333334,
+      googleScore: 0.08368618001734751,
+      finalScore: 0.33350975667534044,
+      googlePosition: 9,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'Hoodies & Sweatshirts - New York Knicks - NBA Store',
+    link: 'https://store.nba.com/new-york-knicks/women-hoodies-and-sweatshirts/t-14581886+ga-57+d-0161174188+z-9-3757323164',
+    snippet: 'Unisex New York Knicks Stadium Essentials Tan 2025/26 City Edition City Star Hoodie ... We have Ladies Knicks sweatshirts for all the top brands for men, women ...',
+    attributes: { Missing: 'youth | Show results with:youth' },
+    position: 8,
+    ranking: {
+      titleRelevance: 0.4583333333333333,
+      googleScore: 0.13280552104633658,
+      finalScore: 0.2955694271898349,
+      googlePosition: 8,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'New York Knicks Gear, Knicks Jerseys, Store, Knicks Shop, Apparel',
+    link: 'https://global.nbastore.com/en/new-york-knicks/t-25360764+z-9272060-390849173',
+    snippet: 'Shop for your Knicks gear today and be sure to visit global.nbastore.com regularly for great discounts, free shipping offers on top Knicks apparel.',
+    position: 6,
+    ranking: {
+      titleRelevance: 0.3333333333333333,
+      googleScore: 0.25277826369078593,
+      finalScore: 0.29305579851205965,
+      googlePosition: 6,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  },
+  {
+    title: 'New York Knicks Hoodie, Knicks Sweatshirts, Knicks Fleece | Fanatics',
+    link: 'https://www.fanatics.com/nba/new-york-knicks/sweatshirts/o-3536+t-58816308+d-86116765+z-9-3168747488',
+    snippet: 'New York Knicks Nike 2025/26 City Edition Courtside Remix Premium Hoodie - Blue ... Men Women Kids Big & Tall. New York Knicks Sweatshirts, Knicks Sweatshirts.',
+    position: 10,
+    ranking: {
+      titleRelevance: 0.3333333333333333,
+      googleScore: 0.03974743221087251,
+      finalScore: 0.18654038277210291,
+      googlePosition: 10,
+      titleKeywords: [Array],
+      matchingKeywords: [Array]
+    }
+  }
+]
+Ranking Done
+Normalization Done
+Search successful

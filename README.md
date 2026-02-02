@@ -1,7 +1,7 @@
 Readme:
 Kush Havinal
 
-SD2 Tasks:
+SD2 Tasks (FINISHED)
 User Query → Query Optimization → API Call → Ranking → Normalization → Output
 
 TO DO:
@@ -12,13 +12,13 @@ TO DO:
 
 - API Call → Serper.dev (DONE)
 
-- Ranking:
+- Ranking: (DONE)
     //1. Title relevance
     //2. Google SEO ranking w/ logarithmic decay
     //Final Ranking = 0.50(title relevance) + 0.50(Google SEO ranking)
 
 
-- Normalization:
+- Normalization: (DONE)
     //1. URL canonicalization
     //2. Title truncation
 

@@ -225,13 +225,11 @@
                     throw new Error(`api error: ${data.message || response.statusText}`);
                 }
 
-                // // Display results
+                // Display results
                 console.log('Displaying results...');
                 output.className = 'output-box';
                 output.textContent = JSON.stringify(data, null, 2);
 
-                // ADD TO HISTORY HERE
-                // Uncomment when ready to implement:
                 addToHistory(query, data);
 
             } catch (error) {
