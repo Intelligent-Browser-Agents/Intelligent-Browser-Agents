@@ -11,6 +11,8 @@ from models import Models
 from prompt_loader import get_execution_prompt
 from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
 
+from execution.handlers import handle_type
+
 print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: GENERAL=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
 class Executor:
@@ -65,6 +67,10 @@ class Executor:
 
         action: ExecutionResult = self.llm.invoke(messages)
         
+        # #! TEST
+        # print("@#@#@@#@##EXECUTION RESULT@#@#@#@#@#@#@#@#@#@")
+        # print(ExecutionResult)
+
         # Build execution log
         args_str = []
         if action.args.url:
@@ -92,7 +98,7 @@ class Executor:
         if action.status == "failure":
             execution_log += f"\n[Executor] Error Type: {action.error_type}"
         
-        # Simulate URL change for navigation actions
+        # Executing URL change for navigation actions
         new_url = current_url
         if action.action == "navigate" and action.args.url:
             new_url = action.args.url
@@ -101,12 +107,119 @@ class Executor:
             result = await DOMExtractionUnderstanding.main(page)
             action = Action(action="navigate", args=ActionArgs(url=new_url))
             result = await dispatch_action(result[2], action)
-            print("[executor - navigation result]: ", result) # test print
+            print("[executor - navigate result]: ", result) # test print
 
-            
-        elif action.action == "click" and "login" in current_task.lower():
-            if "my.ucf" in current_url:
-                new_url = "https://my.ucf.edu/dashboard"
+        # Executing click handler (with fake input for 'role' and 'name')
+        if action.action == "click": 
+ 
+            #!!! role and name return None as it currently stands due to LLM output. fix this!
+            # # check if role and name are sent in properly
+            # if not action.args.role or not action.args.name: 
+            #     raise RuntimeError("[Executor Error] Click action produced without role or name....\n'role': {action.args.role}\n'name': {action.args.name}")
+
+            # HARDCODING FOR TEST on https://google.com
+            role = "textbox"    # should be action.args.role
+            name = "Search"     # should be
+
+            # run click action
+            result = await DOMExtractionUnderstanding.main(page)
+            # ===== WARNING: hardcoded role and name values for now!! =====
+            action = Action(action="click", args=ActionArgs(role=role, name=name))
+            result = await dispatch_action(result[2], action)
+            print("[executor - click result]: ", result) # test print
+
+
+        # Executing click handler (with fake input for 'text')
+        if action == "type": 
+
+            # # check if text is sent in properly
+            # if not action.args.text: 
+            #     raise RuntimeError("[Executor Error] Type action produced without text....\n'text': {action.args.text}}")
+
+            # HARDCODING FOR TEST on https://google.com
+            text = "University of Central Florida" # should be action.args.text
+
+            # run type action
+            result = await DOMExtractionUnderstanding.main(page)
+            # ===== WARNING: hardcoded text for now!! =====
+            action = Action(action="type", args=ActionArgs(text=text))
+            result = await dispatch_action(result[2], action)
+            print("[executor - type result]: ", result) # test print
+
+
+        # Execution of the search handler
+        if action == "search": 
+            # # check if query is sent in properly
+            # if not action.args.query: 
+            #     raise RuntimeError("[Executor Error] Search action produced without query....\n'query': {action.args.query}}")
+
+            # HARDCODING FOR TEST on https://google.com
+            query = "this is a test query" # should be action.args.query
+
+            # run type action
+            result = await DOMExtractionUnderstanding.main(page)
+            # ===== WARNING: hardcoded query for now!! =====
+            action = Action(action="search", args=ActionArgs(query=query))
+            result = await dispatch_action(result[2], action)
+            print("[executor - search result]: ", result) # test print
+
+        # Execution of the scroll handler
+        if action == "scroll": 
+            # # check if direction is sent in properly
+            # if not action.args.direction: 
+            #     raise RuntimeError("[Executor Error] scroll action produced without direction....\n'direction': {action.args.direction}}")
+
+            # HARDCODING FOR TEST on https://google.com
+            direction = "down" # should be action.args.direction
+
+            # run type action
+            result = await DOMExtractionUnderstanding.main(page)
+            # ===== WARNING: hardcoded direction for now!! =====
+            action = Action(action="scroll", args=ActionArgs(direction=direction))
+            result = await dispatch_action(result[2], action)
+            print("[executor - scroll result]: ", result) # test print
+
+
+        # Execution of the press_key handler
+        if action == "press_key": 
+            # # check if key is sent in properly
+            # if not action.args.key: 
+            #     raise RuntimeError("[Executor Error] press_key action produced without key....\n'key': {action.args.key}}")
+
+            # HARDCODING FOR TEST on https://google.com
+            key = "Enter" # should be action.args.seconds
+
+            # run type action
+            result = await DOMExtractionUnderstanding.main(page)
+            # ===== WARNING: hardcoded seconds for now!! =====
+            action = Action(action="press_key", args=ActionArgs(key=key))
+            result = await dispatch_action(result[2], action)
+            print("[executor - press_key result]: ", result) # test print
+
+
+
+        # Execution of the wait handler
+        if action == "wait": 
+            # # check if seconds is sent in properly
+            # if not action.args.seconds: 
+            #     raise RuntimeError("[Executor Error] Wait action produced without seconds....\n'seconds': {action.args.seconds}}")
+
+            # HARDCODING FOR TEST on https://google.com
+            seconds = 5.0 # should be action.args.seconds
+
+            # run type action
+            result = await DOMExtractionUnderstanding.main(page)
+            # ===== WARNING: hardcoded seconds for now!! =====
+            action = Action(action="wait", args=ActionArgs(seconds=seconds))
+            result = await dispatch_action(result[2], action)
+            print("[executor - wait result]: ", result) # test print
+
+
+
+        # # hardcoded simulation of the click action
+        # elif action.action == "click" and "login" in current_task.lower():
+        #     if "my.ucf" in current_url:
+        #         new_url = "https://my.ucf.edu/dashboard"
         
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
@@ -114,6 +227,9 @@ class Executor:
             "current_url": new_url,
         }
     
+
+
+
     def _get_user_intent(self, state: ProjectState) -> str:
         print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: _get_user_intent=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
@@ -125,6 +241,10 @@ class Executor:
             return user_message.content
         return str(user_message) if user_message else "Unknown intent"
     
+
+
+
+    # hardcoded example DOM
     def _get_simulated_dom(self, url: str, task: str) -> str:
         print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-INSIDE OF EXECUTOR: _get_simulated_dom=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 

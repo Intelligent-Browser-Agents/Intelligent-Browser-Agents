@@ -55,11 +55,11 @@ async def main():
     # from frontend (use after backend testing)
     # user_input = str(sys.argv[1])
     # user_request = user_input
-    user_request = "go to https://my.ucf.edu and log into my ucf account"
+    user_request = "navigate to https://www.rapidtables.com/tools/notepad.html. Then, type \"University of Central Florida\" into the search box"
 
     initial_input = {
         "messages": [{"role": "user", "content": f"{SIMULATION_CONTEXT}\n\nUSER REQUEST: {user_request}"}],
-        "current_url": "https://google.com",
+        "current_url": "https://example.com",
         # Plan tracking
         "plan_history": [],
         "current_plan": [],  # Will be populated by orchestrator
@@ -110,9 +110,6 @@ async def main():
 
         # runs langgraph asynchronously
         async for event in app.astream(initial_input, config):
-            
-            print("[=LOG=] NEW EVENT STARTED IN APP FROM FOR LOOP")
-            
             
             for node_name, state_update in event.items():
                 print(f"\n{'-' * 40}")
