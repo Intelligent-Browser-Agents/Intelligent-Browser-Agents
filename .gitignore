@@ -25,3 +25,11 @@ DOM_output/
 back/*
 backend/__pycache__
 *.cpython-313.pyc
+
+# Env / venv
+.env
+.venv/
+
+# Python
+__pycache__/
+*.pyc
