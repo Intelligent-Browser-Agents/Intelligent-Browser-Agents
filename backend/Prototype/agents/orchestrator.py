@@ -95,7 +95,11 @@ class Orchestrator:
             HumanMessage(content=context)
         ]
         
-        plan: OrchestratorPlan = self.planner.invoke(messages)
+        try:
+            plan: OrchestratorPlan = self.planner.invoke(messages)
+        except Exception as e:
+                print("\n!!! planner.invoke failed:",repr(e), "\n")
+                raise
         
         # Handle clarification requests
         if plan.needs_clarification:
