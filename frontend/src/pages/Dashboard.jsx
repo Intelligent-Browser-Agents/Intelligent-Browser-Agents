@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import "./Dashboard.css";
+import axios from 'axios'     // messenger between React and FastAPI
+
 
 export default function Dashboard() {
   const [input, setInput] = useState("");
@@ -14,7 +16,7 @@ export default function Dashboard() {
   const [conversations, setConversations] = useState([
     { id: crypto.randomUUID(), title: "Browse 1", messages: [] }
   ]);
-
+ 
   const [activeChatId, setActiveChatId] = useState(conversations[0].id);
 
   const bottomRef = useRef(null);
@@ -22,9 +24,10 @@ export default function Dashboard() {
 
   const activeChat = conversations.find((c) => c.id === activeChatId);
 
-  const handleSend = () => {
+  const handleSend = async() => {
     if (!input.trim()) return;
 
+    // handle user chat
     setConversations((prev) =>
       prev.map((chat) =>
         chat.id === activeChatId
@@ -39,8 +42,38 @@ export default function Dashboard() {
           : chat
       )
     );
-
     setInput("");
+
+    // send input to server to start app.py using this prompt
+    var response = await axios.post("http://localhost:8000/start_agent", {
+      user_input: input
+    });
+
+
+    
+
+    //! test
+
+    console.log(response);
+
+
+
+    // make a agent chat bubble with output  
+    setConversations((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChatId
+          ? {
+              ...chat,
+              messages: [...chat.messages, { text: response.data?.STDOUT, isUser: false }],
+              title:
+                chat.messages.length === 0
+                  ? response.data?.STDOUT.slice(0, 20) || "New Chat"
+                  : chat.title,
+            }
+          : chat
+      )
+    );
+
   };
 
   const handleNewChat = () => {

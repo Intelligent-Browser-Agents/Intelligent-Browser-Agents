@@ -1,5 +1,7 @@
 # FastAPI framework, Requests for anything but GET
 from fastapi import FastAPI, Request 
+from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # ForJWT Gen
 import jwt
@@ -16,6 +18,9 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 
+# For starting main or app
+import subprocess
+
 # For password hashing
 import bcrypt
 
@@ -27,11 +32,14 @@ from email.mime.multipart import MIMEMultipart
 # Random Password Generation
 import secrets
 
+# For copying sys env variables
+import sys
+
+
 """
 To-DO List:
 -Create Verify Email endpoint, using app.get and token sent as query param
 """
-
 
 # Global Variables
 conn = None #postgres connection
@@ -81,7 +89,20 @@ async def lifespan(app: FastAPI):
         print('Database connection closed.')
     
 
-app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan)
+app = FastAPI()     # for testing frontend/backend endpoints (EDWIN)
+
+# add CORS so that the UI can access the server from localhost.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 """
 Helper Functions
@@ -97,7 +118,6 @@ def user_exists_id(userId: int) -> bool:
     cur.execute(query, (str(userId),))
     results = cur.fetchone()
     return results is not None
-
 
 def send_forgot_password(to_email: str, new_password: str) -> None:
     from_email = os.getenv('EMAIL_ACCOUNT')
@@ -387,3 +407,47 @@ async def forgot_password(request: Request):
 """
 Placeholder for Agent API Endpoints
 """
+
+
+"""
+Endpoints for frontend/backend interaction
+"""
+
+# # todo: handle user input and start app.py on the user's hardware
+@app.post('/start_agent')
+async def start_agent(requests: Request): 
+
+    # get user's input from frontend
+    body = await requests.json()
+    user_input = body.get("user_input")
+    print("TEST: ", user_input) 
+
+
+    # send user input to app.py
+    #! start the agent on the SERVER
+    # start main with subprocess
+    current_env = os.environ.copy()
+    python_path = sys.executable
+
+    result = subprocess.run(
+        [python_path, 'Prototype\\app.py', user_input],
+        env=current_env,
+        capture_output=True,
+        text=True
+    )
+
+    return {"STDOUT": result.stdout, "STDERR": result.stderr}
+
+
+# todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)
+@app.get('/send_logs')
+async def send_logs(requests: Request): 
+    
+    # get output from app.py
+    # send app.py output to the frontend
+    pass 
+
+# test endpoint
+@app.get('/')
+def test():
+    return {"message": "This works!"}
