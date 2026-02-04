@@ -3,15 +3,15 @@ This file will act as the prototype of Intelligent Browser Agents (WORKING)
 
 Course of action: 
 
-[ ] app opens an instance of browser
-    [ ] keep for duration of program)
+[o] app opens an instance of browser
+    [o] keep for duration of program)
     
 [ ] Execution agent will select actions from execution handler
-    [ ] Navigate(page, url) - (working example in main.py)
-    [ ] Click(page, role, name)
-    [ ] Type(page, text)
+    [o] Navigate(page, url) - (working example in main.py)
+    [o] Click(page, role, name)
+    [X] Type(page, text) - Does NOT work!!
     [ ] Search(page, query)
-    [ ] Scroll(page, direction)
+    [X] Scroll(page, direction) - Does NOT work!!
     [ ] Press Key(page, key)
     [ ] Wait(page, seconds)
     
@@ -55,7 +55,7 @@ async def main():
     # from frontend (use after backend testing)
     # user_input = str(sys.argv[1])
     # user_request = user_input
-    user_request = "navigate to https://www.rapidtables.com/tools/notepad.html. Then, type \"University of Central Florida\" into the search box"
+    user_request = "navigate to https://ucf.edu. Then, scroll to the bottom of the page."
 
     initial_input = {
         "messages": [{"role": "user", "content": f"{SIMULATION_CONTEXT}\n\nUSER REQUEST: {user_request}"}],

@@ -121,7 +121,7 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
             execution_time_ms=elapsed
         )
 
-
+# maybe pass in the focused input field??
 async def handle_type(page: Page, text: str) -> ExecutionOutput:
     """
     Type text into focused input field.
