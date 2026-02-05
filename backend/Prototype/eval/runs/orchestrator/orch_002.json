@@ -1,0 +1,22 @@
+{
+  "case": {
+    "id": "orch_002",
+    "user": "Log into my account and check my bill",
+    "expected": {
+      "needs_clarification": true
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [],
+    "plan_history": [],
+    "current_step_index": 0,
+    "plan_status": "NEEDS_CLARIFICATION",
+    "current_task": "Awaiting user clarification",
+    "reasoning_log": [
+      "[Planner] Needs clarification:\n  - Which account do you want to log into (e.g., Google, Amazon, bank name)?\n  - Can you specify the website or service provider for the account?\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}
