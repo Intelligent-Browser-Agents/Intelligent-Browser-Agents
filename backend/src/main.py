@@ -9,7 +9,7 @@ from google import genai
 import asyncio
 from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
 import json
-from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
+from dom_extraction import dom_extractor
 from execution import Action, dispatch_action, ActionArgs
 # from app_prototype import runtime
 
@@ -27,11 +27,11 @@ def read_markdown_file(file_path):
         return f"Error: {file_path} was not found."
 
 # prompts
-orchestration_prompt = read_markdown_file('backend\\prototype\\prompts\\orchestration.prompt.md')
-execution_prompt = read_markdown_file('backend\\prototype\\prompts\\execution.prompt.md')
-verification_prompt = read_markdown_file('backend\\prototype\\prompts\\verification.prompt.md')
-fallback_prompt = read_markdown_file('backend\\prototype\\prompts\\fallback.prompt.md')
-interaction_prompt = read_markdown_file('backend\\prototype\\prompts\\interaction.prompt.md')
+orchestration_prompt = read_markdown_file('backend\\src\\prompts\\orchestration.prompt.md')
+execution_prompt = read_markdown_file('backend\\src\\prompts\\execution.prompt.md')
+verification_prompt = read_markdown_file('backend\\src\\prompts\\verification.prompt.md')
+fallback_prompt = read_markdown_file('backend\\src\\prompts\\fallback.prompt.md')
+interaction_prompt = read_markdown_file('backend\\src\\prompts\\interaction.prompt.md')
 
 
 # grab user input from frontend

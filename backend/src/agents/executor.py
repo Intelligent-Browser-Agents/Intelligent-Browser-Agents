@@ -9,7 +9,7 @@ from schema import ExecutionResult
 from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt
-from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
+from dom_extraction import dom_extractor
 
 from execution.handlers import handle_type
 
@@ -106,7 +106,7 @@ class Executor:
             new_url = action.args.url
             
             # run navigate action using DOMExtractionUnderstanding
-            result = await DOMExtractionUnderstanding.main(page)
+            result = await dom_extractor.main(page)
             action = Action(action="navigate", args=ActionArgs(url=new_url))
             result = await dispatch_action(result[2], action)
             print("[executor - navigate result]: ", result) # test print
@@ -124,7 +124,7 @@ class Executor:
             name = "Search"     # should be
 
             # run click action
-            result = await DOMExtractionUnderstanding.main(page)
+            result = await dom_extractor.main(page)
             # ===== WARNING: hardcoded role and name values for now!! =====
             action = Action(action="click", args=ActionArgs(role=role, name=name))
             result = await dispatch_action(result[2], action)
@@ -142,7 +142,7 @@ class Executor:
             text = "University of Central Florida" # should be action.args.text
 
             # run type action
-            result = await DOMExtractionUnderstanding.main(page)
+            result = await dom_extractor.main(page)
             # ===== WARNING: hardcoded text for now!! =====
             action = Action(action="type", args=ActionArgs(text=text))
             result = await dispatch_action(result[2], action)
@@ -159,7 +159,7 @@ class Executor:
             query = "this is a test query" # should be action.args.query
 
             # run type action
-            result = await DOMExtractionUnderstanding.main(page)
+            result = await dom_extractor.main(page)
             # ===== WARNING: hardcoded query for now!! =====
             action = Action(action="search", args=ActionArgs(query=query))
             result = await dispatch_action(result[2], action)
@@ -175,7 +175,7 @@ class Executor:
             direction = "down" # should be action.args.direction
 
             # run type action
-            result = await DOMExtractionUnderstanding.main(page)
+            result = await dom_extractor.main(page)
             # ===== WARNING: hardcoded direction for now!! =====
             action = Action(action="scroll", args=ActionArgs(direction="down"))
             result = await dispatch_action(result[2], action)
@@ -192,7 +192,7 @@ class Executor:
             key = "Enter" # should be action.args.seconds
 
             # run type action
-            result = await DOMExtractionUnderstanding.main(page)
+            result = await dom_extractor.main(page)
             # ===== WARNING: hardcoded seconds for now!! =====
             action = Action(action="press_key", args=ActionArgs(key=key))
             result = await dispatch_action(result[2], action)
@@ -210,7 +210,7 @@ class Executor:
             seconds = 5.0 # should be action.args.seconds
 
             # run type action
-            result = await DOMExtractionUnderstanding.main(page)
+            result = await dom_extractor.main(page)
             # ===== WARNING: hardcoded seconds for now!! =====
             action = Action(action="wait", args=ActionArgs(seconds=seconds))
             result = await dispatch_action(result[2], action)

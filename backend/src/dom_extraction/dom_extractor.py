@@ -34,6 +34,112 @@ class FuncFailed(BaseException):
     error: Any
     execution_time: float
 
+
+def infer_role_from_tag(tag: str, attrs: dict) -> str:
+    """
+    Infer ARIA role from HTML tag and attributes.
+
+    Args:
+        tag: HTML tag name (e.g., 'button', 'input', 'a')
+        attrs: Dictionary of HTML attributes
+
+    Returns:
+        ARIA role string (e.g., 'button', 'textbox', 'link')
+    """
+    # Check for explicit ARIA role first
+    if 'role' in attrs:
+        return attrs['role']
+
+    # Infer from HTML tag and type
+    if tag == 'button':
+        return 'button'
+    elif tag == 'a':
+        return 'link'
+    elif tag == 'input':
+        input_type = attrs.get('type', 'text')
+        if input_type in ['text', 'email', 'password', 'tel', 'url']:
+            return 'textbox'
+        elif input_type == 'search':
+            return 'searchbox'
+        elif input_type == 'checkbox':
+            return 'checkbox'
+        elif input_type == 'radio':
+            return 'radio'
+        elif input_type == 'submit':
+            return 'button'
+        elif input_type == 'button':
+            return 'button'
+        else:
+            return 'textbox'  # Default for unknown input types
+    elif tag == 'textarea':
+        return 'textbox'
+    elif tag == 'select':
+        return 'combobox'
+    elif tag == 'option':
+        return 'option'
+    elif tag == 'label':
+        return 'label'
+    else:
+        return tag  # Fallback to tag name
+
+
+def extract_aria_name(element, attrs: dict) -> str:
+    """
+    Extract accessible name from element following ARIA naming priority.
+
+    Priority order:
+    1. aria-label
+    2. aria-labelledby (text content of referenced element)
+    3. Element text content
+    4. placeholder attribute
+    5. title attribute
+    6. value attribute
+    7. alt attribute (for images)
+
+    Args:
+        element: BeautifulSoup element
+        attrs: Dictionary of HTML attributes
+
+    Returns:
+        Accessible name string, or empty string if none found
+    """
+    # 1. aria-label has highest priority
+    if 'aria-label' in attrs:
+        return attrs['aria-label'].strip()
+
+    # 2. aria-labelledby (simplified - just use the ID as fallback)
+    if 'aria-labelledby' in attrs:
+        # In a full implementation, we'd look up the referenced element
+        # For now, we'll skip to next option
+        pass
+
+    # 3. Text content (trimmed and cleaned)
+    text_content = element.get_text(strip=True)
+    if text_content:
+        return text_content
+
+    # 4. placeholder attribute
+    if 'placeholder' in attrs:
+        return attrs['placeholder'].strip()
+
+    # 5. title attribute
+    if 'title' in attrs:
+        return attrs['title'].strip()
+
+    # 6. value attribute (for buttons/inputs)
+    if 'value' in attrs:
+        return attrs['value'].strip()
+
+    # 7. alt attribute (for images used as buttons)
+    if 'alt' in attrs:
+        return attrs['alt'].strip()
+
+    # 8. name attribute as last resort
+    if 'name' in attrs:
+        return attrs['name'].strip()
+
+    return ""  # No accessible name found
+
 async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
     """
     Retrieves a webpage's DOM Tree and takes a screenshot of webpage.
@@ -140,13 +246,41 @@ def retrieve_interactive_elements(page_data: str) -> str:
             elements = soup.find_all(tag)
 
             for element in elements:
-                interactive_element = {'url': url, 'title': title, 'tag': tag, 'text': element.text, 'attributes': element.attrs}
+                # Extract ARIA role and name
+                role = infer_role_from_tag(tag, element.attrs)
+                name = extract_aria_name(element, element.attrs)
+
+                # Build ARIA-formatted element
+                interactive_element = {
+                    'url': url,
+                    'title': title,
+                    'role': role,
+                    'name': name,
+                    'tag': tag,  # Keep tag for debugging
+                    'attributes': element.attrs  # Keep raw attributes for reference
+                }
                 interactive_elements.append(interactive_element)
 
-        onclick_elements = soup.find_all(onclick = True)
+        # Handle onclick elements that might not be in common tags
+        onclick_elements = soup.find_all(onclick=True)
 
         for element in onclick_elements:
-            interactive_element = {'url': url, 'title': title, 'tag': tag, 'text': element.text, 'attributes': element.attrs}
+            # Skip if already processed
+            if element.name in common_interactive_tags:
+                continue
+
+            # Extract ARIA role and name
+            role = infer_role_from_tag(element.name, element.attrs)
+            name = extract_aria_name(element, element.attrs)
+
+            interactive_element = {
+                'url': url,
+                'title': title,
+                'role': role,
+                'name': name,
+                'tag': element.name,
+                'attributes': element.attrs
+            }
             interactive_elements.append(interactive_element)
 
         #Packages function meta data and webpage data into a Pydantic object

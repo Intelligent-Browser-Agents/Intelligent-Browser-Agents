@@ -21,7 +21,7 @@ Course of action:
 """
 
 from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
-from informationGathering.DOMExtractionUnderstanding import DOMExtractionUnderstanding
+from dom_extraction import dom_extractor
 from execution import Action, dispatch_action, ActionArgs
 from langgraph.checkpoint.memory import MemorySaver
 from agents.verifier import Verifier
@@ -103,7 +103,7 @@ async def main():
 
 
         # # todo: WHEN WE CALL THE PROPER FUNCTION IN ==EXECUTOR==, THIS SHOULD RUN 
-        # result = await DOMExtractionUnderstanding.main(browser)
+        # result = await dom_extractor.main(browser)
         # action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
         # result = await dispatch_action(result[2], action)
         # print(result)
