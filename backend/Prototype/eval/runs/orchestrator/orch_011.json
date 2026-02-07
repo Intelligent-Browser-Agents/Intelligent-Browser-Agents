@@ -1,0 +1,36 @@
+{
+  "case": {
+    "id": "orch_011",
+    "user": "Find the mailing address and phone number for UCF Registrar",
+    "expected": {
+      "needs_clarification": false,
+      "min_steps": 3,
+      "max_steps": 8
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search Google for \"UCF Registrar contact information\".",
+      "Navigate to the official UCF Registrar's Office website from the search results.",
+      "Locate the mailing address on the Registrar's website.",
+      "Locate the phone number on the Registrar's website.",
+      "Present the mailing address and phone number."
+    ],
+    "plan_history": [
+      "Search Google for \"UCF Registrar contact information\".",
+      "Navigate to the official UCF Registrar's Office website from the search results.",
+      "Locate the mailing address on the Registrar's website.",
+      "Locate the phone number on the Registrar's website.",
+      "Present the mailing address and phone number."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search Google for \"UCF Registrar contact information\".",
+    "reasoning_log": [
+      "[Planner] Goal: Find the mailing address and phone number for the University of Central Florida (UCF) Registrar's Office.\n[Planner] Created plan with 5 steps:\n  1. Search Google for \"UCF Registrar contact information\".\n  2. Navigate to the official UCF Registrar's Office website from the search results.\n  3. Locate the mailing address on the Registrar's website.\n  4. Locate the phone number on the Registrar's website.\n  5. Present the mailing address and phone number.\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

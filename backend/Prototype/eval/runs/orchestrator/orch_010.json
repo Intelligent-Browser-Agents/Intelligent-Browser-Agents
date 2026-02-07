@@ -1,7 +1,7 @@
 {
   "case": {
-    "id": "orch_002",
-    "user": "Log into my account and check my bill",
+    "id": "orch_010",
+    "user": "Buy the cheapest round-trip flight from Orlando to Denver next month",
     "expected": {
       "needs_clarification": true
     }
@@ -14,7 +14,7 @@
     "plan_status": "NEEDS_CLARIFICATION",
     "current_task": "Awaiting user clarification",
     "reasoning_log": [
-      "[Planner] Needs clarification:\n  - Which account do you want to log into (e.g., Google, Amazon, bank name)?\n  - Please specify the website or service where you want to check your bill.\n"
+      "[Planner] Needs clarification:\n  - What dates next month are you considering for your trip?\n  - Do you have any preferred airlines or airports?\n  - Are there any specific times you would like to depart or arrive?\n"
     ],
     "is_complete": false,
     "needs_fallback": false

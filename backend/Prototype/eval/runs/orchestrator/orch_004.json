@@ -1,6 +1,6 @@
 {
   "case": {
-    "id": "orch_001",
+    "id": "orch_004",
     "user": "Find the refund policy for Spotify Premium",
     "expected": {
       "needs_clarification": false,
@@ -13,18 +13,18 @@
     "current_plan": [
       "Search Google for \"Spotify Premium refund policy\".",
       "Navigate to the official Spotify help page regarding refunds.",
-      "Locate and present the specific details of the Spotify Premium refund policy."
+      "Locate and present the refund policy details for Spotify Premium."
     ],
     "plan_history": [
       "Search Google for \"Spotify Premium refund policy\".",
       "Navigate to the official Spotify help page regarding refunds.",
-      "Locate and present the specific details of the Spotify Premium refund policy."
+      "Locate and present the refund policy details for Spotify Premium."
     ],
     "current_step_index": 0,
     "plan_status": "MAINTAIN",
     "current_task": "Search Google for \"Spotify Premium refund policy\".",
     "reasoning_log": [
-      "[Planner] Goal: Find the refund policy for Spotify Premium.\n[Planner] Created plan with 3 steps:\n  1. Search Google for \"Spotify Premium refund policy\".\n  2. Navigate to the official Spotify help page regarding refunds.\n  3. Locate and present the specific details of the Spotify Premium refund policy.\n"
+      "[Planner] Goal: Find the refund policy for Spotify Premium.\n[Planner] Created plan with 3 steps:\n  1. Search Google for \"Spotify Premium refund policy\".\n  2. Navigate to the official Spotify help page regarding refunds.\n  3. Locate and present the refund policy details for Spotify Premium.\n"
     ],
     "is_complete": false,
     "needs_fallback": false

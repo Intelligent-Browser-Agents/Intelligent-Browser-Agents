@@ -1,0 +1,52 @@
+{
+  "case": {
+    "id": "orch_006",
+    "user": "Compare the tuition and application deadlines for UCF vs UF for Fall 2026",
+    "expected": {
+      "needs_clarification": false,
+      "min_steps": 3,
+      "max_steps": 8
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search Google for \"UCF tuition Fall 2026\".",
+      "Navigate to the official UCF tuition page.",
+      "Find and record the tuition information for Fall 2026.",
+      "Search Google for \"UCF application deadline Fall 2026\".",
+      "Navigate to the official UCF application deadline page.",
+      "Find and record the application deadline for Fall 2026.",
+      "Search Google for \"UF tuition Fall 2026\".",
+      "Navigate to the official UF tuition page.",
+      "Find and record the tuition information for Fall 2026.",
+      "Search Google for \"UF application deadline Fall 2026\".",
+      "Navigate to the official UF application deadline page.",
+      "Find and record the application deadline for Fall 2026.",
+      "Present the tuition and application deadlines for both UCF and UF for Fall 2026."
+    ],
+    "plan_history": [
+      "Search Google for \"UCF tuition Fall 2026\".",
+      "Navigate to the official UCF tuition page.",
+      "Find and record the tuition information for Fall 2026.",
+      "Search Google for \"UCF application deadline Fall 2026\".",
+      "Navigate to the official UCF application deadline page.",
+      "Find and record the application deadline for Fall 2026.",
+      "Search Google for \"UF tuition Fall 2026\".",
+      "Navigate to the official UF tuition page.",
+      "Find and record the tuition information for Fall 2026.",
+      "Search Google for \"UF application deadline Fall 2026\".",
+      "Navigate to the official UF application deadline page.",
+      "Find and record the application deadline for Fall 2026.",
+      "Present the tuition and application deadlines for both UCF and UF for Fall 2026."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search Google for \"UCF tuition Fall 2026\".",
+    "reasoning_log": [
+      "[Planner] Goal: Compare the tuition and application deadlines for UCF and UF for Fall 2026.\n[Planner] Created plan with 13 steps:\n  1. Search Google for \"UCF tuition Fall 2026\".\n  2. Navigate to the official UCF tuition page.\n  3. Find and record the tuition information for Fall 2026.\n  4. Search Google for \"UCF application deadline Fall 2026\".\n  5. Navigate to the official UCF application deadline page.\n  6. Find and record the application deadline for Fall 2026.\n  7. Search Google for \"UF tuition Fall 2026\".\n  8. Navigate to the official UF tuition page.\n  9. Find and record the tuition information for Fall 2026.\n  10. Search Google for \"UF application deadline Fall 2026\".\n  11. Navigate to the official UF application deadline page.\n  12. Find and record the application deadline for Fall 2026.\n  13. Present the tuition and application deadlines for both UCF and UF for Fall 2026.\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

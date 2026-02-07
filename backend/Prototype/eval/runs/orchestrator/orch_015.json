@@ -1,0 +1,22 @@
+{
+  "case": {
+    "id": "orch_015",
+    "user": "Sign me up for a gym membership near me",
+    "expected": {
+      "needs_clarification": true
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [],
+    "plan_history": [],
+    "current_step_index": 0,
+    "plan_status": "NEEDS_CLARIFICATION",
+    "current_task": "Awaiting user clarification",
+    "reasoning_log": [
+      "[Planner] Needs clarification:\n  - Do you have any preferred gym brands or specific features you're looking for (e.g., swimming pool, specific equipment)?\n  - Are you looking for a specific type of membership (e.g., monthly, annual)?\n  - To provide accurate location-based results, may I have your permission to access your location?\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

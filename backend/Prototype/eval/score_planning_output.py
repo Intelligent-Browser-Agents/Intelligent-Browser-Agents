@@ -54,11 +54,24 @@ def main():
         raise SystemExit(f"No run files found in {RUN_DIR}. Run: python -m eval.run_orchestrator")
 
     # Write CSV
-    fieldnames = list(rows[0].keys())
+    # Write CSV (union of all keys, because clarify-mode has different fields)
+    all_keys = set()
+    for r in rows:
+        all_keys.update(r.keys())
+
+    preferred_order = [
+        "id", "user", "expected_needs_clarification", "actual_plan_status", "steps",
+        "mode_correct", "has_plan", "step_count_ok", "current_task_matches_step0",
+        "not_complete_after_planning", "has_no_plan_on_clarify", "not_complete_on_clarify",
+        "plan_status_ok", "total_pass_fraction",
+    ]
+    fieldnames = [k for k in preferred_order if k in all_keys] + sorted(all_keys - set(preferred_order))
+
     with CSV_OUT.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        for r in rows:
+            writer.writerow(r)
 
     print(f"Wrote {len(rows)} rows to {CSV_OUT}")
 

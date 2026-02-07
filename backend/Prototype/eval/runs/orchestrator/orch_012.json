@@ -1,0 +1,38 @@
+{
+  "case": {
+    "id": "orch_012",
+    "user": "Reset my Netflix password",
+    "expected": {
+      "needs_clarification": true
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search for \"Netflix password reset\".",
+      "Navigate to the Netflix password reset page.",
+      "Enter the email address or phone number associated with the Netflix account.",
+      "Choose a verification method (email or text message).",
+      "Follow the instructions in the email or text message to reset the password.",
+      "Create a new, strong password.",
+      "Log in to Netflix with the new password to confirm the reset was successful."
+    ],
+    "plan_history": [
+      "Search for \"Netflix password reset\".",
+      "Navigate to the Netflix password reset page.",
+      "Enter the email address or phone number associated with the Netflix account.",
+      "Choose a verification method (email or text message).",
+      "Follow the instructions in the email or text message to reset the password.",
+      "Create a new, strong password.",
+      "Log in to Netflix with the new password to confirm the reset was successful."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search for \"Netflix password reset\".",
+    "reasoning_log": [
+      "[Planner] Goal: Reset my Netflix password.\n[Planner] Created plan with 7 steps:\n  1. Search for \"Netflix password reset\".\n  2. Navigate to the Netflix password reset page.\n  3. Enter the email address or phone number associated with the Netflix account.\n  4. Choose a verification method (email or text message).\n  5. Follow the instructions in the email or text message to reset the password.\n  6. Create a new, strong password.\n  7. Log in to Netflix with the new password to confirm the reset was successful.\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

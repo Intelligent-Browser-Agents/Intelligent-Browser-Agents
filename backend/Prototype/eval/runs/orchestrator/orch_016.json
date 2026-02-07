@@ -1,0 +1,36 @@
+{
+  "case": {
+    "id": "orch_016",
+    "user": "Compare iPhone 15 vs Pixel 8 camera differences from reputable sources",
+    "expected": {
+      "needs_clarification": false,
+      "min_steps": 3,
+      "max_steps": 8
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search Google for reputable reviews and comparisons of iPhone 15 and Pixel 8 camera quality.",
+      "Visit websites of well-known tech reviewers (e.g., The Verge, GSMArena, Digital Photography Review) from the search results.",
+      "Extract information about camera specs, features, and performance of both phones from each source.",
+      "Summarize the key differences and similarities in camera capabilities between the iPhone 15 and Pixel 8 based on the collected information.",
+      "Present a comparison of the iPhone 15 and Pixel 8 camera differences based on reputable sources."
+    ],
+    "plan_history": [
+      "Search Google for reputable reviews and comparisons of iPhone 15 and Pixel 8 camera quality.",
+      "Visit websites of well-known tech reviewers (e.g., The Verge, GSMArena, Digital Photography Review) from the search results.",
+      "Extract information about camera specs, features, and performance of both phones from each source.",
+      "Summarize the key differences and similarities in camera capabilities between the iPhone 15 and Pixel 8 based on the collected information.",
+      "Present a comparison of the iPhone 15 and Pixel 8 camera differences based on reputable sources."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search Google for reputable reviews and comparisons of iPhone 15 and Pixel 8 camera quality.",
+    "reasoning_log": [
+      "[Planner] Goal: Compare the camera capabilities of the iPhone 15 and Pixel 8 using reputable sources.\n[Planner] Created plan with 5 steps:\n  1. Search Google for reputable reviews and comparisons of iPhone 15 and Pixel 8 camera quality.\n  2. Visit websites of well-known tech reviewers (e.g., The Verge, GSMArena, Digital Photography Review) from the search results.\n  3. Extract information about camera specs, features, and performance of both phones from each source.\n  4. Summarize the key differences and similarities in camera capabilities between the iPhone 15 and Pixel 8 based on the collected information.\n  5. Present a comparison of the iPhone 15 and Pixel 8 camera differences based on reputable sources.\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

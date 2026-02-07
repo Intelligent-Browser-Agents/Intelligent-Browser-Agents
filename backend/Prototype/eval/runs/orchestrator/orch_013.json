@@ -1,0 +1,36 @@
+{
+  "case": {
+    "id": "orch_013",
+    "user": "Find a good beginner guide to LangGraph and summarize the key concepts",
+    "expected": {
+      "needs_clarification": false,
+      "min_steps": 3,
+      "max_steps": 8
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search Google for 'LangGraph beginner guide'.",
+      "Examine the search results and select a guide that appears comprehensive and suitable for beginners.",
+      "Navigate to the selected guide.",
+      "Read the guide to understand the key concepts of LangGraph.",
+      "Summarize the key concepts of LangGraph as presented in the guide."
+    ],
+    "plan_history": [
+      "Search Google for 'LangGraph beginner guide'.",
+      "Examine the search results and select a guide that appears comprehensive and suitable for beginners.",
+      "Navigate to the selected guide.",
+      "Read the guide to understand the key concepts of LangGraph.",
+      "Summarize the key concepts of LangGraph as presented in the guide."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search Google for 'LangGraph beginner guide'.",
+    "reasoning_log": [
+      "[Planner] Goal: Find a suitable beginner's guide to LangGraph, then summarize its key concepts.\n[Planner] Created plan with 5 steps:\n  1. Search Google for 'LangGraph beginner guide'.\n  2. Examine the search results and select a guide that appears comprehensive and suitable for beginners.\n  3. Navigate to the selected guide.\n  4. Read the guide to understand the key concepts of LangGraph.\n  5. Summarize the key concepts of LangGraph as presented in the guide.\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

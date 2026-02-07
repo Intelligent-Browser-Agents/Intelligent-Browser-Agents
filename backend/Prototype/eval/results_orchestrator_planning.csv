@@ -1,0 +1,18 @@
+id,user,expected_needs_clarification,actual_plan_status,steps,mode_correct,has_plan,step_count_ok,current_task_matches_step0,not_complete_after_planning,has_no_plan_on_clarify,not_complete_on_clarify,plan_status_ok,total_pass_fraction
+orch_001,Find the refund policy for Spotify Premium,False,MAINTAIN,3,True,True,True,True,True,,,True,1.0
+orch_002,Log into my account and check my bill,True,NEEDS_CLARIFICATION,0,True,,,,,True,True,True,1.0
+orch_004,Find the refund policy for Spotify Premium,False,MAINTAIN,3,True,True,True,True,True,,,True,1.0
+orch_005,Download the latest NVIDIA GPU drivers for an RTX 4070 on Windows 11,False,MAINTAIN,5,True,True,True,True,True,,,True,1.0
+orch_006,Compare the tuition and application deadlines for UCF vs UF for Fall 2026,False,MAINTAIN,13,True,True,False,True,True,,,True,0.8333333333333334
+orch_007,Book me a hotel in Denver for March 10–15 under $180/night,True,NEEDS_CLARIFICATION,0,True,,,,,True,True,True,1.0
+orch_008,Check my Chase credit card balance and last 5 transactions,True,NEEDS_CLARIFICATION,0,True,,,,,True,True,True,1.0
+orch_009,Find the official IRS page explaining how to file a tax extension,False,MAINTAIN,4,True,True,True,True,True,,,True,1.0
+orch_010,Buy the cheapest round-trip flight from Orlando to Denver next month,True,NEEDS_CLARIFICATION,0,True,,,,,True,True,True,1.0
+orch_011,Find the mailing address and phone number for UCF Registrar,False,MAINTAIN,5,True,True,True,True,True,,,True,1.0
+orch_012,Reset my Netflix password,True,MAINTAIN,7,False,True,True,True,True,,,True,0.8333333333333334
+orch_013,Find a good beginner guide to LangGraph and summarize the key concepts,False,MAINTAIN,5,True,True,True,True,True,,,True,1.0
+orch_014,Find the warranty policy for AirPods Pro (2nd gen) from Apple,False,MAINTAIN,3,True,True,True,True,True,,,True,1.0
+orch_015,Sign me up for a gym membership near me,True,NEEDS_CLARIFICATION,0,True,,,,,True,True,True,1.0
+orch_016,Compare iPhone 15 vs Pixel 8 camera differences from reputable sources,False,MAINTAIN,5,True,True,True,True,True,,,True,1.0
+orch_017,Find the official documentation for Python's csv module and show how DictWriter works,False,MAINTAIN,4,True,True,True,True,True,,,True,1.0
+orch_018,Log into my UCF account and check my grades,True,NEEDS_CLARIFICATION,0,True,,,,,True,True,True,1.0

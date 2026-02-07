@@ -1,0 +1,34 @@
+{
+  "case": {
+    "id": "orch_009",
+    "user": "Find the official IRS page explaining how to file a tax extension",
+    "expected": {
+      "needs_clarification": false,
+      "min_steps": 3,
+      "max_steps": 8
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search Google for \"IRS tax extension form\".",
+      "Select the official IRS website from the search results.",
+      "Locate the page or document explaining how to file a tax extension.",
+      "Present the relevant information on filing a tax extension from the IRS website."
+    ],
+    "plan_history": [
+      "Search Google for \"IRS tax extension form\".",
+      "Select the official IRS website from the search results.",
+      "Locate the page or document explaining how to file a tax extension.",
+      "Present the relevant information on filing a tax extension from the IRS website."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search Google for \"IRS tax extension form\".",
+    "reasoning_log": [
+      "[Planner] Goal: Find the official IRS page explaining how to file a tax extension.\n[Planner] Created plan with 4 steps:\n  1. Search Google for \"IRS tax extension form\".\n  2. Select the official IRS website from the search results.\n  3. Locate the page or document explaining how to file a tax extension.\n  4. Present the relevant information on filing a tax extension from the IRS website.\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

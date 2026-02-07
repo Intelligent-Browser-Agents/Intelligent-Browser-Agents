@@ -1,7 +1,7 @@
 {
   "case": {
-    "id": "orch_002",
-    "user": "Log into my account and check my bill",
+    "id": "orch_007",
+    "user": "Book me a hotel in Denver for March 10\u201315 under $180/night",
     "expected": {
       "needs_clarification": true
     }
@@ -14,7 +14,7 @@
     "plan_status": "NEEDS_CLARIFICATION",
     "current_task": "Awaiting user clarification",
     "reasoning_log": [
-      "[Planner] Needs clarification:\n  - Which account do you want to log into (e.g., Google, Amazon, bank name)?\n  - Please specify the website or service where you want to check your bill.\n"
+      "[Planner] Needs clarification:\n  - Do you have any preferred hotel chains or amenities?\n  - Do you have any specific location preferences within Denver?\n"
     ],
     "is_complete": false,
     "needs_fallback": false

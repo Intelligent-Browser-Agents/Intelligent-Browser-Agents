@@ -1,0 +1,32 @@
+{
+  "case": {
+    "id": "orch_014",
+    "user": "Find the warranty policy for AirPods Pro (2nd gen) from Apple",
+    "expected": {
+      "needs_clarification": false,
+      "min_steps": 3,
+      "max_steps": 8
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search Google for \"Apple AirPods Pro 2nd generation warranty policy\".",
+      "Click the link that leads to the official Apple website.",
+      "Locate and present the warranty policy for AirPods Pro (2nd generation)."
+    ],
+    "plan_history": [
+      "Search Google for \"Apple AirPods Pro 2nd generation warranty policy\".",
+      "Click the link that leads to the official Apple website.",
+      "Locate and present the warranty policy for AirPods Pro (2nd generation)."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search Google for \"Apple AirPods Pro 2nd generation warranty policy\".",
+    "reasoning_log": [
+      "[Planner] Goal: Find the warranty policy for AirPods Pro (2nd generation) from Apple's official website.\n[Planner] Created plan with 3 steps:\n  1. Search Google for \"Apple AirPods Pro 2nd generation warranty policy\".\n  2. Click the link that leads to the official Apple website.\n  3. Locate and present the warranty policy for AirPods Pro (2nd generation).\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}

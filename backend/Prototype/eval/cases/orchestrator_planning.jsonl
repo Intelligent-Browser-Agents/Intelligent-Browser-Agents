@@ -1,3 +1,18 @@
 {"id":"orch_001","user":"Find the refund policy for Spotify Premium","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
 {"id":"orch_002","user":"Log into my account and check my bill","expected":{"needs_clarification":true}}
+{"id":"orch_004","user":"Find the refund policy for Spotify Premium","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_005","user":"Download the latest NVIDIA GPU drivers for an RTX 4070 on Windows 11","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_006","user":"Compare the tuition and application deadlines for UCF vs UF for Fall 2026","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_007","user":"Book me a hotel in Denver for March 10–15 under $180/night","expected":{"needs_clarification":true}}
+{"id":"orch_008","user":"Check my Chase credit card balance and last 5 transactions","expected":{"needs_clarification":true}}
+{"id":"orch_009","user":"Find the official IRS page explaining how to file a tax extension","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_010","user":"Buy the cheapest round-trip flight from Orlando to Denver next month","expected":{"needs_clarification":true}}
+{"id":"orch_011","user":"Find the mailing address and phone number for UCF Registrar","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_012","user":"Reset my Netflix password","expected":{"needs_clarification":true}}
+{"id":"orch_013","user":"Find a good beginner guide to LangGraph and summarize the key concepts","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_014","user":"Find the warranty policy for AirPods Pro (2nd gen) from Apple","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_015","user":"Sign me up for a gym membership near me","expected":{"needs_clarification":true}}
+{"id":"orch_016","user":"Compare iPhone 15 vs Pixel 8 camera differences from reputable sources","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_017","user":"Find the official documentation for Python's csv module and show how DictWriter works","expected":{"needs_clarification":false,"min_steps":3,"max_steps":8}}
+{"id":"orch_018","user":"Log into my UCF account and check my grades","expected":{"needs_clarification":true}}
 

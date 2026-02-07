@@ -1,0 +1,36 @@
+{
+  "case": {
+    "id": "orch_005",
+    "user": "Download the latest NVIDIA GPU drivers for an RTX 4070 on Windows 11",
+    "expected": {
+      "needs_clarification": false,
+      "min_steps": 3,
+      "max_steps": 8
+    }
+  },
+  "output": {
+    "number_of_transactions": 1,
+    "current_plan": [
+      "Search Google for 'NVIDIA RTX 4070 drivers Windows 11'.",
+      "Navigate to the official NVIDIA driver download page.",
+      "Select the appropriate driver version for Windows 11.",
+      "Download the driver installation package.",
+      "Locate the downloaded driver file and present it to the user."
+    ],
+    "plan_history": [
+      "Search Google for 'NVIDIA RTX 4070 drivers Windows 11'.",
+      "Navigate to the official NVIDIA driver download page.",
+      "Select the appropriate driver version for Windows 11.",
+      "Download the driver installation package.",
+      "Locate the downloaded driver file and present it to the user."
+    ],
+    "current_step_index": 0,
+    "plan_status": "MAINTAIN",
+    "current_task": "Search Google for 'NVIDIA RTX 4070 drivers Windows 11'.",
+    "reasoning_log": [
+      "[Planner] Goal: Download the latest NVIDIA GPU drivers for an RTX 4070 on Windows 11.\n[Planner] Created plan with 5 steps:\n  1. Search Google for 'NVIDIA RTX 4070 drivers Windows 11'.\n  2. Navigate to the official NVIDIA driver download page.\n  3. Select the appropriate driver version for Windows 11.\n  4. Download the driver installation package.\n  5. Locate the downloaded driver file and present it to the user.\n"
+    ],
+    "is_complete": false,
+    "needs_fallback": false
+  }
+}
