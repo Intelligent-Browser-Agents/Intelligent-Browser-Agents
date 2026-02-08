@@ -8,12 +8,13 @@ Course of action:
     
 [ ] Execution agent will select actions from execution handler
     [o] Navigate(page, url) - (working example in main.py)
+    ! Everything after 'navigate's parameters are not passed in correctly. 
     [o] Click(page, role, name)
-    [X] Type(page, text) - Does NOT work!!
-    [ ] Search(page, query)
-    [X] Scroll(page, direction) - Does NOT work!!
-    [ ] Press Key(page, key)
-    [ ] Wait(page, seconds)
+    [o] Type(page, text) - Does NOT work!!
+    [X] Search(page, query)
+    [o] Scroll(page, direction) - Does NOT work!!
+    [o] Press Key(page, key)
+    [o] Wait(page, seconds)
     
 [ ] Get user input from the frontend and call this file from server passing in user input
     [ ] Send this input to the orchestrator
