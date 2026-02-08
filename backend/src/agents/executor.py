@@ -115,9 +115,9 @@ class Executor:
         elif action.action == "click": 
  
             #!!! role and name return None as it currently stands due to LLM output. fix this!
-            # check if role and name are sent in properly
-            if not action.args.role or not action.args.name: 
-                raise RuntimeError("[Executor Error] Click action produced without role or name....\n'role': {action.args.role}\n'name': {action.args.name}")
+            # # check if role and name are sent in properly
+            # if not action.args.role or not action.args.name: 
+            #     raise RuntimeError(f"[Executor Error] Click action produced without role or name....\n'role': {action.args.role}\n'name': {action.args.name}")
 
             # HARDCODING FOR TEST on https://google.com
             role = "textbox"    # should be action.args.role
@@ -132,11 +132,11 @@ class Executor:
 
 
         # Executing click handler (with fake input for 'text')
-        elif action == "type": 
+        elif action.action == "type": 
 
-            # check if text is sent in properly
-            if not action.args.text: 
-                raise RuntimeError("[Executor Error] Type action produced without text....\n'text': {action.args.text}}")
+            # # check if text is sent in properly
+            # if not action.args.text: 
+            #     raise RuntimeError(f"[Executor Error] Type action produced without text....\n'text': {action.args.text}")
 
             # HARDCODING FOR TEST on https://google.com
             text = "University of Central Florida" # should be action.args.text
@@ -149,27 +149,27 @@ class Executor:
             print("[executor - type result]: ", result) # test print
 
 
-        # Execution of the search handler
-        elif action == "search": 
-            # check if query is sent in properly
-            if not action.args.query: 
-                raise RuntimeError("[Executor Error] Search action produced without query....\n'query': {action.args.query}}")
+        # # Execution of the search handler
+        # elif action.action == "search": 
+        #     # check if query is sent in properly
+        #     if not action.args.query: 
+        #         raise RuntimeError(f"[Executor Error] Search action produced without query....\n'query': {action.args.query}")
 
-            # HARDCODING FOR TEST on https://google.com
-            query = "this is a test query" # should be action.args.query
+        #     # HARDCODING FOR TEST on https://google.com
+        #     query = "this is a test query" # should be action.args.query
 
-            # run type action
-            result = await dom_extractor.main(page)
-            # ===== WARNING: hardcoded query for now!! =====
-            action = Action(action="search", args=ActionArgs(query=query))
-            result = await dispatch_action(result[2], action)
-            print("[executor - search result]: ", result) # test print
+        #     # run type action
+        #     result = await dom_extractor.main(page)
+        #     # ===== WARNING: hardcoded query for now!! =====
+        #     action = Action(action="search", args=ActionArgs(query=query))
+        #     result = await dispatch_action(result[2], action)
+        #     print("[executor - search result]: ", result) # test print
 
         # Execution of the scroll handler
-        elif action == "scroll": 
-            # check if direction is sent in properly
-            if not action.args.direction: 
-                raise RuntimeError("[Executor Error] scroll action produced without direction....\n'direction': {action.args.direction}}")
+        elif action.action == "scroll": 
+            # # check if direction is sent in properly
+            # if not action.args.direction: 
+            #     raise RuntimeError(f"[Executor Error] scroll action produced without direction....\n'direction': {action.args.direction}")
 
             # HARDCODING FOR TEST on https://google.com
             direction = "down" # should be action.args.direction
@@ -183,10 +183,10 @@ class Executor:
 
 
         # Execution of the press_key handler
-        elif action == "press_key": 
-            # check if key is sent in properly
-            if not action.args.key: 
-                raise RuntimeError("[Executor Error] press_key action produced without key....\n'key': {action.args.key}}")
+        elif action.action == "press_key": 
+            # # check if key is sent in properly
+            # if not action.args.key: 
+            #     raise RuntimeError(f"[Executor Error] press_key action produced without key....\n'key': {action.args.key}")
 
             # HARDCODING FOR TEST on https://google.com
             key = "Enter" # should be action.args.seconds
@@ -201,13 +201,13 @@ class Executor:
 
 
         # Execution of the wait handler
-        elif action == "wait": 
-            # check if seconds is sent in properly
-            if not action.args.seconds: 
-                raise RuntimeError("[Executor Error] Wait action produced without seconds....\n'seconds': {action.args.seconds}}")
+        elif action.action == "wait": 
+            # # check if seconds is sent in properly
+            # if not action.args.seconds: 
+            #     raise RuntimeError(f"[Executor Error] Wait action produced without seconds....\n'seconds': {action.args.seconds}")
 
             # HARDCODING FOR TEST on https://google.com
-            seconds = 5.0 # should be action.args.seconds
+            seconds = 50.0 # should be action.args.seconds
 
             # run type action
             result = await dom_extractor.main(page)
