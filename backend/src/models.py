@@ -66,7 +66,7 @@ MODELS = {
 
 # Assign specific models to each agent based on their needs
 AGENT_MODELS = {
-    "planner": "gemini-flash", # Smart reasoning for plan creation (1 call)
+    "planner": "gemini-pro", # Smart reasoning for plan creation (1 call)
     "decision": "gemini-flash", # Routing decisions (N calls) - could use cheaper
     "executor": "gemini-flash", # Translating tasks to actions
     "verifier": "gemini-flash", # Checking results - could use cheaper

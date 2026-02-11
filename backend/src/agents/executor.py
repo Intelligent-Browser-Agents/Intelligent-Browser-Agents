@@ -65,163 +65,113 @@ class Executor:
             HumanMessage(content=context)
         ]
 
-        action: ExecutionResult = self.llm.invoke(messages)
+        llm_action: ExecutionResult = self.llm.invoke(messages)
         
-        # #! TEST
-        # print("@#@#@@#@##EXECUTION RESULT@#@#@#@#@#@#@#@#@#@")
-        # print(ExecutionResult)
-
-        # Build execution log
-        args_str = []
-        if action.args.url:
-            args_str.append(f"url={action.args.url}")
-        if action.args.role:
-            args_str.append(f"role={action.args.role}")
-        if action.args.name:
-            args_str.append(f"name={action.args.name}")
-        if action.args.text:
-            args_str.append(f"text={action.args.text}")
-        if action.args.direction:
-            args_str.append(f"direction={action.args.direction}")
-        if action.args.key:
-            args_str.append(f"key={action.args.key}")
-        if action.args.seconds:
-            args_str.append(f"seconds={action.args.seconds}")
-        
-        execution_log = (
-            f"[Executor] Action: {action.action}\n"
-            f"[Executor] Args: {', '.join(args_str) or 'None'}\n"
-            f"[Executor] Status: {action.status}\n"
-            f"[Executor] Message: {action.message}"
-        )
-        
-        if action.status == "failure":
-            execution_log += f"\n[Executor] Error Type: {action.error_type}"
-        
-       
+        # Initialize result tracking
         new_url = current_url
+        dispatch_result = None
+        actual_action = None
+        actual_args = {}
         
         # Executing URL change for navigation actions
-        if action.action == "navigate" and action.args.url:
-            new_url = action.args.url
+        if llm_action.action == "navigate" and llm_action.args.url:
+            new_url = llm_action.args.url
+            actual_action = "navigate"
+            actual_args = {"url": new_url}
             
             # run navigate action using DOMExtractionUnderstanding
-            result = await dom_extractor.main(page)
-            action = Action(action="navigate", args=ActionArgs(url=new_url))
-            result = await dispatch_action(result[2], action)
-            print("[executor - navigate result]: ", result) # test print
+            dom_result = await dom_extractor.main(page)
+            action_obj = Action(action="navigate", args=ActionArgs(url=new_url))
+            dispatch_result = await dispatch_action(dom_result[2], action_obj)
+            print("[executor - navigate result]: ", dispatch_result)
 
         # Executing click handler (with fake input for 'role' and 'name')
-        elif action.action == "click": 
- 
-            #!!! role and name return None as it currently stands due to LLM output. fix this!
-            # # check if role and name are sent in properly
-            # if not action.args.role or not action.args.name: 
-            #     raise RuntimeError(f"[Executor Error] Click action produced without role or name....\n'role': {action.args.role}\n'name': {action.args.name}")
-
+        elif llm_action.action == "click": 
             # HARDCODING FOR TEST on https://google.com
-            role = "textbox"    # should be action.args.role
-            name = "Search"     # should be
+            # TODO: Use llm_action.args.role and llm_action.args.name when LLM output is fixed
+            role = llm_action.args.role or "textbox"
+            name = llm_action.args.name or "Search"
+            actual_action = "click"
+            actual_args = {"role": role, "name": name}
 
             # run click action
-            result = await dom_extractor.main(page)
-            # ===== WARNING: hardcoded role and name values for now!! =====
-            action = Action(action="click", args=ActionArgs(role=role, name=name))
-            result = await dispatch_action(result[2], action)
-            print("[executor - click result]: ", result) # test print
+            dom_result = await dom_extractor.main(page)
+            action_obj = Action(action="click", args=ActionArgs(role=role, name=name))
+            dispatch_result = await dispatch_action(dom_result[2], action_obj)
+            print("[executor - click result]: ", dispatch_result)
 
-
-        # Executing click handler (with fake input for 'text')
-        elif action.action == "type": 
-
-            # # check if text is sent in properly
-            # if not action.args.text: 
-            #     raise RuntimeError(f"[Executor Error] Type action produced without text....\n'text': {action.args.text}")
-
+        # Executing type handler
+        elif llm_action.action == "type": 
             # HARDCODING FOR TEST on https://google.com
-            text = "University of Central Florida" # should be action.args.text
+            # TODO: Use llm_action.args.text when LLM output is fixed
+            text = llm_action.args.text or "University of Central Florida"
+            actual_action = "type"
+            actual_args = {"text": text}
 
             # run type action
-            result = await dom_extractor.main(page)
-            # ===== WARNING: hardcoded text for now!! =====
-            action = Action(action="type", args=ActionArgs(text=text))
-            result = await dispatch_action(result[2], action)
-            print("[executor - type result]: ", result) # test print
-
-
-        # # Execution of the search handler
-        # elif action.action == "search": 
-        #     # check if query is sent in properly
-        #     if not action.args.query: 
-        #         raise RuntimeError(f"[Executor Error] Search action produced without query....\n'query': {action.args.query}")
-
-        #     # HARDCODING FOR TEST on https://google.com
-        #     query = "this is a test query" # should be action.args.query
-
-        #     # run type action
-        #     result = await dom_extractor.main(page)
-        #     # ===== WARNING: hardcoded query for now!! =====
-        #     action = Action(action="search", args=ActionArgs(query=query))
-        #     result = await dispatch_action(result[2], action)
-        #     print("[executor - search result]: ", result) # test print
+            dom_result = await dom_extractor.main(page)
+            action_obj = Action(action="type", args=ActionArgs(text=text))
+            dispatch_result = await dispatch_action(dom_result[2], action_obj)
+            print("[executor - type result]: ", dispatch_result)
 
         # Execution of the scroll handler
-        elif action.action == "scroll": 
-            # # check if direction is sent in properly
-            # if not action.args.direction: 
-            #     raise RuntimeError(f"[Executor Error] scroll action produced without direction....\n'direction': {action.args.direction}")
+        elif llm_action.action == "scroll": 
+            # Use LLM's direction if provided, otherwise default to "down"
+            direction = llm_action.args.direction or "down"
+            actual_action = "scroll"
+            actual_args = {"direction": direction}
 
-            # HARDCODING FOR TEST on https://google.com
-            direction = "down" # should be action.args.direction
-
-            # run type action
-            result = await dom_extractor.main(page)
-            # ===== WARNING: hardcoded direction for now!! =====
-            action = Action(action="scroll", args=ActionArgs(direction="down"))
-            result = await dispatch_action(result[2], action)
-            print("[executor - scroll result]: ", result) # test print
-
+            # run scroll action
+            dom_result = await dom_extractor.main(page)
+            action_obj = Action(action="scroll", args=ActionArgs(direction=direction))
+            dispatch_result = await dispatch_action(dom_result[2], action_obj)
+            print("[executor - scroll result]: ", dispatch_result)
 
         # Execution of the press_key handler
-        elif action.action == "press_key": 
-            # # check if key is sent in properly
-            # if not action.args.key: 
-            #     raise RuntimeError(f"[Executor Error] press_key action produced without key....\n'key': {action.args.key}")
+        elif llm_action.action == "press_key": 
+            # Use LLM's key if provided, otherwise default to "Enter"
+            key = llm_action.args.key or "Enter"
+            actual_action = "press_key"
+            actual_args = {"key": key}
 
-            # HARDCODING FOR TEST on https://google.com
-            key = "Enter" # should be action.args.seconds
-
-            # run type action
-            result = await dom_extractor.main(page)
-            # ===== WARNING: hardcoded seconds for now!! =====
-            action = Action(action="press_key", args=ActionArgs(key=key))
-            result = await dispatch_action(result[2], action)
-            print("[executor - press_key result]: ", result) # test print
-
-
+            # run press_key action
+            dom_result = await dom_extractor.main(page)
+            action_obj = Action(action="press_key", args=ActionArgs(key=key))
+            dispatch_result = await dispatch_action(dom_result[2], action_obj)
+            print("[executor - press_key result]: ", dispatch_result)
 
         # Execution of the wait handler
-        elif action.action == "wait": 
-            # # check if seconds is sent in properly
-            # if not action.args.seconds: 
-            #     raise RuntimeError(f"[Executor Error] Wait action produced without seconds....\n'seconds': {action.args.seconds}")
+        elif llm_action.action == "wait": 
+            # Use LLM's seconds if provided, otherwise default to 5.0
+            seconds = llm_action.args.seconds or 5.0
+            actual_action = "wait"
+            actual_args = {"seconds": seconds}
 
-            # HARDCODING FOR TEST on https://google.com
-            seconds = 50.0 # should be action.args.seconds
+            # run wait action
+            dom_result = await dom_extractor.main(page)
+            action_obj = Action(action="wait", args=ActionArgs(seconds=seconds))
+            dispatch_result = await dispatch_action(dom_result[2], action_obj)
+            print("[executor - wait result]: ", dispatch_result)
 
-            # run type action
-            result = await dom_extractor.main(page)
-            # ===== WARNING: hardcoded seconds for now!! =====
-            action = Action(action="wait", args=ActionArgs(seconds=seconds))
-            result = await dispatch_action(result[2], action)
-            print("[executor - wait result]: ", result) # test print
-
-
-
-        # # hardcoded simulation of the click action
-        # elif action.action == "click" and "login" in current_task.lower():
-        #     if "my.ucf" in current_url:
-        #         new_url = "https://my.ucf.edu/dashboard"
+        # Build execution log from ACTUAL dispatch result (not LLM prediction)
+        if dispatch_result:
+            args_str = ', '.join(f"{k}={v}" for k, v in actual_args.items()) or 'None'
+            execution_log = (
+                f"[Executor] Action: {dispatch_result.action}\n"
+                f"[Executor] Args: {args_str}\n"
+                f"[Executor] Status: {dispatch_result.status}\n"
+                f"[Executor] Message: {dispatch_result.message}"
+            )
+            if dispatch_result.status == "failure":
+                execution_log += f"\n[Executor] Error Type: {dispatch_result.error_type}"
+        else:
+            # Fallback if no dispatch happened (unknown action)
+            execution_log = (
+                f"[Executor] Action: {llm_action.action}\n"
+                f"[Executor] Args: None\n"
+                f"[Executor] Status: failure\n"
+                f"[Executor] Message: Unknown or unsupported action type"
+            )
         
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
