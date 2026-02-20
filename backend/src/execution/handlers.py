@@ -173,24 +173,24 @@ async def handle_search(page: Page, query: str) -> ExecutionOutput:
     """
     start = asyncio.get_event_loop().time()
 
-    try:
-        search_box = page.get_by_role("combobox", name="Search")
-        await search_box.click()
-        await search_box.fill(query)
-        await page.keyboard.press("Enter")
+    selector_candidates = [
+        "input[name='q']",
+        "textarea[name='q']",
+        "input[type='search']",
+        "input[aria-label*='Search' i]",
+        "textarea[aria-label*='Search' i]",
+        "#searchbox_input",
+        "#search_form_input_homepage",
+        "#sb_form_q",
+    ]
 
-        elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
-        return ExecutionOutput(
-            action="search",
-            args={"text": query},
-            status="success",
-            error_type="none",
-            message=f"Searched for '{query}'",
-            execution_time_ms=elapsed
-        )
-    except Exception:
+    for selector in selector_candidates:
         try:
-            await page.keyboard.type(query)
+            locator = page.locator(selector).first
+            if await locator.count() == 0:
+                continue
+            await locator.click(timeout=2500)
+            await locator.fill(query, timeout=2500)
             await page.keyboard.press("Enter")
 
             elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
@@ -199,19 +199,61 @@ async def handle_search(page: Page, query: str) -> ExecutionOutput:
                 args={"text": query},
                 status="success",
                 error_type="none",
-                message=f"Searched for '{query}' (fallback)",
+                message=f"Searched for '{query}'",
                 execution_time_ms=elapsed
             )
-        except Exception as e:
+        except Exception:
+            continue
+
+    role_candidates = [
+        ("searchbox", None),
+        ("combobox", "Search"),
+        ("textbox", "Search"),
+    ]
+
+    for role, name in role_candidates:
+        try:
+            locator = page.get_by_role(role, name=name) if name else page.get_by_role(role)
+            target = locator.first
+            await target.click(timeout=2500)
+            await target.fill(query, timeout=2500)
+            await page.keyboard.press("Enter")
+
             elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
             return ExecutionOutput(
                 action="search",
                 args={"text": query},
-                status="failure",
-                error_type="element_not_found",
-                message=f"Failed to search: {str(e)}",
+                status="success",
+                error_type="none",
+                message=f"Searched for '{query}'",
                 execution_time_ms=elapsed
             )
+        except Exception:
+            continue
+
+    try:
+        await page.keyboard.type(query)
+        await page.keyboard.press("Enter")
+
+        elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
+        return ExecutionOutput(
+            action="search",
+            args={"text": query},
+            status="success",
+            error_type="none",
+            message=f"Searched for '{query}' (keyboard fallback)",
+            execution_time_ms=elapsed
+        )
+    except Exception as e:
+        elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
+        return ExecutionOutput(
+            action="search",
+            args={"text": query},
+            status="failure",
+            error_type="element_not_found",
+            message=f"Failed to search: {str(e)}",
+            execution_time_ms=elapsed
+        )
 
 
 async def handle_scroll(page: Page, direction: str) -> ExecutionOutput:

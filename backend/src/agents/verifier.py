@@ -1,145 +1,132 @@
 """
 Verification Agent
-Evaluates whether execution actions satisfied the plan step.
+Evaluates whether execution actions satisfied the current plan step.
 """
 
-from langchain_core.messages import SystemMessage, HumanMessage
-from schema import VerificationResult
+import re
+
 from state import ProjectState
-from models import Models
-from prompt_loader import get_verification_prompt
 
 
 class Verifier:
     """
-    LLM-powered Verifier that checks if actions succeeded.
-    Uses the verification prompt from the prompts directory.
+    Deterministic verifier that reads executor logs and routes control.
+
+    This removes unstable simulated verification behavior and directly
+    uses the execution result emitted by Executor.
     """
-    
-    # Track attempts to occasionally simulate failures
+
     _attempt_count = 0
-    
+
     def __init__(self):
-        self.llm = Models.verifier(VerificationResult)
-        # Load the verification prompt from the prompts directory
-        self.system_prompt = get_verification_prompt()
+        # Kept for compatibility with existing initialization patterns.
+        pass
 
     def __call__(self, state: ProjectState) -> dict:
         Verifier._attempt_count += 1
-        
-        current_task = state.get("current_task", "Unknown task")
-        current_plan = state.get("current_plan", [])
+
         current_step = state.get("current_step_index", 0)
+        current_plan = state.get("current_plan", [])
+        current_task = state.get("current_task", "")
+        step_count = len(current_plan)
+        is_last_step = step_count > 0 and current_step >= step_count - 1
+
         reasoning_log = state.get("reasoning_log", [])
         last_execution = reasoning_log[-1] if reasoning_log else "No execution log"
-        user_intent = self._get_user_intent(state)
-        
-        # Get simulated states
-        before_url = state.get("previous_url", state.get("current_url", "unknown"))
-        after_url = state.get("current_url", "unknown")
-        simulated_result = self._get_simulated_result(current_task, Verifier._attempt_count)
-        
-        # Determine if this is the last step
-        is_last_step = current_step >= len(current_plan) - 1 if current_plan else False
-        
-        # Build context following the prompt's expected inputs
-        context = f"""
-        MAIN_GOAL: {user_intent}
 
-        PLAN_STEP: {current_task}
+        executor_action = self._extract_executor_action(last_execution)
+        executor_status = self._extract_executor_status(last_execution)
+        executor_message = self._extract_executor_message(last_execution)
+        action_aligned = self._is_action_aligned_with_task(current_task, executor_action)
 
-        EXECUTION_OUTPUT:
-        {last_execution}
+        step_complete = executor_status == "success" and action_aligned
+        goal_complete = step_complete and is_last_step
+        needs_fallback = not step_complete
 
-        BEFORE_STATE:
-        URL: {before_url}
+        if step_complete:
+            verdict = "success"
+            handoff = "orchestration"
+            error_type = "none"
+            message = executor_message or "Execution step completed successfully."
+            next_step_attempts = 0
+        else:
+            verdict = "failure"
+            handoff = "fallback"
+            error_type = "execution_failure"
+            if executor_status == "success" and not action_aligned:
+                message = (
+                    f"Action '{executor_action}' succeeded but did not satisfy current task: {current_task}"
+                )
+            else:
+                message = executor_message or "Execution step failed."
+            next_step_attempts = int(state.get("step_attempts", 0)) + 1
 
-        AFTER_STATE:
-        URL: {after_url}
-        {simulated_result}
-
-        IS_FINAL_STEP: {is_last_step}
-
-        Verify if the action was successful based on this information.
-        """
-
-        messages = [
-            SystemMessage(content=self.system_prompt),
-            HumanMessage(content=context)
-        ]
-
-        result: VerificationResult = self.llm.invoke(messages)
-        
         verification_log = (
-            f"[Verifier] Verdict: {result.verdict}\n"
-            f"[Verifier] Step Complete: {result.step_complete}\n"
-            f"[Verifier] Goal Complete: {result.goal_complete}\n"
-            f"[Verifier] Message: {result.message}\n"
-            f"[Verifier] Handoff: {result.handoff}"
+            f"[Verifier] Verdict: {verdict}\n"
+            f"[Verifier] Action Aligned: {action_aligned}\n"
+            f"[Verifier] Step Complete: {step_complete}\n"
+            f"[Verifier] Goal Complete: {goal_complete}\n"
+            f"[Verifier] Message: {message}\n"
+            f"[Verifier] Handoff: {handoff}"
         )
-        
-        if result.error_type != "none":
-            verification_log += f"\n[Verifier] Error Type: {result.error_type}"
-        
+
+        if error_type != "none":
+            verification_log += f"\n[Verifier] Error Type: {error_type}"
+
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-            "needs_fallback": result.handoff == "fallback",
-            "is_complete": result.goal_complete,
+            "needs_fallback": needs_fallback,
+            "is_complete": goal_complete,
+            "last_step_complete": step_complete,
+            "step_attempts": next_step_attempts,
             "reasoning_log": [verification_log],
         }
-    
-    def _get_user_intent(self, state: ProjectState) -> str:
-        """Extract user intent from messages."""
-        user_message = state["messages"][0] if state["messages"] else None
-        if isinstance(user_message, dict):
-            return user_message.get("content", "Unknown intent")
-        elif hasattr(user_message, "content"):
-            return user_message.content
-        return str(user_message) if user_message else "Unknown intent"
-    
-    def _get_simulated_result(self, task: str, attempt: int) -> str:
-        """Generate simulated post-action page state."""
-        
-        # Occasionally simulate a failure (roughly 15% chance on early attempts)
-        if attempt <= 2 and attempt % 6 == 0:
-            return (
-                "DOM_SNAPSHOT:\n"
-                "[role='dialog'] 'Cookie Consent'\n"
-                "  [role='button'] 'Accept All'\n"
-                "  [role='button'] 'Reject All'\n"
-                "\nNote: An overlay modal appeared blocking the target element."
-            )
-        
-        if "click" in task.lower() and "login" in task.lower():
-            return (
-                "DOM_SNAPSHOT:\n"
-                "[role='main']\n"
-                "  [role='heading'] 'Welcome, Student'\n"
-                "  [role='link'] 'My Courses'\n"
-                "  [role='link'] 'Canvas'\n"
-                "  [role='link'] 'Knights Email'\n"
-                "\nLogin button was clicked. Page is now showing the dashboard."
-            )
-        elif "username" in task.lower() or "enter" in task.lower():
-            return (
-                "DOM_SNAPSHOT:\n"
-                "[role='textbox'] 'username' value='student@ucf.edu'\n"
-                "[role='textbox'] 'password' placeholder='Enter your password'\n"
-                "[role='button'] 'Sign In'\n"
-                "\nText was successfully entered into the input field."
-            )
-        elif "navigate" in task.lower():
-            return (
-                "DOM_SNAPSHOT:\n"
-                "[role='main']\n"
-                "  [role='heading'] 'Page Title'\n"
-                "  [role='navigation'] 'Main Menu'\n"
-                "\nNavigation successful. New page has loaded."
-            )
-        else:
-            return f"Action completed successfully. Page state updated as expected after: {task}"
-    
+
+    def _extract_executor_action(self, execution_log: str) -> str:
+        match = re.search(r"\[Executor\] Action:\s*([a-z_]+)", execution_log, flags=re.IGNORECASE)
+        if not match:
+            return "unknown"
+        return match.group(1).lower()
+
+    def _extract_executor_status(self, execution_log: str) -> str:
+        match = re.search(r"\[Executor\] Status:\s*(success|failure)", execution_log, flags=re.IGNORECASE)
+        if not match:
+            return "failure"
+        return match.group(1).lower()
+
+    def _extract_executor_message(self, execution_log: str) -> str:
+        match = re.search(r"\[Executor\] Message:\s*(.+)", execution_log)
+        if not match:
+            return ""
+        return match.group(1).strip()
+
+    def _is_action_aligned_with_task(self, task: str, action: str) -> bool:
+        t = (task or "").lower()
+        a = (action or "").lower()
+
+        search_markers = [
+            "search",
+            "look up",
+            "lookup",
+            "find information",
+            "locate information",
+            "find info",
+            "query",
+        ]
+        navigate_markers = [
+            "navigate",
+            "go to ",
+            "open ",
+            "visit ",
+        ]
+
+        if any(marker in t for marker in search_markers):
+            return a == "search"
+        if any(marker in t for marker in navigate_markers):
+            return a == "navigate"
+        return True
+
     @classmethod
     def reset_simulation(cls):
-        """Reset the attempt counter for new test runs."""
+        """Compatibility reset hook."""
         cls._attempt_count = 0

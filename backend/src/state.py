@@ -27,13 +27,19 @@ class ProjectState(TypedDict):
     current_plan: List[str]  # The active plan steps
     current_step_index: int  # Which step we're on (0-based)
     number_of_transactions: int  # Number of transactions completed
+    step_attempts: int  # Attempts made on the current step
+    max_step_attempts: int  # Max retries before aborting
+    max_transactions: int  # Max graph transactions before aborting
     
     # Coordination fields
-    plan_status: Literal["MAINTAIN", "UPDATE", "CREATE"]
+    plan_status: Literal["MAINTAIN", "UPDATE", "CREATE", "NEEDS_CLARIFICATION"]
     current_task: str  # The specific task for executor
     reasoning_log: List[str]
     is_complete: bool
     needs_fallback: bool
+    last_step_complete: bool
+    mission_failed: bool
+    abort_reason: Optional[str]
     
     # store the page being passed around
     # page: Optional[Page]

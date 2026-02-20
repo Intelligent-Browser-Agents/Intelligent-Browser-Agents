@@ -5,17 +5,22 @@ This module defines the input/output contracts for the execution agent,
 including action specifications, arguments, and execution results.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices, ConfigDict
 from typing import Literal, Optional, Dict, Any
 
 
 class ActionArgs(BaseModel):
     """Arguments for browser actions."""
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     url: Optional[str] = None
     role: Optional[str] = None
     name: Optional[str] = None
-    text: Optional[str] = None
+    text: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("text", "query"),
+        serialization_alias="text",
+    )
     direction: Optional[Literal["up", "down"]] = None
     key: Optional[str] = None
     seconds: Optional[float] = None

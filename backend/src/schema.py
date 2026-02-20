@@ -4,9 +4,9 @@ These Pydantic models define the structured output format for each agent,
 aligned with the prompts in the prompts/ directory.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices, model_validator
 from typing import List, Optional, Literal
-
+from urllib.parse import urlparse
 
 # =============================================================================
 # ORCHESTRATION LAYER
@@ -44,40 +44,68 @@ class ExecutionArgs(BaseModel):
     url: Optional[str] = Field(default=None, description="URL for navigation actions.")
     role: Optional[str] = Field(default=None, description="ARIA role for element targeting.")
     name: Optional[str] = Field(default=None, description="Accessible name for element targeting.")
-    text: Optional[str] = Field(default=None, description="Text to type or search query.")
+    text: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("text", "query"),
+        serialization_alias="text",
+        description="Text to type or search query.",
+    )
     direction: Optional[Literal["up", "down"]] = Field(default=None, description="Scroll direction.")
     key: Optional[str] = Field(default=None, description="Key to press (e.g., 'Enter', 'Escape').")
     seconds: Optional[float] = Field(default=None, description="Duration for wait actions.")
 
 
 class ExecutionResult(BaseModel):
-    """
-    Schema for the Execution Agent's action output.
-    Translates plan steps into specific browser actions.
-    """
-    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait"] = Field(
-        description="The browser action to perform."
-    )
-    args: ExecutionArgs = Field(
-        description="Arguments for the action."
-    )
-    status: Literal["success", "failure"] = Field(
-        description="Whether the action can be attempted or not."
-    )
+    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait"]
+    args: ExecutionArgs
+    status: Literal["success", "failure"]
     error_type: Literal[
-        "none", 
-        "element_not_found", 
-        "ambiguous_step", 
-        "tool_limit", 
-        "navigation_blocked", 
-        "unknown"
-    ] = Field(
-        default="none",
-        description="Type of error if status is failure."
-    )
-    message: str = Field(
-        description="One concise sentence describing what was done or why it failed."
-    )
+        "none", "element_not_found", "ambiguous_step",
+        "tool_limit", "navigation_blocked", "unknown"
+    ] = "none"
+    message: str
+
+    @model_validator(mode="after")
+    def validate_action_requirements(self):
+        required = {
+            "navigate": ["url"],
+            "click": ["role", "name"],
+            "type": ["text"],
+            "search": ["text"],
+            "scroll": ["direction"],
+            "press_key": ["key"],
+            "wait": ["seconds"],
+        }
+
+        if self.status == "success":
+            missing = []
+            for key in required[self.action]:
+                v = getattr(self.args, key, None)
+                if v is None or (isinstance(v, str) and not v.strip()):
+                    missing.append(key)
+            if missing:
+                raise ValueError(
+                    f"status='success' requires non-empty args for action='{self.action}': {missing}"
+                )
+
+            if self.action == "navigate":
+                raw_url = (self.args.url or "").strip()
+                parsed = urlparse(raw_url)
+                if (
+                    any(char.isspace() for char in raw_url)
+                    or parsed.scheme not in ("http", "https")
+                    or not parsed.netloc
+                ):
+                    raise ValueError(
+                        "status='success' for action='navigate' requires a valid absolute http(s) URL without spaces"
+                    )
+
+            if self.action == "wait" and (self.args.seconds is None or self.args.seconds <= 0):
+                raise ValueError("status='success' for action='wait' requires args.seconds > 0")
+        else:
+            if self.error_type == "none":
+                raise ValueError("status='failure' cannot use error_type='none'")
+        return self
 
 
 # =============================================================================

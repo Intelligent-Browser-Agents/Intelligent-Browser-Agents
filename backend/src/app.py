@@ -37,14 +37,17 @@ Verifier.reset_simulation()
 async def main():
     
     # 1. Setup the initial mission
-    config = {"configurable": {"thread_id": "simulation_001"}}
+    config = {
+        "configurable": {"thread_id": "simulation_001"},
+        "recursion_limit": 80,
+    }
 
     # This is a sample initial input. Notice the fields we are passing in.
 
     # from frontend (use after backend testing)
     # user_input = str(sys.argv[1])
     # user_request = user_input
-    user_request = "navigate to https://ucf.edu. Then, search for academics in the search bar on top of the screen"
+    user_request = "navigate to https://ucf.edu. Then, go to google.com, look up nintendo, and give me information you found on the director of super smash bros."
 
     initial_input = {
         "messages": [{"role": "user", "content": f"USER REQUEST: {user_request}"}],
@@ -59,6 +62,12 @@ async def main():
         "reasoning_log": [],
         "is_complete": False,
         "needs_fallback": False,
+        "last_step_complete": False,
+        "step_attempts": 0,
+        "max_step_attempts": 6,
+        "max_transactions": 80,
+        "mission_failed": False,
+        "abort_reason": None,
         "screenshot": None,
     }
 
@@ -89,13 +98,6 @@ async def main():
         workflow = build_workflow(runtime)
         app = workflow.compile(checkpointer=checkpointer)
     
-
-
-        # # todo: WHEN WE CALL THE PROPER FUNCTION IN ==EXECUTOR==, THIS SHOULD RUN 
-        # result = await dom_extractor.main(browser)
-        # action = Action(action="navigate", args=ActionArgs(url="https://nike.com"))
-        # result = await dispatch_action(result[2], action)
-        # print(result)
 
         # runs langgraph asynchronously
         async for event in app.astream(initial_input, config):

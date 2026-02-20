@@ -27,6 +27,24 @@ class InteractionAgent:
         reasoning_log = state.get("reasoning_log", [])
         current_url = state.get("current_url", "unknown")
         is_complete = state.get("is_complete", False)
+        mission_failed = state.get("mission_failed", False)
+        abort_reason = state.get("abort_reason", "")
+
+        if mission_failed:
+            final_message = (
+                "The agent stopped before completing the request.\n"
+                f"Reason: {abort_reason or 'Exceeded retry safety limits.'}\n"
+                f"Last URL: {current_url}"
+            )
+            interaction_log = (
+                "[Interaction] Type: finish\n"
+                "[Interaction] Mission aborted due to safety stop"
+            )
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "reasoning_log": [interaction_log],
+                "messages": [{"role": "assistant", "content": final_message}],
+            }
         
         # Determine system status
         system_status = "goal_completed" if is_complete else "needs_clarification"
