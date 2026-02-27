@@ -27,6 +27,8 @@ from email.mime.multipart import MIMEMultipart
 # Random Password Generation
 import secrets
 
+from fastapi.middleware.cors import CORSMiddleware
+
 """
 To-DO List:
 -Create Verify Email endpoint, using app.get and token sent as query param
@@ -83,6 +85,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"], # Your React URL
+    allow_credentials=True,
+    allow_methods=["*"], # This allows POST, OPTIONS, etc.
+    allow_headers=["*"],
+)
+
 """
 Helper Functions
 """
@@ -130,16 +140,30 @@ User CRUD Endpoints
 """
 @app.get('/api/users/') # Get User by Id
 async def get_user(request: Request):
-    #incoming: userId
+    #incoming: userId or JWT
     #outgoing: username, firstname, lastname, email
     error  = ''
 
-    # Checking values in query exists 
-    if len(request.query_params) == 0 or request.query_params.get('userId') == '':
-        error = 'No UserId Specified'
-        return {'error' : error}
+    token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
+    userId = -1
 
-    userId = int(request.query_params.get('userId', 0))
+    print(request.query_params.get('userId'))
+
+    # Checking values in query exists 
+    if request.query_params.get('userId') == '' and (token == '' or token == 'undefined'):
+        error = 'No UserId or Token Specified'
+        return {'error' : error}
+    
+    if request.query_params.get('userId') is not None:
+        userId = int(request.query_params.get('userId', 0))
+    else:
+        try:
+            secret_key = os.getenv('TOKEN_SECRET')
+            decoded = jwt.decode(token, secret_key, algorithms='HS256')
+            userId = decoded['user_id']
+        except jwt.InvalidTokenError as e:
+            error = str(e)
+            return {'error': error}
 
     if userId <= 0: #Validate User
         error = 'UserId is Invalid'
@@ -301,18 +325,18 @@ async def login_user(request: Request):
     token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
     body = await request.json()
 
-    if token != '':
+    if token != '' and token != 'undefined':
         try:
             secret_key = os.getenv('TOKEN_SECRET')
             decoded = jwt.decode(token, secret_key, algorithms='HS256')
             return {'token': token, 'error': error}
         except jwt.InvalidTokenError as e:
-            return {'error': e}
+            return {'error': str(e)}
         
     username = body['username']
     password = body['password']
 
-    print(password)
+    #print(password)
 
     if username == '' or password == '':
         error = 'Username or Password is Missing'
@@ -321,7 +345,7 @@ async def login_user(request: Request):
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
     hashed_password = hashed_password.decode('utf-8')
     
-    print(hashed_password)
+    #print(hashed_password)
 
     query = 'SELECT * FROM users WHERE username = %s AND password = %s;'
     cur.execute(query, (username, hashed_password))
@@ -359,6 +383,7 @@ async def forgot_password(request: Request):
     
     username = request.query_params.get('username') if 'username' in request.query_params else None
     email = request.query_params.get('email') if 'email' in request.query_params else None
+    print(email)
     
     if username != None:
         query = 'SELECT email, user_id FROM users WHERE username = %s;'

@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import "./Dashboard.css";
+import { useNavigate } from "react-router-dom";
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  
   const [input, setInput] = useState("");
 
   const [showSettings, setShowSettings] = useState(false);
@@ -21,6 +24,8 @@ export default function Dashboard() {
   const chatListRef = useRef(null);
 
   const activeChat = conversations.find((c) => c.id === activeChatId);
+
+  const [firstname, setFirstname] = useState("");
 
   const handleSend = () => {
     if (!input.trim()) return;
@@ -70,6 +75,33 @@ export default function Dashboard() {
     setShowSettings(false); // close modal
   };
 
+  const handleGetFirstname = async () => {
+    const token = localStorage.getItem('token');
+    const response = await fetch('http://localhost:8000/api/users/', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+    });
+
+    const data = await response.json();
+    if (data.error === '') {
+      setFirstname(data.firstname);
+    } else {
+      console.log(data.error);
+    }
+  };
+
+  useEffect(() => {
+    handleGetFirstname();
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    navigate("/");
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeChat.messages]);
@@ -90,7 +122,7 @@ export default function Dashboard() {
         </button>
 
         <button className="sidebar-btn">User Credentials</button>
-        <button className="sidebar-btn">↪ Logout</button>
+        <button onClick={handleLogout} className="sidebar-btn">↪ Logout</button>
 
         <div className="chat-list" ref={chatListRef}>
           {conversations.map((chat) => (
@@ -110,7 +142,7 @@ export default function Dashboard() {
       {/* Main Chat */}
       <main className="dashboard-main">
         {activeChat.messages.length === 0 && (
-          <h2 className="welcome-text">Welcome Guest</h2>
+          <h2 className="welcome-text">Welcome {firstname}</h2>
         )}
 
         {activeChat.messages.map((msg, index) => (
