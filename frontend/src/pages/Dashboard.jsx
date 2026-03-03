@@ -196,7 +196,7 @@ export default function Dashboard() {
 
       {/* ---------- SETTINGS MODAL ---------- */}
       {showSettings && (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+        <div className="modal-overlay" >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
             <h2 className="modal-title">Settings</h2>
@@ -209,6 +209,13 @@ export default function Dashboard() {
               onChange={(e) => setAgentPrompt(e.target.value)}
             />
 
+            {/* Account Options */}
+            <h3>Account Settings</h3>
+            <button className="setting-btn">Reset Password</button>
+            <br/>
+            <button className="setting-btn">Delete Account</button>
+            <br/><br/>
+
             <button className="save-btn" onClick={handleSaveSettings}>Save Settings</button>
           </div>
         </div>
@@ -217,9 +224,22 @@ export default function Dashboard() {
 
       {/* ---------- USER CREDENTIALS MODAL ---------- */}
       {showUserCredentials && (
-        <div className="modal-overlay" onClick={() => setShowUserCredentials(false)}>
-          <div className="modal-content">
+        <div className="modal-overlay">
+          <div className="modal-content user-credentials-modal">
             <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
+            <h2 className="modal-title">User Credentials</h2>
+            <hr className="modal-title-divider"/>
+
+            {/* Prompt user to enter password before having access to credentials */}
+            <div className="password-verification-group">
+              <h3 className="password-prompt">Please enter your password.</h3>
+              <input className="small-input password-input" placeholder="Your Password" type="password"></input>
+              <button className="setting-btn verify-identity-btn">Verify Identity</button>
+            </div>
+            <br/>
+
+            {/* Add user credentials button */}
+            <button className="setting-btn">Add New Credentials</button>
           </div>
         </div>
       )}
@@ -228,6 +248,5 @@ export default function Dashboard() {
     </div>
   );
 }
-
 
 

@@ -54,19 +54,20 @@
   font-size: 28px;
   font-weight: 700;
   color: #1f7fab;
-  font-family: 'Consolas', Courier, monospace;
+  font-family: 'Consolas', Consolas, monospace;
   margin-bottom: 15px;
 }
 
 /* Sidebar Buttons */
 .sidebar-btn {
   background-color: #ffffff;
-  color: #315d74;
+  color: #59b6e1;
   border: 2px solid #9ad9f5;
   padding: 12px;
   border-radius: 30px;
   font-size: 18px;
-  font-family: 'Consolas';
+  font-family: 'Consolas', Consolas, monospace;
+  font-weight: bold;
   cursor: pointer;
   width: 100%;
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
@@ -140,6 +141,7 @@
   text-align: center;
   font-size: 42px;
   font-weight: 800;
+  font-family: 'Consolas', Consolas, monospace;
   color: #f4fcff;
   text-shadow: 0 5px 15px rgba(33, 90, 117, 0.2);
   pointer-events: none;
@@ -393,7 +395,7 @@
 .modal-title {
   margin: 0 30px 14px 0;
   color: #1f7fab;
-  font-family: "Consolas", Courier, monospace;
+  font-family: "Consolas", Consolas, monospace;
   font-size: 28px;
 }
 
@@ -478,4 +480,76 @@
 @keyframes modalIn {
   from { opacity: 0; transform: translateY(6px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+
+/* Setting Buttons */
+.setting-btn {
+  background-color: #ffffff;
+  color: #59b6e1;
+  border: 2px solid #9ad9f5;
+  padding: 6px;
+  border-radius: 30px;
+  font-size: 14px;
+  font-family: 'Consolas', Consolas, monospace;
+  font-weight: bold;
+  cursor: pointer;
+  width: 45%;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  text-align: left;
+}
+.setting-btn:hover {
+  transform: translateY(-1px);
+  border: 2px solid #67c2ee;
+  background-color: #f3fbff;
+  box-shadow: 0 6px 14px rgba(41, 129, 172, 0.18);
+}
+
+/* Smaller Input fields */
+.small-input {
+  background: #f8fcff;
+  border: 1px solid #b5e3f8;
+  border-radius: 30px;
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  box-shadow: 0 8px 20px rgba(53, 143, 182, 0.18);
+  transition: border-color 0.25s ease;
+  z-index: 30;
+}
+.small-input::placeholder {
+  color: #7d7b7b;
+}
+
+.user-credentials-modal .password-verification-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  margin: 8px 0 12px;
+}
+
+.user-credentials-modal .password-prompt {
+  margin: 0;
+}
+
+.user-credentials-modal .password-input {
+  width: min(360px, 100%);
+  box-sizing: border-box;
+  display: block;
+  margin: 0 auto;
+}
+
+.user-credentials-modal .verify-identity-btn {
+  width: auto;
+  min-width: 180px;
+  text-align: center;
+  display: block;
+  margin: 0 auto;
+}
+
+.modal-title-divider {
+  width: 100%;
+  background-color: rgb(12, 247, 43);
 }
