@@ -152,6 +152,7 @@ export default function Dashboard() {
           </div>
         ))}
         <div ref={bottomRef}></div>
+
       </main>
 
       {/* Input Bar */}
