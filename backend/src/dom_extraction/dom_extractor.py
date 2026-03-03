@@ -1,0 +1,308 @@
+import asyncio
+from playwright.async_api import async_playwright, Browser, Page, Error as PlaywrightError
+from bs4 import BeautifulSoup
+import json
+import time
+from pympler import asizeof
+from pydantic import BaseModel, ValidationError
+from typing import Any
+
+
+class GetDOMTreeData(BaseModel):
+    tool_name: str
+    status: str
+    url: str
+    title: str
+    execution_time: float 
+    total_memory_usage: int 
+    dom_tree_memory_usage: int 
+    page_screenshot_memory_usage: int 
+    page_screenshot_path: str
+    dom_tree: str
+
+class IntElementsData(BaseModel):
+    tool_name: str
+    status: str
+    execution_time: float
+    memory_usage: int
+    num_of_elements: int 
+    interactive_elements: list
+
+class FuncFailed(BaseException):
+    tool_name: str
+    status: str
+    error: Any
+    execution_time: float
+
+
+def infer_role_from_tag(tag: str, attrs: dict) -> str:
+    """
+    Infer ARIA role from HTML tag and attributes.
+
+    Args:
+        tag: HTML tag name (e.g., 'button', 'input', 'a')
+        attrs: Dictionary of HTML attributes
+
+    Returns:
+        ARIA role string (e.g., 'button', 'textbox', 'link')
+    """
+    # Check for explicit ARIA role first
+    if 'role' in attrs:
+        return attrs['role']
+
+    # Infer from HTML tag and type
+    if tag == 'button':
+        return 'button'
+    elif tag == 'a':
+        return 'link'
+    elif tag == 'input':
+        input_type = attrs.get('type', 'text')
+        if input_type in ['text', 'email', 'password', 'tel', 'url']:
+            return 'textbox'
+        elif input_type == 'search':
+            return 'searchbox'
+        elif input_type == 'checkbox':
+            return 'checkbox'
+        elif input_type == 'radio':
+            return 'radio'
+        elif input_type == 'submit':
+            return 'button'
+        elif input_type == 'button':
+            return 'button'
+        else:
+            return 'textbox'  # Default for unknown input types
+    elif tag == 'textarea':
+        return 'textbox'
+    elif tag == 'select':
+        return 'combobox'
+    elif tag == 'option':
+        return 'option'
+    elif tag == 'label':
+        return 'label'
+    else:
+        return tag  # Fallback to tag name
+
+
+def extract_aria_name(element, attrs: dict) -> str:
+    """
+    Extract accessible name from element following ARIA naming priority.
+
+    Priority order:
+    1. aria-label
+    2. aria-labelledby (text content of referenced element)
+    3. Element text content
+    4. placeholder attribute
+    5. title attribute
+    6. value attribute
+    7. alt attribute (for images)
+
+    Args:
+        element: BeautifulSoup element
+        attrs: Dictionary of HTML attributes
+
+    Returns:
+        Accessible name string, or empty string if none found
+    """
+    # 1. aria-label has highest priority
+    if 'aria-label' in attrs:
+        return attrs['aria-label'].strip()
+
+    # 2. aria-labelledby (simplified - just use the ID as fallback)
+    if 'aria-labelledby' in attrs:
+        # In a full implementation, we'd look up the referenced element
+        # For now, we'll skip to next option
+        pass
+
+    # 3. Text content (trimmed and cleaned)
+    text_content = element.get_text(strip=True)
+    if text_content:
+        return text_content
+
+    # 4. placeholder attribute
+    if 'placeholder' in attrs:
+        return attrs['placeholder'].strip()
+
+    # 5. title attribute
+    if 'title' in attrs:
+        return attrs['title'].strip()
+
+    # 6. value attribute (for buttons/inputs)
+    if 'value' in attrs:
+        return attrs['value'].strip()
+
+    # 7. alt attribute (for images used as buttons)
+    if 'alt' in attrs:
+        return attrs['alt'].strip()
+
+    # 8. name attribute as last resort
+    if 'name' in attrs:
+        return attrs['name'].strip()
+
+    return ""  # No accessible name found
+
+async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
+    """
+    Retrieves a webpage's DOM Tree and takes a screenshot of webpage.
+    
+    Args:
+        browser: Playwright Browser object.
+        url: URL of webpage to get DOM Tree and screenshot from.
+    
+    Returns:
+        If Succesful:
+            Tuple[0]: Webpage data, webpage's DOM Tree, and function meta data, as a JSON string.
+            Tuple[1]: Screenshot of webpage in bytes.
+            Tuple[2]: Loaded webpage using playwright browser.
+        If Unsuccessful:
+            Tool name, status, error, and execution time up to the point of failure as a JSON string.
+
+    **Function execution time is slightly longer in actuality than calculated and returned.**
+    """
+
+    try:
+        start = time.perf_counter()
+
+        #Goes to webpage and extracts title and DOM tree
+        try: 
+            
+            # #! Removed page because now page is passed across agents, NOT the whole browser!
+            # #  This is because passing the whole browser would create new tabs for every action. 
+            # #  Passing page in will allow new actions to be performed on already existing pages.
+            # page = await browser.new_page()
+            # await page.goto(url)
+            
+            title = await page.title()
+
+            if not title or not title.strip():
+                title = "page"
+
+            dom_tree = await page.content()
+        except PlaywrightError as e:
+            data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+            return data.model_dump_json(indent = 4)
+
+        #Filters out chars from webpage's domain that don't abide by file naming standards
+        problamatic_chars = ['*', '?', '"', "'", '&', '|', '<', '>', '$', '!', ';', '(', ')', ':', '\\', '/', '.', ' ']
+            
+        for char in problamatic_chars:
+            title = title.replace(char, '')  
+            
+        file_path = f'screenshots\\{title}.png' 
+
+        try:
+            page_screenshot = await page.screenshot(path = file_path, full_page = True) #Takes screenshot of webpage and saves it to file_path
+        except PlaywrightError as e:
+            data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+            return data.model_dump_json(indent = 4)
+
+        #Packages function webpage data with function metadata into a Pydantic object
+        try: 
+            data = GetDOMTreeData(tool_name = 'get_dom_tree_and_page_screenshot', status = 'success', url = page.url, title = title, execution_time = time.perf_counter() - start, 
+                    total_memory_usage = asizeof.asizeof(dom_tree) + asizeof.asizeof(page_screenshot), dom_tree_memory_usage = asizeof.asizeof(dom_tree), 
+                    page_screenshot_memory_usage = asizeof.asizeof(page_screenshot), page_screenshot_path = file_path, 
+                    dom_tree = dom_tree, page = page)
+        except ValidationError as e:
+            data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e.json(), execution_time = time.perf_counter() - start)
+            return data.model_dump_json(indent = 4)
+
+        return data.model_dump_json(indent = 4), page_screenshot, page #Converts object to JSON
+    except Exception as e:
+        data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+        return data.model_dump_json(indent = 4)
+
+    
+def retrieve_interactive_elements(page_data: str) -> str:
+    """
+    Filters for PREDICTABLE interactive elements from a DOM Tree.
+
+    Args:
+        page_data: Webpage data, webpage's DOM Tree, and function meta data, as a JSON string (formatted as returned from get_dom_tree_and_page_screenshot).
+
+    Returns:
+        If Successful:    
+            All PREDICTABLE interactive elements from a DOM Tree, and function meta data, as a JSON string.
+        If Unsuccessful:
+            Tool name, status, error, and execution time up to the point of failure as a JSON string.
+
+    **Function execution time is slightly longer in actuality than calculated and returned.**
+    """
+    
+    try:
+        start = time.perf_counter()
+        
+        #Extracts webpages data from JSON
+        page_data = json.loads(page_data)
+        url = page_data['url']
+        title = page_data['title']
+        dom_tree = page_data['dom_tree']
+
+        #Extracts all common interactive elements from webpages DOM tree
+        soup = BeautifulSoup(dom_tree, 'html.parser')
+
+        common_interactive_tags = ['a', 'button', 'input', 'select', 'option', 'textarea', 'label']
+        interactive_elements = []
+
+        for tag in common_interactive_tags:
+            elements = soup.find_all(tag)
+
+            for element in elements:
+                # Extract ARIA role and name
+                role = infer_role_from_tag(tag, element.attrs)
+                name = extract_aria_name(element, element.attrs)
+
+                # Build ARIA-formatted element
+                interactive_element = {
+                    'url': url,
+                    'title': title,
+                    'role': role,
+                    'name': name,
+                    'tag': tag,  # Keep tag for debugging
+                    'attributes': element.attrs  # Keep raw attributes for reference
+                }
+                interactive_elements.append(interactive_element)
+
+        # Handle onclick elements that might not be in common tags
+        onclick_elements = soup.find_all(onclick=True)
+
+        for element in onclick_elements:
+            # Skip if already processed
+            if element.name in common_interactive_tags:
+                continue
+
+            # Extract ARIA role and name
+            role = infer_role_from_tag(element.name, element.attrs)
+            name = extract_aria_name(element, element.attrs)
+
+            interactive_element = {
+                'url': url,
+                'title': title,
+                'role': role,
+                'name': name,
+                'tag': element.name,
+                'attributes': element.attrs
+            }
+            interactive_elements.append(interactive_element)
+
+        #Packages function meta data and webpage data into a Pydantic object
+        try: 
+            data = IntElementsData(tool_name = 'retrieve_interactive_elements', status = 'success', execution_time = time.perf_counter() - start, 
+                                   memory_usage = asizeof.asizeof(interactive_elements), num_of_elements = len(interactive_elements), 
+                                   interactive_elements = interactive_elements)
+        except ValidationError as e:
+            data = FuncFailed(tool_name = 'retrieve_interactive_elements', status = 'failed', error = e.json(), execution_time = time.perf_counter() - start)
+            return data.model_dump_json(indent = 4)
+        
+        return data.model_dump_json(indent = 4) #Converts object to JSON
+    except Exception as e:
+        data = FuncFailed(tool_name = 'retrieve_interactive_elements', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+        return data.model_dump_json(indent = 4)
+
+async def main(page: Page):
+
+    print("DOM EXTRACTION CALLED!")
+    # uses page (includes url) to extract DOM
+    return await get_dom_tree_and_page_screenshot(page)
+
+
+if __name__ == "__main__": 
+    asyncio.run(main())

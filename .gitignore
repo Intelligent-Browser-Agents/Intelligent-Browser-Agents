@@ -1,6 +1,9 @@
 # stuff the program makes currently
 output/
 chrome_profile/
+screenshots/
+*.png
+*.pyc
 
 # dotenv
 .env
@@ -22,3 +25,4 @@ DOM_output/
 
 back/*
 backend/__pycache__
+*.cpython-313.pyc
