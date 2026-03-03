@@ -3,6 +3,7 @@ output/
 chrome_profile/
 screenshots/
 *.png
+*.pyc
 
 # dotenv
 .env

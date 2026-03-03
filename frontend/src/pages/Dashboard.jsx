@@ -1,28 +1,24 @@
 import React, { useState, useRef, useEffect } from "react";
-import "./Dashboard.css";
+import { useNavigate } from "react-router-dom";
 import axios from 'axios'     // messenger between React and FastAPI
-
+import "./Dashboard.css";
 
 export default function Dashboard() {
+  
+  // ⬅ Stores the settings text
+  const [conversations, setConversations] = useState([ { id: crypto.randomUUID(), title: "Browse 1", messages: [] }]);
+  const [agentPrompt, setAgentPrompt] = useState(localStorage.getItem("agentPrompt") || "");
+  const [activeChatId, setActiveChatId] = useState(conversations[0].id);
+  const [showUserCredentials, setShowUserCredentials] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [firstname, setFirstname] = useState("");
   const [input, setInput] = useState("");
 
-  const [showSettings, setShowSettings] = useState(false);
-
-  // ⬅ Stores the settings text
-  const [agentPrompt, setAgentPrompt] = useState(
-    localStorage.getItem("agentPrompt") || ""
-  );
-
-  const [conversations, setConversations] = useState([
-    { id: crypto.randomUUID(), title: "Browse 1", messages: [] }
-  ]);
- 
-  const [activeChatId, setActiveChatId] = useState(conversations[0].id);
-
-  const bottomRef = useRef(null);
-  const chatListRef = useRef(null);
-
   const activeChat = conversations.find((c) => c.id === activeChatId);
+  const chatListRef = useRef(null);
+  const bottomRef = useRef(null);
+  const navigate = useNavigate();
 
   const handleSend = async() => {
     if (!input.trim()) return;
@@ -49,31 +45,22 @@ export default function Dashboard() {
       user_input: input
     });
 
-
-    
-
-    //! test
-
+    //! TEST
     console.log(response);
-
-
 
     // make a agent chat bubble with output  
     setConversations((prev) =>
       prev.map((chat) =>
-        chat.id === activeChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, { text: response.data?.STDOUT, isUser: false }],
-              title:
-                chat.messages.length === 0
-                  ? response.data?.STDOUT.slice(0, 20) || "New Chat"
-                  : chat.title,
-            }
-          : chat
+        chat.id === activeChatId ? {
+            ...chat,
+            messages: [...chat.messages, { text: response.data?.STDOUT, isUser: false }],
+            title:
+              chat.messages.length === 0
+                ? response.data?.STDOUT.slice(0, 20) || "New Chat"
+                : chat.title,
+        }: chat
       )
     );
-
   };
 
   const handleNewChat = () => {
@@ -103,27 +90,64 @@ export default function Dashboard() {
     setShowSettings(false); // close modal
   };
 
+  const handleGetFirstname = async () => {
+    const token = localStorage.getItem('token');
+    const response = await fetch('http://localhost:8000/api/users/', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+    });
+
+    const data = await response.json();
+    if (data.error === '') {
+      setFirstname(data.firstname);
+    } else {
+      console.log(data.error);
+    }
+  };
+
+  useEffect(() => {
+    handleGetFirstname();
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    navigate("/");
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeChat.messages]);
 
   return (
     <div className="dashboard-container">
+      <button
+        className="mobile-menu-btn"
+        onClick={() => setMobileMenuOpen((prev) => !prev)}
+        aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+      >
+        <span className="mobile-menu-icon" aria-hidden="true">&#9776;</span>
+      </button>
+      {mobileMenuOpen && (
+        <div className="mobile-drawer-overlay" onClick={() => setMobileMenuOpen(false)} />
+      )}
       
       {/* Sidebar */}
-      <aside className="dashboard-sidebar">
+      <aside className={`dashboard-sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}>
         <h1 className="dashboard-title">Intelligent Browser Agents</h1>
 
-        <button className="sidebar-btn" onClick={handleNewChat}>
+        <button className="sidebar-btn" onClick={() => { handleNewChat(); setMobileMenuOpen(false); }}>
           ＋ New Chat
         </button>
         
-        <button className="sidebar-btn" onClick={() => setShowSettings(true)}>
+        <button className="sidebar-btn" onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }}>
           Settings
         </button>
 
-        <button className="sidebar-btn">User Credentials</button>
-        <button className="sidebar-btn">↪ Logout</button>
+        <button className="sidebar-btn" onClick={() => { setShowUserCredentials(true); setMobileMenuOpen(false); }}>User Credentials</button>
+        <button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="sidebar-btn">Logout</button>
 
         <div className="chat-list" ref={chatListRef}>
           {conversations.map((chat) => (
@@ -132,7 +156,10 @@ export default function Dashboard() {
               className={`chat-item ${
                 chat.id === activeChatId ? "active-chat" : ""
               }`}
-              onClick={() => setActiveChatId(chat.id)}
+              onClick={() => {
+                setActiveChatId(chat.id);
+                setMobileMenuOpen(false);
+              }}
             >
               {chat.title}
             </div>
@@ -143,7 +170,7 @@ export default function Dashboard() {
       {/* Main Chat */}
       <main className="dashboard-main">
         {activeChat.messages.length === 0 && (
-          <h2 className="welcome-text">Welcome Guest</h2>
+          <h2 className="welcome-text">Welcome {firstname}</h2>
         )}
 
         {activeChat.messages.map((msg, index) => (
@@ -169,24 +196,57 @@ export default function Dashboard() {
 
       {/* ---------- SETTINGS MODAL ---------- */}
       {showSettings && (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+        <div className="modal-overlay" >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowSettings(false)}>✖</button>
-            <h2>Settings</h2>
+            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
+            <h2 className="modal-title">Settings</h2>
 
-            <label>Agent’s Prompt</label>
+            <label className="modal-label">Agent Prompt</label>
             <textarea
+              className="modal-textarea"
               placeholder="Type here..."
               value={agentPrompt}
               onChange={(e) => setAgentPrompt(e.target.value)}
             />
 
-            <button className="save-btn" onClick={handleSaveSettings}>
-              Save
-            </button>
+            {/* Account Options */}
+            <h3>Account Settings</h3>
+            <button className="setting-btn">Reset Password</button>
+            <br/>
+            <button className="setting-btn">Delete Account</button>
+            <br/><br/>
+
+            <button className="save-btn" onClick={handleSaveSettings}>Save Settings</button>
           </div>
         </div>
       )}
+
+
+      {/* ---------- USER CREDENTIALS MODAL ---------- */}
+      {showUserCredentials && (
+        <div className="modal-overlay">
+          <div className="modal-content user-credentials-modal">
+            <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
+            <h2 className="modal-title">User Credentials</h2>
+            <hr className="modal-title-divider"/>
+
+            {/* Prompt user to enter password before having access to credentials */}
+            <div className="password-verification-group">
+              <h3 className="password-prompt">Please enter your password.</h3>
+              <input className="small-input password-input" placeholder="Your Password" type="password"></input>
+              <button className="setting-btn verify-identity-btn">Verify Identity</button>
+            </div>
+            <br/>
+
+            {/* Add user credentials button */}
+            <button className="setting-btn">Add New Credentials</button>
+          </div>
+        </div>
+      )}
+
+
     </div>
   );
 }
+
+
