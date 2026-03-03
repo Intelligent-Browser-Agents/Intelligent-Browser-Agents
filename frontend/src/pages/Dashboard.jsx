@@ -218,7 +218,9 @@ export default function Dashboard() {
       {/* ---------- USER CREDENTIALS MODAL ---------- */}
       {showUserCredentials && (
         <div className="modal-overlay" onClick={() => setShowUserCredentials(false)}>
-          <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
+          <div className="modal-content">
+            <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
+          </div>
         </div>
       )}
 
