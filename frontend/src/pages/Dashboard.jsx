@@ -1,33 +1,24 @@
 import React, { useState, useRef, useEffect } from "react";
-import "./Dashboard.css";
-import axios from 'axios'     // messenger between React and FastAPI
-
 import { useNavigate } from "react-router-dom";
+import axios from 'axios'     // messenger between React and FastAPI
+import "./Dashboard.css";
 
 export default function Dashboard() {
-  const navigate = useNavigate();
   
+  // ⬅ Stores the settings text
+  const [conversations, setConversations] = useState([ { id: crypto.randomUUID(), title: "Browse 1", messages: [] }]);
+  const [agentPrompt, setAgentPrompt] = useState(localStorage.getItem("agentPrompt") || "");
+  const [activeChatId, setActiveChatId] = useState(conversations[0].id);
+  const [showUserCredentials, setShowUserCredentials] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [firstname, setFirstname] = useState("");
   const [input, setInput] = useState("");
 
-  const [showSettings, setShowSettings] = useState(false);
-
-  // ⬅ Stores the settings text
-  const [agentPrompt, setAgentPrompt] = useState(
-    localStorage.getItem("agentPrompt") || ""
-  );
-
-  const [conversations, setConversations] = useState([
-    { id: crypto.randomUUID(), title: "Browse 1", messages: [] }
-  ]);
- 
-  const [activeChatId, setActiveChatId] = useState(conversations[0].id);
-
-  const bottomRef = useRef(null);
-  const chatListRef = useRef(null);
-
   const activeChat = conversations.find((c) => c.id === activeChatId);
-
-  const [firstname, setFirstname] = useState("");
+  const chatListRef = useRef(null);
+  const bottomRef = useRef(null);
+  const navigate = useNavigate();
 
   const handleSend = async() => {
     if (!input.trim()) return;
@@ -54,31 +45,22 @@ export default function Dashboard() {
       user_input: input
     });
 
-
-    
-
-    //! test
-
+    //! TEST
     console.log(response);
-
-
 
     // make a agent chat bubble with output  
     setConversations((prev) =>
       prev.map((chat) =>
-        chat.id === activeChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, { text: response.data?.STDOUT, isUser: false }],
-              title:
-                chat.messages.length === 0
-                  ? response.data?.STDOUT.slice(0, 20) || "New Chat"
-                  : chat.title,
-            }
-          : chat
+        chat.id === activeChatId ? {
+            ...chat,
+            messages: [...chat.messages, { text: response.data?.STDOUT, isUser: false }],
+            title:
+              chat.messages.length === 0
+                ? response.data?.STDOUT.slice(0, 20) || "New Chat"
+                : chat.title,
+        }: chat
       )
     );
-
   };
 
   const handleNewChat = () => {
@@ -141,21 +123,31 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-container">
+      <button
+        className="mobile-menu-btn"
+        onClick={() => setMobileMenuOpen((prev) => !prev)}
+        aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+      >
+        <span className="mobile-menu-icon" aria-hidden="true">&#9776;</span>
+      </button>
+      {mobileMenuOpen && (
+        <div className="mobile-drawer-overlay" onClick={() => setMobileMenuOpen(false)} />
+      )}
       
       {/* Sidebar */}
-      <aside className="dashboard-sidebar">
+      <aside className={`dashboard-sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}>
         <h1 className="dashboard-title">Intelligent Browser Agents</h1>
 
-        <button className="sidebar-btn" onClick={handleNewChat}>
+        <button className="sidebar-btn" onClick={() => { handleNewChat(); setMobileMenuOpen(false); }}>
           ＋ New Chat
         </button>
         
-        <button className="sidebar-btn" onClick={() => setShowSettings(true)}>
+        <button className="sidebar-btn" onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }}>
           Settings
         </button>
 
-        <button className="sidebar-btn">User Credentials</button>
-        <button onClick={handleLogout} className="sidebar-btn">↪ Logout</button>
+        <button className="sidebar-btn" onClick={() => { setShowUserCredentials(true); setMobileMenuOpen(false); }}>User Credentials</button>
+        <button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="sidebar-btn">Logout</button>
 
         <div className="chat-list" ref={chatListRef}>
           {conversations.map((chat) => (
@@ -164,7 +156,10 @@ export default function Dashboard() {
               className={`chat-item ${
                 chat.id === activeChatId ? "active-chat" : ""
               }`}
-              onClick={() => setActiveChatId(chat.id)}
+              onClick={() => {
+                setActiveChatId(chat.id);
+                setMobileMenuOpen(false);
+              }}
             >
               {chat.title}
             </div>
@@ -203,22 +198,34 @@ export default function Dashboard() {
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowSettings(false)}>✖</button>
-            <h2>Settings</h2>
+            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">x</button>
+            <h2 className="modal-title">Settings</h2>
 
-            <label>Agent’s Prompt</label>
+            <label className="modal-label">Agent Prompt</label>
             <textarea
+              className="modal-textarea"
               placeholder="Type here..."
               value={agentPrompt}
               onChange={(e) => setAgentPrompt(e.target.value)}
             />
 
-            <button className="save-btn" onClick={handleSaveSettings}>
-              Save
-            </button>
+            <button className="save-btn" onClick={handleSaveSettings}>Save Settings</button>
           </div>
         </div>
       )}
+
+
+      {/* ---------- USER CREDENTIALS MODAL ---------- */}
+      {showUserCredentials && (
+        <div className="modal-overlay" onClick={() => setShowUserCredentials(false)}>
+          <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">x</button>
+        </div>
+      )}
+
+
     </div>
   );
 }
+
+
+

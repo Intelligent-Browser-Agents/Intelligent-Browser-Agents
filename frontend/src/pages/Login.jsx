@@ -64,7 +64,7 @@ export default function Login() {
             onChange={(e) => setPassword(e.target.value)}
           />
           {message && (
-            <p style={{ color: 'red', fontSize: '14px', marginTop: '10px' }}>
+            <p className="login-message">
               {message}
             </p>
           )}

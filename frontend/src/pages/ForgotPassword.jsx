@@ -43,7 +43,7 @@ export default function ForgotPassword() {
         <form onSubmit={handleSubmit} className="forgot-form">
           <input type="email" onChange={(e) => setEmail(e.target.value)}placeholder="Enter your email" className="forgot-input" />
           {message && (
-            <p style={{ color: 'red', fontSize: '14px', marginTop: '10px' }}>
+            <p className={`forgot-message ${message.includes("sent") ? "success" : ""}`}>
               {message}
             </p>
           )}
