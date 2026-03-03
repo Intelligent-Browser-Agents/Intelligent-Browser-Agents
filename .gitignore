@@ -22,3 +22,9 @@ DOM_output/
 
 back/*
 backend/__pycache__
+
+# screenshots
+*.png
+
+# pychache 
+*.pyc
