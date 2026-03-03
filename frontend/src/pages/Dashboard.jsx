@@ -198,7 +198,7 @@ export default function Dashboard() {
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">x</button>
+            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
             <h2 className="modal-title">Settings</h2>
 
             <label className="modal-label">Agent Prompt</label>
@@ -218,7 +218,7 @@ export default function Dashboard() {
       {/* ---------- USER CREDENTIALS MODAL ---------- */}
       {showUserCredentials && (
         <div className="modal-overlay" onClick={() => setShowUserCredentials(false)}>
-          <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">x</button>
+          <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
         </div>
       )}
 
