@@ -25,7 +25,7 @@ export default function Login() {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch('http://100.49.61.97:8000/api/users/login/', {
+    const response = await fetch('http://0.0.0.0:8000/api/users/login/', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({ username, password }), // Sending raw JSON
