@@ -74,6 +74,8 @@ jobs:
             # 2. Navigate to backend folder
             cd /home/bitnami/Intelligent-Browser-Agents/backend
 
+            git pull origin main
+
             # 3. Start Uvicorn in a detached screen
             # -d -m starts it detached immediately
             # Use 'python3 -m uvicorn' to ensure it uses the correct path
