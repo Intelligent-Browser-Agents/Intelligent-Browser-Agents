@@ -131,7 +131,7 @@ export default function Dashboard() {
         navigate('/');
         return;
       }
-      const response = await fetch('http://localhost:8000/api/users/verify/', {
+      const response = await fetch('/api/users/verify/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
