@@ -147,10 +147,8 @@ async def get_user(request: Request):
     token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
     userId = -1
 
-    print(request.query_params.get('userId'))
-
     # Checking values in query exists 
-    if request.query_params.get('userId') == '' and (token == '' or token == 'undefined'):
+    if request.query_params.get('userId') == ''  and (token == '' or token == 'undefined'):
         error = 'No UserId or Token Specified'
         return {'error' : error}
     
