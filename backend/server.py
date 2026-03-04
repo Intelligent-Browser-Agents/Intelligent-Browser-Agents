@@ -87,7 +87,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://100.49.61.97"], # Your React URL
+    allow_origins=["http://0.0.0.0"], # Your React URL
     allow_credentials=True,
     allow_methods=["*"], # This allows POST, OPTIONS, etc.
     allow_headers=["*"],
