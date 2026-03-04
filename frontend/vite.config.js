@@ -8,7 +8,7 @@ export default defineConfig({
     proxy: {
       // This is the "nickname" Vite looks for
       '/api': {
-        target: 'http://100.49.61.97:8000', // Your EC2 Backend
+        target: 'http://1.1.1.1:8000', // Your EC2 Backend
         changeOrigin: true,
         // Optional: If your FastAPI routes ALREADY start with /api, 
         // you don't need to rewrite anything. 
