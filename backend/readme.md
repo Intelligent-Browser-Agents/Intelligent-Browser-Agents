@@ -8,7 +8,7 @@ docker run -d -p 8000:8000 chromadb/chroma
 To get and run a postgress docker
 ```bash
 docker pull postgres
-docker run --name some-postgres -e POSTRGRES_PASSWORD=mysecretpassword -p 5432:5432 -d postgres
+docker run --name some-postgres -e POSTGRES_PASSWORD=mysecretpassword -p 5432:5432 -d postgres
 ```
 --name some-postgres: Assigns a name to your container for easier identification.\
 -e POSTGRES_PASSWORD=mysecretpassword: Sets the password for the default postgres superuser. This is mandatory.\
