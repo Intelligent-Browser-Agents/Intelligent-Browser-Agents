@@ -5,14 +5,13 @@ import "./Login.css";
 export default function Login() {
   const navigate = useNavigate(); // allows navigation between pages
 
-  const [username, setUsername] = React.useState("");
-  const [password, setPassword] = React.useState("");
-  const [message, setMessage] = React.useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
 
-  useEffect(() => {
-      // This runs exactly ONCE when the page loads
-      setMessage(''); 
-    }, []);
+  useEffect (() => {
+      setMessage('');
+    })
 
   const handleSubmit = async (e) => {
     e.preventDefault();
