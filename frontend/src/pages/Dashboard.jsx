@@ -15,6 +15,10 @@ export default function Dashboard() {
   const [firstname, setFirstname] = useState("");
   const [input, setInput] = useState("");
 
+  // verify user values
+  const [password, setPassword] = useState("");
+  const [didUserVerifyIdentity, setDidUserVerifyIdentity] = useState(false);
+
   const activeChat = conversations.find((c) => c.id === activeChatId);
   const chatListRef = useRef(null);
   const bottomRef = useRef(null);
@@ -90,7 +94,7 @@ export default function Dashboard() {
     setShowSettings(false); // close modal
   };
 
-  const handleGetFirstname = async () => {
+  const handleGetUserInfo = async () => {
     const token = localStorage.getItem('token');
     const response = await fetch('/api/users/', {
       method: 'GET',
@@ -101,6 +105,7 @@ export default function Dashboard() {
     });
 
     const data = await response.json();
+    console.log(data);
     if (data.error === '') {
       setFirstname(data.firstname);
     } else {
@@ -109,12 +114,52 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    handleGetFirstname();
+    handleGetUserInfo();
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     navigate("/");
+  }
+
+  // verify user identity to show credentials
+  const verifyUser = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token || token === 'undefined' || token === 'null') {
+        alert('Your session expired. Please log in again.');
+        navigate('/');
+        return;
+      }
+      const response = await fetch('http://localhost:8000/api/users/verify/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ password }),
+      });
+      const data = await response.json();
+
+      if (data.verified === true && data.error === '') {
+        // show user credentials on page
+        setDidUserVerifyIdentity(true);
+        console.log(didUserVerifyIdentity);
+      } else {
+        // unsuccessful - try again
+        setDidUserVerifyIdentity(false);
+        alert(data.error || 'Verification failed.');
+
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Verification failed. Try again.');       
+    }
+  };
+
+  // add credentials function
+  const addUserCredentials = () => {
+    alert("This needds to be implemented!!");
   }
 
   useEffect(() => {
@@ -170,7 +215,7 @@ export default function Dashboard() {
       {/* Main Chat */}
       <main className="dashboard-main">
         {activeChat.messages.length === 0 && (
-          <h2 className="welcome-text">Welcome {firstname}</h2>
+          <h2 className="welcome-text">Welcome, {firstname}!</h2>
         )}
 
         {activeChat.messages.map((msg, index) => (
@@ -230,16 +275,31 @@ export default function Dashboard() {
             <h2 className="modal-title">User Credentials</h2>
             <hr className="modal-title-divider"/>
 
-            {/* Prompt user to enter password before having access to credentials */}
-            <div className="password-verification-group">
-              <h3 className="password-prompt">Please enter your password.</h3>
-              <input className="small-input password-input" placeholder="Your Password" type="password"></input>
-              <button className="setting-btn verify-identity-btn">Verify Identity</button>
-            </div>
+            {/* VERIFY USER'S IDENTITY BEFORE REVELAING CREDENTIALS */}
+            {didUserVerifyIdentity ? (
+              // TRUE - show the previously defined user credentials
+              <div>
+                <h2>SHOW USER CREDENTIALS</h2>
+              </div>
+            ) : (
+              // FALSE - prompt user to verify their identity first
+              <div className="password-verification-group">
+                <h3 className="password-prompt">Please enter your password.</h3>
+                <input 
+                  className="small-input password-input" 
+                  placeholder="Your Password" 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}  
+                ></input>
+                <button className="setting-btn verify-identity-btn" type="submit" onClick={verifyUser}>Verify Identity</button>
+              </div>
+            )}
+
             <br/>
 
-            {/* Add user credentials button */}
-            <button className="setting-btn">Add New Credentials</button>
+            {/* Add user credentials button - should be available either way */}
+            <button className="setting-btn" onClick={addUserCredentials}>Add New Credentials</button>
           </div>
         </div>
       )}

@@ -29,6 +29,10 @@ import secrets
 
 from fastapi.middleware.cors import CORSMiddleware
 
+# start agent endpoint
+import sys
+import subprocess
+
 """
 To-DO List:
 -Create Verify Email endpoint, using app.get and token sent as query param
@@ -63,11 +67,13 @@ async def lifespan(app: FastAPI):
 
     # connect to the PostgreSQL server
     print('Connecting to the PostgreSQL database...')
-    conn = psycopg2.connect(dbname = userdb_config['dbname'],
-                            user = userdb_config['user'],
-                            password = userdb_config['password'],
-                            port = userdb_config['port'],
-                            host = userdb_config['host'])
+    conn = psycopg2.connect(
+        dbname = userdb_config['dbname'],
+        user = userdb_config['user'],
+        password = userdb_config['password'],
+        port = userdb_config['port'],
+        host = userdb_config['host']
+    )
     conn.autocommit = True
     # create a cursor
     cur = conn.cursor()
@@ -87,7 +93,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Your React URL
+    allow_origins=["*", "https://100.49.61.97"], # Your React URL
     allow_credentials=True,
     allow_methods=["*"], # This allows POST, OPTIONS, etc.
     allow_headers=["*"],
@@ -204,10 +210,10 @@ async def insert_user(request: Request):
         return {'error' : error}
     
     # Inserting the new user
-    query = 'INSERT INTO users (username, firstname, lastname, email, password, isverified) VALUES (%s, %s, %s, %s, %s, %s) RETURNING user_id;'
+    query = 'INSERT INTO users (username, firstname, lastname, email, , isverified, chng_pass, password) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING user_id;'
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
     hashed_password = hashed_password.decode('utf-8')
-    cur.execute(query, (username, firstname, lastname, email, hashed_password, False))
+    cur.execute(query, (username, firstname, lastname, email, False, False, hashed_password))
     newUserId = cur.fetchone()[0]
     return {'userId': newUserId, 'error': error}
 
@@ -367,6 +373,39 @@ async def login_user(request: Request):
     else:
         error = 'Invalid Username or Password'
         return {'error': error}
+
+@app.post('/api/users/verify/') # Verify logged-in user by token + password
+async def verify_user(request: Request):
+    token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
+    body = await request.json()
+    password = body['password'] if 'password' in body else ''
+
+    if token in ('', 'undefined', 'null', 'None'):
+        return {'verified': False, 'error': 'No Token Provided'}
+    if password == '':
+        return {'verified': False, 'error': 'Password is Missing'}
+
+    try:
+        secret_key = os.getenv('TOKEN_SECRET')
+        decoded = jwt.decode(token, secret_key, algorithms='HS256')
+        user_id = decoded.get('user_id')
+    except jwt.InvalidTokenError as e:
+        return {'verified': False, 'error': str(e)}
+
+    if user_id is None:
+        return {'verified': False, 'error': 'Invalid token payload'}
+
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
+    hashed_password = hashed_password.decode('utf-8')
+
+    query = 'SELECT user_id FROM users WHERE user_id = %s AND password = %s;'
+    cur.execute(query, (str(user_id), hashed_password))
+    result = cur.fetchone()
+
+    if result is None:
+        return {'verified': False, 'error': 'Invalid password'}
+
+    return {'verified': True, 'error': ''}
     
 @app.get('/api/users/forgot-password/') # User Forgot Password
 async def forgot_password(request: Request):
@@ -414,39 +453,39 @@ Placeholder for Agent API Endpoints
 
 """ ===== EDWIN TEST ENDPOINTS ===== """
 
-# # # todo: handle user input and start app.py on the user's hardware
-# @app.post('/start_agent')
-# async def start_agent(requests: Request): 
+# # todo: handle user input and start app.py on the user's hardware
+@app.post('/start_agent')
+async def start_agent(requests: Request): 
 
-#     # get user's input from frontend
-#     body = await requests.json()
-#     user_input = body.get("user_input")
-#     print("TEST: ", user_input) 
-
-
-#     # send user input to app.py
-#     #! start the agent on the SERVER
-#     # start main with subprocess
-#     current_env = os.environ.copy()
-#     python_path = sys.executable
-
-#     result = subprocess.run(
-#         [python_path, 'Prototype\\app.py', user_input],
-#         env=current_env,
-#         capture_output=True,
-#         text=True
-#     )
-
-#     return {"STDOUT": result.stdout, "STDERR": result.stderr}
+    # get user's input from frontend
+    body = await requests.json()
+    user_input = body.get("user_input")
+    print("TEST: ", user_input) 
 
 
-# # todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)
-# @app.get('/send_logs')
-# async def send_logs(requests: Request): 
+    # send user input to app.py
+    #! start the agent on the SERVER
+    # start main with subprocess
+    current_env = os.environ.copy()
+    python_path = sys.executable
+
+    result = subprocess.run(
+        [python_path, 'Prototype\\app.py', user_input],
+        env=current_env,
+        capture_output=True,
+        text=True
+    )
+
+    return {"STDOUT": result.stdout, "STDERR": result.stderr}
+
+
+# todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)
+@app.get('/send_logs')
+async def send_logs(requests: Request): 
     
-#     # get output from app.py
-#     # send app.py output to the frontend
-#     pass 
+    # get output from app.py
+    # send app.py output to the frontend
+    pass 
 
 # # test endpoint
 # @app.get('/')
