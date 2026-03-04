@@ -48,8 +48,8 @@ CREATE TABLE Users (
 
 Adding a new user 
 ```SQL
-INSERT INTO users (username, firstname, lastname, email, isverified, chng_pass)
-VALUES ('testuser', 'Caleb', 'Yaghoubi', 'test@email.com', true, false);
+INSERT INTO users (username, firstname, lastname, email, isverified, chng_pass, password)
+VALUES ('testuser', 'Caleb', 'Yaghoubi', 'test@email.com', true, false, example_password);
 ```
 Testing 
 ```bash
