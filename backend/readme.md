@@ -30,6 +30,7 @@ Connect in terminal to postgres
 - users is the table
 
 Used to create the table
+```SQL
 CREATE TABLE Users (
     user_id SERIAL PRIMARY KEY,
     username VarChar(50) UNIQUE NOT NULL,
@@ -37,12 +38,17 @@ CREATE TABLE Users (
     lastname VarChar(50) NOT NULL,
     email VarChar(50) UNIQUE NOT NULL,
     isverified BOOLEAN NOT NULL,
-    createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    createdat TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    chng_pass BOOLEAN NOT NULL
 );
+```
 
 Adding a new user 
-INSERT INTO users (username, firstname, lastname, email, isverified)
-VALUES ('testuser', 'Caleb', 'Yaghoubi', 'test@email.com', true);
-
+```SQL
+INSERT INTO users (username, firstname, lastname, email, isverified, chng_pass)
+VALUES ('testuser', 'Caleb', 'Yaghoubi', 'test@email.com', true, false);
+```
 Testing 
+```bash
 pytest -q testing.py
+```
