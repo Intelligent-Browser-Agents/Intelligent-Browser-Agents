@@ -16,7 +16,7 @@ export default function ForgotPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const url = 'http://100.49.61.97:8000/api/users/forgot-password/?email=' + encodeURIComponent(email);
+    const url = '/api/users/forgot-password/?email=' + encodeURIComponent(email);
 
     const response = await fetch(url, {
       method: 'GET',

@@ -41,7 +41,7 @@ export default function Dashboard() {
     setInput("");
 
     // send input to server to start app.py using this prompt
-    var response = await axios.post("http://100.49.61.97:8000/start_agent", {
+    var response = await axios.post("/api/start_agent", {
       user_input: input
     });
 
@@ -92,7 +92,7 @@ export default function Dashboard() {
 
   const handleGetFirstname = async () => {
     const token = localStorage.getItem('token');
-    const response = await fetch('http://100.49.61.97:8000/api/users/', {
+    const response = await fetch('/api/users/', {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

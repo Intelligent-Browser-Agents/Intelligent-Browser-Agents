@@ -23,7 +23,7 @@ export default function Register() {
       'Content-Type': 'application/json' // Include the token in the Authorization header
     };
 
-    const response = await fetch('http://100.49.61.97:8000/api/users/insert/', {
+    const response = await fetch('/api/users/insert/', {
       method: 'POST',
       headers: headers,
       body: JSON.stringify({ username: Username, firstname: FirstName, lastname: LastName, email: Email, password: Password }), // Sending raw JSON
