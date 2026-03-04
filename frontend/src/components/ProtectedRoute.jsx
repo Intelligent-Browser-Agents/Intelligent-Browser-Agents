@@ -42,7 +42,7 @@ const ProtectedRoute = () => {
             headers['Authorization'] = `Bearer ${token}`;
             }
 
-            const response = await fetch('http://localhost:8000/api/users/login/', {
+            const response = await fetch('/api/users/login/', {
             method: 'POST',
             headers: headers,
             body: JSON.stringify({ token }), // Sending raw JSON
