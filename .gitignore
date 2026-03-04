@@ -31,3 +31,6 @@ backend/__pycache__
 
 # pychache 
 *.pyc
+
+# config
+*.yaml

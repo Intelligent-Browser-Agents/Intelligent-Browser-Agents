@@ -63,11 +63,13 @@ async def lifespan(app: FastAPI):
 
     # connect to the PostgreSQL server
     print('Connecting to the PostgreSQL database...')
-    conn = psycopg2.connect(dbname = userdb_config['dbname'],
-                            user = userdb_config['user'],
-                            password = userdb_config['password'],
-                            port = userdb_config['port'],
-                            host = userdb_config['host'])
+    conn = psycopg2.connect(
+        dbname = userdb_config['dbname'],
+        user = userdb_config['user'],
+        password = userdb_config['password'],
+        port = userdb_config['port'],
+        host = userdb_config['host']
+    )
     conn.autocommit = True
     # create a cursor
     cur = conn.cursor()
