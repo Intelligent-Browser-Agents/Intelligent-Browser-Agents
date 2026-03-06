@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from 'axios'     // messenger between React and FastAPI
 import "./Dashboard.css";
 
 export default function Dashboard() {
@@ -24,6 +23,11 @@ export default function Dashboard() {
   const bottomRef = useRef(null);
   const navigate = useNavigate();
 
+  //Store llive frames
+  const [liveFrame, setLiveFrame] = useState(null);
+  const socketRef = useRef(null);
+
+  {/*}
   const handleSend = async() => {
     if (!input.trim()) return;
 
@@ -65,6 +69,90 @@ export default function Dashboard() {
         }: chat
       )
     );
+  };
+  */}
+  const handleSend = async () => {
+    if (!input.trim()) return;
+
+    // 🛑 STOP: Close any existing ghost connections first
+    if (socketRef.current) {
+      console.log("Closing existing socket...");
+      socketRef.current.close();
+    }
+
+    const currentInput = input;
+    setInput("");
+
+    // 1. Add user message to UI
+    setConversations((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChatId
+          ? {
+              ...chat,
+              messages: [...chat.messages, { text: currentInput, isUser: true }],
+              title: chat.messages.length === 0 ? currentInput.slice(0, 20) : chat.title,
+            }
+          : chat
+      )
+    );
+
+    // 2. Open WebSocket for the Live Stream
+    // If there's an existing socket, close it
+    if (socketRef.current) socketRef.current.close();
+
+    const encodedPrompt = encodeURIComponent(currentInput);
+    const token = localStorage.getItem('token'); // Use your existing token for ID
+    
+    // Connect to the new backend endpoint we discussed
+    const wsUrl = `ws://localhost:8000/ws/stream/${activeChatId}?prompt=${encodedPrompt}`;
+    socketRef.current = new WebSocket(wsUrl);
+
+    socketRef.current.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      
+      if (msg.type === "FRAME") {
+        setLiveFrame(`data:image/jpeg;base64,${msg.data}`);
+      } else if (msg.type === "STATUS") {
+        setConversations((prev) =>
+        prev.map((chat) =>
+          chat.id === activeChatId
+            ? {
+                ...chat,
+                messages: [
+                  ...chat.messages, 
+                  { 
+                    text: msg.content, 
+                    isUser: false,
+                  }
+                ],
+              }
+            : chat
+        )
+      );
+      } else if (msg.type === "LOG") {
+        setConversations((prev) =>
+        prev.map((chat) =>
+          chat.id === activeChatId
+            ? {
+                ...chat,
+                messages: [
+                  ...chat.messages, 
+                  { 
+                    text: msg.source + ": " + msg.content, 
+                    isUser: false,
+                  }
+                ],
+              }
+            : chat
+        )
+      );
+      }
+    };
+
+    socketRef.current.onclose = () => {
+      setLiveFrame(null); // Clear video when finished
+      console.log("Agent finished task.");
+    };
   };
 
   const handleNewChat = () => {
@@ -223,6 +311,14 @@ export default function Dashboard() {
             {msg.text}
           </div>
         ))}
+
+        {/* 📺 NEW: Live Browser Feed */}
+        {liveFrame && (
+          <div className="live-browser-container">
+            <div className="browser-header">Live Agent View</div>
+            <img src={liveFrame} alt="Browser Stream" className="browser-frame" />
+          </div>
+        )}
         <div ref={bottomRef}></div>
 
       </main>

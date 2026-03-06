@@ -553,3 +553,30 @@
   width: 100%;
   background-color: rgb(12, 247, 43);
 }
+
+.live-browser-container {
+  margin-right: auto;
+  border-bottom-left-radius: 4px;
+  margin: 20px 0;
+  border-radius: 12px;
+  width: 60%;
+  overflow: hidden;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.browser-header {
+  background: #333;
+  color: #ccc;
+  padding: 8px 15px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.browser-frame {
+  width: 100%;
+  height: auto;
+  display: block;
+}

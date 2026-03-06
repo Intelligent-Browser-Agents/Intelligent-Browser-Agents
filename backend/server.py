@@ -1,5 +1,7 @@
 # FastAPI framework, Requests for anything but GET
-from fastapi import FastAPI, Request 
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from playwright.async_api import async_playwright
+import socket
 
 # ForJWT Gen
 import jwt
@@ -33,6 +35,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import sys
 import subprocess
 
+
+import asyncio
 """
 To-DO List:
 -Create Verify Email endpoint, using app.get and token sent as query param
@@ -44,6 +48,7 @@ conn = None #postgres connection
 cur = None #postgres terminal cursor
 userdb_config_path = 'configs/user_db_config.yaml'
 userdb_config = None
+PORT_POOL = asyncio.Queue()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -78,6 +83,14 @@ async def lifespan(app: FastAPI):
     # create a cursor
     cur = conn.cursor()
     print("Database connected!")
+
+    while not PORT_POOL.empty():
+        await PORT_POOL.get()
+            
+    for p in range(9000,9010): # Using 9000+ 
+        await PORT_POOL.put(p)
+    print(f"✅ POOL READY: {PORT_POOL.qsize()} ports available.")
+    
     yield
     # Shutdown logic: close the database connection
     print("Closing database connection...")
@@ -87,9 +100,11 @@ async def lifespan(app: FastAPI):
     if conn is not None:
         conn.close()
         print('Database connection closed.')
+
     
 
 app = FastAPI(lifespan=lifespan)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -454,7 +469,7 @@ Placeholder for Agent API Endpoints
 """ ===== EDWIN TEST ENDPOINTS ===== """
 
 # # todo: handle user input and start app.py on the user's hardware
-@app.post('/start_agent')
+@app.post('/api/start_agent')
 async def start_agent(requests: Request): 
 
     # get user's input from frontend
@@ -470,13 +485,98 @@ async def start_agent(requests: Request):
     python_path = sys.executable
 
     result = subprocess.run(
-        [python_path, 'Prototype\\app.py', user_input],
+        [python_path, f'src/app.py', '--prompt', user_input, '--video_port', '10000'],
         env=current_env,
         capture_output=True,
         text=True
     )
 
     return {"STDOUT": result.stdout, "STDERR": result.stderr}
+
+async def wait_for_port(port: int, timeout: float = 10.0):
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < timeout:
+        try:
+            conn = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: socket.create_connection(("127.0.0.1", port), timeout=0.5)
+            )
+            conn.close()
+            return True
+        except:
+            await asyncio.sleep(0.5)
+    return False
+
+@app.websocket("/ws/stream/{user_id}")
+async def stream_endpoint(websocket: WebSocket, user_id: str):
+    await websocket.accept()
+    print("DEBUG 1: Socket Accepted")
+
+    query_params = websocket.query_params
+    prompt = query_params.get("prompt", "Default Prompt")
+    print("Prompt Received in WebSocket Endpoint: ")
+
+    port = await PORT_POOL.get()
+    print(f"DEBUG 2: Got Port {port}")
+
+    current_env = os.environ.copy()
+    python_path = sys.executable
+    
+    # 1. Launch Agent with full pipe access
+    process = await asyncio.create_subprocess_exec(
+        python_path, "src/app.py", "--port", str(port), "--prompt", prompt,
+        env=current_env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    print("DEBUG 3: Agent Subprocess Started")
+
+    is_ready = await wait_for_port(port)
+    print(f"DEBUG 4: Browser Ready: {is_ready}")
+
+    # 2. Monitor Logs in the background
+    async def log_reader(pipe, log_type):
+        while True:
+            line = await pipe.readline()
+            if not line: break
+            content = line.decode().strip()
+            print(f"[{log_type}] {content}")
+            await websocket.send_json({"type": "LOG", "source": log_type, "content": content})
+
+    # Start log monitoring tasks
+    stdout_task = asyncio.create_task(log_reader(process.stdout, "STDOUT"))
+    stderr_task = asyncio.create_task(log_reader(process.stderr, "STDERR"))
+
+    try:
+        # 3. Wait for Browser
+        await websocket.send_json({"type": "STATUS", "content": "Warming up browser..."})
+        if await wait_for_port(port):
+            async with async_playwright() as p:
+                browser = await p.chromium.connect_over_cdp(f"http://localhost:{port}")
+                page = browser.contexts[0].pages[0]
+                client = await page.context.new_cdp_session(page)
+
+                # 4. Stream Setup
+                async def on_frame(payload):
+                    try:
+                        await websocket.send_json({"type": "FRAME", "data": payload['data']})
+                        await client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
+                    except: pass
+
+                client.on("Page.screencastFrame", on_frame)
+                await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
+                
+                # Keep alive until process ends
+                await process.wait()
+        else:
+            await websocket.send_json({"type": "STATUS", "content": "Browser failed to open."})
+
+    finally:
+        # 5. Cleanup
+        stdout_task.cancel()
+        stderr_task.cancel()
+        if process.returncode is None:
+            process.terminate()
+        await PORT_POOL.put(port)
 
 
 # todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)

@@ -28,7 +28,7 @@ class ModelConfig:
 MODELS = {
     # Google models
     "gemini-flash": ModelConfig(
-        name="gemini-2.0-flash",
+        name="gemini-3.1-flash-lite-preview",
         provider="google",
         api_key_env="GOOGLE_API_KEY"
     ),

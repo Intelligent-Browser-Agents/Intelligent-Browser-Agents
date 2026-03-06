@@ -28,13 +28,14 @@ from langgraph.checkpoint.memory import MemorySaver
 from agents.verifier import Verifier
 from main import build_workflow
 import asyncio
+import argparse
 import sys
 
 
 # Reset verifier counter for consistent simulation
 Verifier.reset_simulation()
 
-async def main():
+async def main(prompt: str, video_port: int):
     
     # 1. Setup the initial mission
     config = {
@@ -45,13 +46,12 @@ async def main():
     # This is a sample initial input. Notice the fields we are passing in.
 
     # from frontend (use after backend testing)
-    # user_input = str(sys.argv[1])
-    # user_request = user_input
-    user_request = "navigate to https://ucf.edu. Then, go to google.com, look up nintendo, and give me information you found on the director of super smash bros."
+    user_request = prompt
+    #user_request = "navigate to https://ucf.edu. Then, go to google.com, look up nintendo, and give me information you found on the director of super smash bros."
 
     initial_input = {
         "messages": [{"role": "user", "content": f"USER REQUEST: {user_request}"}],
-        "current_url": "https://example.com",
+        "current_url": "https://google.com",
         # Plan tracking
         "plan_history": [],
         "current_plan": [],  # Will be populated by orchestrator
@@ -83,7 +83,9 @@ async def main():
     async with async_playwright() as p:
         
         #initialize the browser instance
-        browser = await p.chromium.launch(headless=False)
+        print(f"Launching browser on port {video_port}...")
+        browser = await p.chromium.launch(headless=False, args=[f'--remote-debugging-port={video_port}'])
+        print(f"Browser launched on port {video_port}. Waiting for frontend connection...")
         context = await browser.new_context()
         page = await context.new_page()
         
@@ -167,4 +169,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prompt", type=str, required=True)
+    parser.add_argument("--port", type=int, required=True)
+    args = parser.parse_args()
+    asyncio.run(main(args.prompt, args.port))

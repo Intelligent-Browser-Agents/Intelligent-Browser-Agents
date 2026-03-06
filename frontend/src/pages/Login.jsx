@@ -9,10 +9,6 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
-  useEffect (() => {
-      setMessage('');
-    })
-
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -36,6 +32,7 @@ export default function Login() {
       localStorage.setItem('token', data.token);
       navigate("/dashboard");
     } else {
+      localStorage.removeItem('token'); // Clear any existing token on failed login
       setMessage('Username or password is incorrect. Please try again.');
     }
   };
