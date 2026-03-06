@@ -225,7 +225,7 @@ async def insert_user(request: Request):
         return {'error' : error}
     
     # Inserting the new user
-    query = 'INSERT INTO users (username, firstname, lastname, email, , isverified, chng_pass, password) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING user_id;'
+    query = 'INSERT INTO users (username, firstname, lastname, email, isverified, chng_pass, password) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING user_id;'
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
     hashed_password = hashed_password.decode('utf-8')
     cur.execute(query, (username, firstname, lastname, email, False, False, hashed_password))
