@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
 
     # connect to the PostgreSQL server
     print('Connecting to the PostgreSQL database...')
-    conn = psycopg2.connect(
+    """conn = psycopg2.connect(
         dbname = userdb_config['dbname'],
         user = userdb_config['user'],
         password = userdb_config['password'],
@@ -82,6 +82,7 @@ async def lifespan(app: FastAPI):
     conn.autocommit = True
     # create a cursor
     cur = conn.cursor()
+    """
     print("Database connected!")
 
     while not PORT_POOL.empty():
@@ -577,6 +578,38 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
         if process.returncode is None:
             process.terminate()
         await PORT_POOL.put(port)
+
+from typing import List
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/stream/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: int):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Wait for message from a client
+            data = await websocket.receive_text()
+            print(f"Received message from client #{client_id}: {data}")
+            # Broadcast it to everyone else
+            await manager.broadcast(f"Client #{client_id} says: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        await manager.broadcast(f"Client #{client_id} left the chat")
 
 
 # todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)

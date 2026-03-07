@@ -27,6 +27,9 @@ export default function Dashboard() {
   const [liveFrame, setLiveFrame] = useState(null);
   const socketRef = useRef(null);
 
+  const [is_agent_running, setIsAgentRunning] = useState(false);
+  const chatSocketRef = useRef(null);
+
   {/*}
   const handleSend = async() => {
     if (!input.trim()) return;
@@ -104,8 +107,11 @@ export default function Dashboard() {
     const token = localStorage.getItem('token'); // Use your existing token for ID
     
     // Connect to the new backend endpoint we discussed
-    const wsUrl = `ws://localhost:8000/ws/stream/${activeChatId}?prompt=${encodedPrompt}`;
-    socketRef.current = new WebSocket(wsUrl);
+    const wsVideoUrl = `ws://localhost:8000/ws/stream/${activeChatId}?prompt=${encodedPrompt}`;
+    const wsChatUrl = `ws://localhost:8000/ws/chat/${activeChatId}?token=${token}`;
+    socketRef.current = new WebSocket(wsVideoUrl);
+    chatSocketRef.current = new WebSocket(wsChatUrl);
+    setIsAgentRunning(true);
 
     socketRef.current.onmessage = (event) => {
       const msg = JSON.parse(event.data);
@@ -149,8 +155,30 @@ export default function Dashboard() {
       }
     };
 
+    chatSocketRef.current.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      setConversations((prev) =>
+      prev.map((chat) =>
+        chat.id === activeChatId
+          ? {
+              ...chat,
+              messages: [
+                ...chat.messages, 
+                { 
+                  text: msg.content, 
+                  isUser: false,
+                }
+              ],
+            }
+          : chat
+      )
+      );
+      
+    };
+
     socketRef.current.onclose = () => {
       setLiveFrame(null); // Clear video when finished
+      setIsAgentRunning(false);
       console.log("Agent finished task.");
     };
   };
