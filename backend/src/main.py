@@ -54,7 +54,7 @@ def build_workflow(runtime):
     # Orchestration -> Execution or Interaction (conditional)
     workflow.add_conditional_edges(
         "orchestrator",
-        lambda state: "interaction" if state.get("is_complete", False) else "execution",
+        lambda state: "interaction" if state.get("handoff_interaction", False) else "execution",
         {
             "interaction": "interaction",
             "execution": "execution"
@@ -80,6 +80,14 @@ def build_workflow(runtime):
 
     # Interaction ends the process
     workflow.add_edge("interaction", END)
+    workflow.add_conditional_edges(
+        "interaction",
+        lambda state: "END" if state.get("is_complete", False) else "orchestrator",
+        {
+            "END": END,
+            "orchestrator": "orchestrator"
+        }
+    )
 
     print("Created agent workflow!")
     return workflow
