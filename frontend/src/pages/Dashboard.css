@@ -177,6 +177,79 @@
   border-bottom-right-radius: 4px;
 }
 
+.agent-running-badge {
+  align-self: flex-start;
+  background: #e8f7ff;
+  color: #1f7fab;
+  border: 1px solid #9ad9f5;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(31, 127, 171, 0.15);
+}
+
+.agent-finished-badge {
+  align-self: flex-start;
+  background: #edfdf1;
+  color: #1f8a4a;
+  border: 1px solid #b8ebc8;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(31, 138, 74, 0.14);
+}
+
+.chat-socket-lane {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-log-bundle {
+  width: min(75%, 900px);
+  padding: 10px 12px;
+}
+
+.agent-session-block {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-log-details {
+  width: 100%;
+}
+
+.agent-log-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #2c5f78;
+  outline: none;
+}
+
+.agent-log-content {
+  margin-top: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid #d6ebf7;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-log-line {
+  font-size: 14px;
+  color: #3e5f70;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* INPUT BAR
    Positioned fixed/absolute above bottom to float over background but not overlap the chat area
 */

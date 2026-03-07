@@ -77,6 +77,7 @@ class Orchestrator:
                 "current_task": "Awaiting user clarification",
                 "reasoning_log": [reasoning],
                 "is_complete": False,
+                "handoff_interaction": True,
                 "needs_fallback": False,
                 "last_step_complete": False,
                 "mission_failed": False,

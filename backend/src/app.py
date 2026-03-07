@@ -61,6 +61,7 @@ async def main(prompt: str, video_port: int):
         "current_task": "",
         "reasoning_log": [],
         "is_complete": False,
+        "handoff_interaction": False,
         "needs_fallback": False,
         "last_step_complete": False,
         "step_attempts": 0,

@@ -36,6 +36,7 @@ class ProjectState(TypedDict):
     current_task: str  # The specific task for executor
     reasoning_log: List[str]
     is_complete: bool
+    handoff_interaction: bool
     needs_fallback: bool
     last_step_complete: bool
     mission_failed: bool
