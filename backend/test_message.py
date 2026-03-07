@@ -3,7 +3,7 @@ import websockets
 #import aioconsole # Optional: pip install aioconsole for better async input
 
 async def chat():
-    uri = "ws://localhost:8000/ws/123" # 123 is a dummy client_id
+    uri = "ws://127.0.0.1:8000/ws/chat/123" # 123 is a dummy client_id
     
     async with websockets.connect(uri) as websocket:
         print("--- Connected to Chat Server ---")

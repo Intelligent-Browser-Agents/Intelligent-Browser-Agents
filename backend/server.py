@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
 
     # connect to the PostgreSQL server
     print('Connecting to the PostgreSQL database...')
-    """conn = psycopg2.connect(
+    conn = psycopg2.connect(
         dbname = userdb_config['dbname'],
         user = userdb_config['user'],
         password = userdb_config['password'],
@@ -82,7 +82,6 @@ async def lifespan(app: FastAPI):
     conn.autocommit = True
     # create a cursor
     cur = conn.cursor()
-    """
     print("Database connected!")
 
     while not PORT_POOL.empty():
@@ -597,9 +596,12 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-@app.websocket("/ws/stream/{client_id}")
+@app.websocket("/ws/chat/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: int):
     await manager.connect(websocket)
+
+    query_params = websocket.query_params
+    token = query_params.get("token", "Default Prompt")
     try:
         while True:
             # Wait for message from a client
