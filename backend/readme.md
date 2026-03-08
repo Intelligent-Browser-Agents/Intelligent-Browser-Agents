@@ -31,6 +31,10 @@ Connect in terminal to postgres
 ```bash
     psql -h localhost -U postgres -p 5432 -d postgres
 ```
+
+- (Note: if you'd like to use postgres from your command line instead of Docker's, run this command:
+  `docker exec -it some-postgres psql -U postgres -d postgres`, `\dt` to view tables, and `\q` to quit.
+
 -(if that doesn't work, try running `docker ps` to list the docker instances running and use the name you see there instead)
 
 Check for tables using the following command: `\l`
