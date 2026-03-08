@@ -27,6 +27,13 @@ export default function Dashboard() {
   const [liveFrame, setLiveFrame] = useState(null);
   const socketRef = useRef(null);
 
+  // User Credentials Values
+  const [fullName, setFullName] = useState("");
+  const [address, setAddress] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [email, setEmail] = useState("");
+  const [userCredentialsList, setUserCredentialsList] = useState([])
+
   {/*}
   const handleSend = async() => {
     if (!input.trim()) return;
@@ -247,8 +254,42 @@ export default function Dashboard() {
 
   // add credentials function
   const addUserCredentials = () => {
-    alert("This needds to be implemented!!");
+    alert("This needds to be implemented!! (It's ANOTHER modal :D)");
   }
+
+  // User Credentials
+  const UserCredentials = () => {
+
+    return (
+      <div className="user-creds-container">
+        <div className="general-creds-container">
+          <h3>General User Data</h3>
+          <p>Name</p>
+          <input placeholder="Your Full Name"></input>
+
+          <p>Address</p>
+          <input placeholder="Your Address"></input>
+
+          <p>Phone Number</p>
+          <input placeholder="Your Phone Number"></input>
+
+          <p>Email</p>
+          <input placeholder="Your Email"></input>
+        </div>
+
+        <div className="services-container">
+          <h3>Services</h3>
+          {/* 
+            todo: a list of credentials which the user has provided so far 
+            (by service associated with them.) 
+            Username: _______
+            Password:________
+          */}
+        </div>
+      </div>
+    );
+  }
+
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -375,7 +416,7 @@ export default function Dashboard() {
             {didUserVerifyIdentity ? (
               // TRUE - show the previously defined user credentials
               <div>
-                <h2>SHOW USER CREDENTIALS</h2>
+                <UserCredentials/>
               </div>
             ) : (
               // FALSE - prompt user to verify their identity first
