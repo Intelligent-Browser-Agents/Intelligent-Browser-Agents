@@ -260,6 +260,7 @@ export default function Dashboard() {
   // User Credentials
   const UserCredentials = () => {
 
+    // SAVE ALL OF THIS INFORMATION TO CACHE AND PULL FROM THERE
     return (
       <div className="user-creds-container">
         <div className="general-creds-container">
