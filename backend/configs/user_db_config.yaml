@@ -1,4 +1,4 @@
-dbname : "postgres"
+dbname : "user_database"
 user : "postgres"
 password : "mysecretpassword"
 port : "5432"
