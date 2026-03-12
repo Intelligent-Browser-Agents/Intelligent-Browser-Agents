@@ -77,6 +77,7 @@ class Orchestrator:
                 "current_task": "Awaiting user clarification",
                 "reasoning_log": [reasoning],
                 "is_complete": False,
+                "handoff_interaction": True,
                 "needs_fallback": False,
                 "last_step_complete": False,
                 "mission_failed": False,
@@ -102,6 +103,7 @@ class Orchestrator:
             "last_step_complete": False,
             "mission_failed": False,
             "step_attempts": 0,
+            "handoff_interaction": False,
         }
 
     def _make_decision(self, current_plan: list, current_step: int, state: ProjectState) -> dict:
