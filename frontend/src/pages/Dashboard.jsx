@@ -2,7 +2,188 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Dashboard.css";
 
+// === COMPONENTS ===
+function UserCredentials({ 
+  fullName, setFullName,
+  address, setAddress,
+  phoneNumber, setPhoneNumber,
+  email, setEmail,
+  serviceCredentials,
+  serviceForm,
+  serviceView,
+  onOpenService,
+  onCreateService,
+  onServiceFormChange,
+  onSaveService,
+  onDeleteService,
+  onBackToServices,
+  paymentMethods,
+  paymentView,
+  paymentForm,
+  onCreatePayment,
+  onOpenPayment,
+  onPaymentFormChange,
+  onSavePayment,
+  onDeletePayment,
+  onBackToPayments,
+}) {
+  const [activeCredentialsTab, setActiveCredentialsTab] = useState("services");
+  const isDetailView = serviceView.mode === "edit" || serviceView.mode === "create";
+  const isCreateMode = serviceView.mode === "create";
+  const isPaymentDetailView = paymentView.mode === "edit" || paymentView.mode === "create";
+  const isPaymentCreateMode = paymentView.mode === "create";
+  const showingServices = activeCredentialsTab === "services";
+
+  return (
+    <div className="user-creds-container">
+      <div className="general-creds-container">
+        <h3>General User Data</h3>
+        <div className="creds-field">
+          <label htmlFor="fullName">Name</label>
+        <input
+            id="fullName"
+            type="text"
+            placeholder="John Doe"
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          />
+        </div>
+
+        <div className="creds-field">
+          <label htmlFor="address">Address</label>
+        <input 
+            id="address"
+            type="text"
+            placeholder="123 Main St, Orlando, FL 32816"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          />
+        </div>
+
+        <div className="creds-field">
+          <label htmlFor="phoneNumber">Phone Number</label>
+        <input 
+            id="phoneNumber"
+            type="tel"
+            placeholder="(407) 555-0123"
+            value={phoneNumber}
+            onChange={(e) => setPhoneNumber(e.target.value)}
+          />
+        </div>
+
+        <div className="creds-field">
+          <label htmlFor="email">Email</label>
+        <input 
+            id="email"
+            type="email"
+            placeholder="name@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="services-container">
+        <div className="credentials-tabs">
+          <button type="button" className={`credentials-tab ${showingServices ? "active" : ""}`} onClick={() => setActiveCredentialsTab("services")}>Services</button>
+          <button type="button" className={`credentials-tab ${!showingServices ? "active" : ""}`} onClick={() => setActiveCredentialsTab("payments")}>Payment Info</button>
+        </div>
+        <div className="credentials-tab-body">
+          {showingServices ? (
+            !isDetailView ? (
+              <div className="services-grid cards-scroll">
+                {serviceCredentials.length === 0 ? (
+                  <p className="services-empty-state">No credentials saved yet.</p>
+                ) : (
+                  serviceCredentials.map((service) => (
+                    <button type="button" key={service.id} className="service-card" onClick={() => onOpenService(service.id)}>
+                      <span className="service-card-name">{service.serviceName || "Unnamed Service"}</span>
+                      <span className="service-card-username">@{service.username || "no-username"}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="cards-scroll">
+                <div className="service-detail-header">
+                  <h3>{isCreateMode ? "Create Service Credential" : "Edit Service Credential"}</h3>
+                  <button type="button" className="setting-btn back-services-btn" onClick={onBackToServices}>Back</button>
+                </div>
+                <div className="creds-field"><label htmlFor="serviceName">Service Name</label><input id="serviceName" type="text" value={serviceForm.serviceName} onChange={(e) => onServiceFormChange("serviceName", e.target.value)} placeholder="Google, Facebook, Github..." /></div>
+                <div className="creds-field"><label htmlFor="serviceEmail">Email</label><input id="serviceEmail" type="email" value={serviceForm.email} onChange={(e) => onServiceFormChange("email", e.target.value)} placeholder="name@example.com" /></div>
+                <div className="creds-field"><label htmlFor="serviceUsername">Username</label><input id="serviceUsername" type="text" value={serviceForm.username} onChange={(e) => onServiceFormChange("username", e.target.value)} placeholder="username" /></div>
+                <div className="creds-field"><label htmlFor="servicePassword">Password</label><input id="servicePassword" type="password" value={serviceForm.password} onChange={(e) => onServiceFormChange("password", e.target.value)} placeholder="password" /></div>
+                <div className="creds-field"><label htmlFor="serviceNotes">Notes</label><input id="serviceNotes" type="text" value={serviceForm.notes} onChange={(e) => onServiceFormChange("notes", e.target.value)} placeholder="Security question hints, recovery notes..." /></div>
+                <div className="service-detail-actions">
+                  <button className="setting-btn" onClick={onSaveService}>{isCreateMode ? "Create Credential" : "Save Changes"}</button>
+                  {!isCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeleteService}>Delete</button>)}
+                </div>
+              </div>
+            )
+          ) : !isPaymentDetailView ? (
+            <div className="services-grid cards-scroll">
+              {paymentMethods.length === 0 ? (
+                <p className="services-empty-state">No payment methods saved yet.</p>
+              ) : (
+                paymentMethods.map((payment) => (
+                  <button type="button" key={payment.id} className="service-card" onClick={() => onOpenPayment(payment.id)}>
+                    <span className="service-card-name">{payment.cardNickname || "Card"}</span>
+                    <span className="service-card-username">{payment.cardholderName || "No cardholder name"}</span>
+                    <span className="service-card-username">{payment.maskedCardNumber || "No number"}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="cards-scroll">
+              <div className="service-detail-header">
+                <h3>{isPaymentCreateMode ? "Add Payment Method" : "Edit Payment Method"}</h3>
+                <button type="button" className="setting-btn back-services-btn" onClick={onBackToPayments}>Back</button>
+              </div>
+              <div className="creds-field"><label htmlFor="cardNickname">Card Name</label><input id="cardNickname" type="text" placeholder="Personal Visa" value={paymentForm.cardNickname} onChange={(e) => onPaymentFormChange("cardNickname", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="cardholderName">Cardholder Name</label><input id="cardholderName" type="text" placeholder="John Doe" value={paymentForm.cardholderName} onChange={(e) => onPaymentFormChange("cardholderName", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="cardNumber">Card Number</label><input id="cardNumber" type="text" inputMode="numeric" placeholder="4111111111111111" value={paymentForm.cardNumber} onChange={(e) => onPaymentFormChange("cardNumber", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="expiryMonth">Expiry Month</label><input id="expiryMonth" type="text" inputMode="numeric" placeholder="MM" value={paymentForm.expiryMonth} onChange={(e) => onPaymentFormChange("expiryMonth", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="expiryYear">Expiry Year</label><input id="expiryYear" type="text" inputMode="numeric" placeholder="YYYY" value={paymentForm.expiryYear} onChange={(e) => onPaymentFormChange("expiryYear", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="cvv">CVV</label><input id="cvv" type="password" inputMode="numeric" placeholder="123" value={paymentForm.cvv} onChange={(e) => onPaymentFormChange("cvv", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="billingZip">Billing ZIP</label><input id="billingZip" type="text" placeholder="32816" value={paymentForm.billingZip} onChange={(e) => onPaymentFormChange("billingZip", e.target.value)} /></div>
+              <div className="service-detail-actions">
+                <button className="setting-btn" onClick={onSavePayment}>{isPaymentCreateMode ? "Add Card" : "Save Card"}</button>
+                {!isPaymentCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeletePayment}>Delete</button>)}
+              </div>
+            </div>
+          )}
+        </div>
+        {showingServices && !isDetailView && (
+          <button className="setting-btn credentials-add-btn" onClick={onCreateService}>Add New Credentials</button>
+        )}
+        {!showingServices && !isPaymentDetailView && (
+          <button className="setting-btn credentials-add-btn" onClick={onCreatePayment}>Add Payment Method</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
+  const defaultServiceForm = {
+    id: null,
+    serviceName: "",
+    email: "",
+    username: "",
+    password: "",
+    notes: "",
+  };
+  const defaultPaymentForm = {
+    id: null,
+    cardNickname: "",
+    cardholderName: "",
+    cardNumber: "",
+    expiryMonth: "",
+    expiryYear: "",
+    cvv: "",
+    billingZip: "",
+  };
   
   // ⬅ Stores the settings text
   const [conversations, setConversations] = useState([ { id: crypto.randomUUID(), title: "Browse 1", messages: [] }]);
@@ -28,11 +209,37 @@ export default function Dashboard() {
   const socketRef = useRef(null);
 
   // User Credentials Values
-  const [fullName, setFullName] = useState("");
-  const [address, setAddress] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [email, setEmail] = useState("");
-  const [userCredentialsList, setUserCredentialsList] = useState([])
+  const [fullName, setFullName] = useState(localStorage.getItem("fullName") || "");
+  const [address, setAddress] = useState(localStorage.getItem("address") || "");
+  const [phoneNumber, setPhoneNumber] = useState(localStorage.getItem("phoneNumber") || "");
+  const [phoneNumberError, setPhoneNumberError] = useState("");
+  const [email, setEmail] = useState(localStorage.getItem("email") || "");
+  const [emailError, setEmailError] = useState(""); 
+
+  const [userCredentialsList, setUserCredentialsList] = useState(() => {
+    const raw = localStorage.getItem("userCredentialsList");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [serviceView, setServiceView] = useState({ mode: "list", selectedId: null });
+  const [serviceForm, setServiceForm] = useState(defaultServiceForm);
+  const [paymentMethods, setPaymentMethods] = useState(() => {
+    const raw = localStorage.getItem("userPaymentMethods");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [paymentView, setPaymentView] = useState({ mode: "list", selectedId: null });
+  const [paymentForm, setPaymentForm] = useState(defaultPaymentForm);
 
   {/*}
   const handleSend = async() => {
@@ -252,45 +459,168 @@ export default function Dashboard() {
     }
   };
 
+  const validatePhoneNumber = (value) => {
+    // Accepts (407) 555-0123, 407-555-0123, 4075550123, +1 formats
+    const phoneRegex = /^(\+1\s?)?(\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}$/;
+    return phoneRegex.test(value.trim());
+  }
+
+  const validateEmail = (value) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(value.trim());
+  };
+
   // add credentials function
   const addUserCredentials = () => {
-    alert("This needds to be implemented!! (It's ANOTHER modal :D)");
+    setServiceView({ mode: "create", selectedId: null });
+    setServiceForm({ ...defaultServiceForm });
   }
 
-  // User Credentials
-  const UserCredentials = () => {
+  const openServiceCard = (serviceId) => {
+    const credential = userCredentialsList.find((service) => service.id === serviceId);
+    if (!credential) return;
+    setServiceForm({
+      id: credential.id,
+      serviceName: credential.serviceName || "",
+      email: credential.email || "",
+      username: credential.username || "",
+      password: credential.password || "",
+      notes: credential.notes || "",
+    });
+    setServiceView({ mode: "edit", selectedId: serviceId });
+  };
 
-    // SAVE ALL OF THIS INFORMATION TO CACHE AND PULL FROM THERE
-    return (
-      <div className="user-creds-container">
-        <div className="general-creds-container">
-          <h3>General User Data</h3>
-          <p>Name</p>
-          <input placeholder="Your Full Name"></input>
+  const handleServiceFormChange = (field, value) => {
+    setServiceForm((prev) => ({ ...prev, [field]: value }));
+  };
 
-          <p>Address</p>
-          <input placeholder="Your Address"></input>
+  const handleBackToServices = () => {
+    setServiceView({ mode: "list", selectedId: null });
+    setServiceForm({ ...defaultServiceForm });
+  };
 
-          <p>Phone Number</p>
-          <input placeholder="Your Phone Number"></input>
+  const saveServiceCredential = () => {
+    if (!serviceForm.serviceName.trim()) {
+      alert("Service name is required.");
+      return;
+    }
+    if (serviceForm.email && !validateEmail(serviceForm.email)) {
+      alert("Please enter a valid email address.");
+      return;
+    }
 
-          <p>Email</p>
-          <input placeholder="Your Email"></input>
-        </div>
+    const payload = {
+      id: serviceForm.id || crypto.randomUUID(),
+      serviceName: serviceForm.serviceName.trim(),
+      email: serviceForm.email.trim(),
+      username: serviceForm.username.trim(),
+      password: serviceForm.password,
+      notes: serviceForm.notes.trim(),
+      updatedAt: new Date().toISOString(),
+    };
 
-        <div className="services-container">
-          <h3>Services</h3>
-          {/* 
-            todo: a list of credentials which the user has provided so far 
-            (by service associated with them.) 
-            Username: _______
-            Password:________
-          */}
-        </div>
-      </div>
-    );
-  }
+    setUserCredentialsList((prev) => {
+      if (serviceView.mode === "create") return [...prev, payload];
+      return prev.map((service) => (service.id === payload.id ? payload : service));
+    });
+    handleBackToServices();
+  };
 
+  const deleteServiceCredential = () => {
+    if (!serviceView.selectedId) return;
+    setUserCredentialsList((prev) => prev.filter((service) => service.id !== serviceView.selectedId));
+    handleBackToServices();
+  };
+
+  const createPaymentMethod = () => {
+    setPaymentView({ mode: "create", selectedId: null });
+    setPaymentForm({ ...defaultPaymentForm });
+  };
+
+  const openPaymentCard = (paymentId) => {
+    const payment = paymentMethods.find((method) => method.id === paymentId);
+    if (!payment) return;
+    setPaymentForm({
+      id: payment.id,
+      cardNickname: payment.cardNickname || "",
+      cardholderName: payment.cardholderName || "",
+      cardNumber: payment.cardNumber || "",
+      expiryMonth: payment.expiryMonth || "",
+      expiryYear: payment.expiryYear || "",
+      cvv: payment.cvv || "",
+      billingZip: payment.billingZip || "",
+    });
+    setPaymentView({ mode: "edit", selectedId: paymentId });
+  };
+
+  const handlePaymentFormChange = (field, value) => {
+    setPaymentForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleBackToPayments = () => {
+    setPaymentView({ mode: "list", selectedId: null });
+    setPaymentForm({ ...defaultPaymentForm });
+  };
+
+  const savePaymentMethod = () => {
+    const cardDigits = paymentForm.cardNumber.replace(/\D/g, "");
+    if (!paymentForm.cardNickname.trim()) {
+      alert("Card name is required.");
+      return;
+    }
+    if (!paymentForm.cardholderName.trim()) {
+      alert("Cardholder name is required.");
+      return;
+    }
+    if (cardDigits.length < 12 || cardDigits.length > 19) {
+      alert("Please enter a valid card number.");
+      return;
+    }
+
+    const payload = {
+      id: paymentForm.id || crypto.randomUUID(),
+      cardNickname: paymentForm.cardNickname.trim(),
+      cardholderName: paymentForm.cardholderName.trim(),
+      cardNumber: cardDigits,
+      maskedCardNumber: `**** **** **** ${cardDigits.slice(-4)}`,
+      expiryMonth: paymentForm.expiryMonth.trim(),
+      expiryYear: paymentForm.expiryYear.trim(),
+      cvv: paymentForm.cvv.trim(),
+      billingZip: paymentForm.billingZip.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setPaymentMethods((prev) => {
+      if (paymentView.mode === "create") return [...prev, payload];
+      return prev.map((method) => (method.id === payload.id ? payload : method));
+    });
+    handleBackToPayments();
+  };
+
+  const deletePaymentMethod = () => {
+    if (!paymentView.selectedId) return;
+    setPaymentMethods((prev) => prev.filter((method) => method.id !== paymentView.selectedId));
+    handleBackToPayments();
+  };
+
+  const handleSaveGeneralUserData = () => {
+    localStorage.setItem("fullName", fullName); // persistence
+    localStorage.setItem("address", address); // persistence
+    localStorage.setItem("phoneNumber", phoneNumber); // persistence
+    localStorage.setItem("email", email); // persistence
+    localStorage.setItem("userCredentialsList", JSON.stringify(userCredentialsList)); // persistence
+    localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods)); // persistence
+
+    setShowUserCredentials(false)
+  };
+
+  useEffect(() => {
+    localStorage.setItem("userCredentialsList", JSON.stringify(userCredentialsList));
+  }, [userCredentialsList]);
+
+  useEffect(() => {
+    localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods));
+  }, [paymentMethods]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -381,7 +711,7 @@ export default function Dashboard() {
       {showSettings && (
         <div className="modal-overlay" >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
+            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close settings">✖</button>
             <h2 className="modal-title">Settings</h2>
 
             <label className="modal-label">Agent Prompt</label>
@@ -416,9 +746,33 @@ export default function Dashboard() {
             {/* VERIFY USER'S IDENTITY BEFORE REVELAING CREDENTIALS */}
             {didUserVerifyIdentity ? (
               // TRUE - show the previously defined user credentials
-              <div>
-                <UserCredentials/>
+              <div className="user-credentials-body">
+                <UserCredentials 
+                fullName={fullName} setFullName={setFullName} 
+                address={address} setAddress={setAddress}
+                phoneNumber={phoneNumber} setPhoneNumber={setPhoneNumber}
+                email={email} setEmail={setEmail}
+                serviceCredentials={userCredentialsList}
+                serviceForm={serviceForm}
+                serviceView={serviceView}
+                onOpenService={openServiceCard}
+                onCreateService={addUserCredentials}
+                onServiceFormChange={handleServiceFormChange}
+                onSaveService={saveServiceCredential}
+                onDeleteService={deleteServiceCredential}
+                onBackToServices={handleBackToServices}
+                paymentMethods={paymentMethods}
+                paymentView={paymentView}
+                paymentForm={paymentForm}
+                onCreatePayment={createPaymentMethod}
+                onOpenPayment={openPaymentCard}
+                onPaymentFormChange={handlePaymentFormChange}
+                onSavePayment={savePaymentMethod}
+                onDeletePayment={deletePaymentMethod}
+                onBackToPayments={handleBackToPayments}
+              />
               </div>
+
             ) : (
               // FALSE - prompt user to verify their identity first
               <div className="password-verification-group">
@@ -434,14 +788,9 @@ export default function Dashboard() {
               </div>
             )}
 
-            <br/>
-
-            {/* Add user credentials button - should be available either way */}
-            <button className="setting-btn" onClick={addUserCredentials}>Add New Credentials</button>
           </div>
         </div>
       )}
-
 
     </div>
   );
