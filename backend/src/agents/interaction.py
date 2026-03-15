@@ -57,19 +57,19 @@ class InteractionAgent:
         
         # Build context following the prompt's expected inputs
         context = f"""
-MAIN_GOAL: {user_intent}
+            MAIN_GOAL: {user_intent}
 
-VERIFIED_RESULT:
-Final URL: {current_url}
-Plan Executed: {plan_history[-1] if plan_history else 'N/A'}
+            VERIFIED_RESULT:
+            Final URL: {current_url}
+            Plan Executed: {plan_history[-1] if plan_history else 'N/A'}
 
-Recent Actions:
-{actions_summary}
+            Recent Actions:
+            {actions_summary}
 
-SYSTEM_STATUS: {system_status}
+            SYSTEM_STATUS: {system_status}
 
-Generate a user-facing response based on this information.
-"""
+            Generate a user-facing response based on this information.
+            """
 
         messages = [
             SystemMessage(content=self.system_prompt),
