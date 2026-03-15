@@ -79,6 +79,7 @@ def build_workflow(runtime):
 
 
     # Interaction ends the process
+    workflow.add_edge("interaction", END)
     workflow.add_conditional_edges(
         "interaction",
         lambda state: "END" if state.get("is_complete", False) else "orchestrator",

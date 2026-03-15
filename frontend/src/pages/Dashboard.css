@@ -465,6 +465,15 @@
   overflow-y: auto;
 }
 
+.modal-content.user-credentials-modal {
+  width: min(980px, 100%);
+  height: min(82vh, 760px);
+  max-height: min(82vh, 760px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .modal-title {
   margin: 0 30px 14px 0;
   color: #1f7fab;
@@ -620,6 +629,209 @@
   text-align: center;
   display: block;
   margin: 0 auto;
+}
+
+.user-creds-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: 100%;
+  min-height: 0;
+}
+
+.general-creds-container,
+.services-container {
+  background: #ffffff;
+  border: 1px solid #cfe8f6;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.general-creds-container h3,
+.services-container h3 {
+  margin: 0 0 12px;
+  color: #2a5f7d;
+}
+
+.services-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.credentials-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.credentials-tab {
+  border: 1px solid #b8dff2;
+  background: #f5fcff;
+  color: #3f6c82;
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.credentials-tab.active {
+  background: #67c3ef;
+  border-color: #67c3ef;
+  color: #ffffff;
+}
+
+.credentials-tab-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.services-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.cards-scroll {
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.user-credentials-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.user-credentials-body > .user-creds-container > .general-creds-container,
+.user-credentials-body > .user-creds-container > .services-container {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.user-credentials-body > .user-creds-container > .general-creds-container {
+  overflow-y: auto;
+}
+
+.service-card {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #c9e6f6;
+  border-radius: 10px;
+  background: #f8fdff;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.service-card:hover {
+  border-color: #79c8ee;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 12px rgba(41, 129, 172, 0.14);
+}
+
+.service-card-name {
+  color: #2a5f7d;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.service-card-username {
+  color: #507588;
+  font-size: 13px;
+}
+
+.services-empty-state {
+  margin: 2px 0 8px;
+  color: #648295;
+  font-size: 14px;
+}
+
+.service-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.back-services-btn {
+  min-width: 90px;
+  width: auto;
+  text-align: center;
+}
+
+.service-detail-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.delete-service-btn {
+  color: #ab4d4d;
+  border-color: #eab8b8;
+}
+
+.credentials-add-btn {
+  width: auto;
+  min-width: 190px;
+  margin-top: 12px;
+  text-align: center;
+  align-self: flex-start;
+}
+
+.creds-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.creds-field:last-child {
+  margin-bottom: 0;
+}
+
+.creds-field label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #43667a;
+}
+
+.creds-field input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 42px;
+  border: 1px solid #b8dff2;
+  border-radius: 10px;
+  background: #fbfeff;
+  color: #24485b;
+  padding: 0 12px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.creds-field input::placeholder {
+  color: #88a5b4;
+}
+
+.creds-field input:focus {
+  border-color: #52b9e8;
+  box-shadow: 0 0 0 3px rgba(82, 185, 232, 0.18);
+  background: #ffffff;
+}
+
+@media (max-width: 760px) {
+  .user-creds-container {
+    grid-template-columns: 1fr;
+  }
 }
 
 .modal-title-divider {

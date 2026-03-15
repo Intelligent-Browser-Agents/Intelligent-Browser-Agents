@@ -103,6 +103,7 @@ class Orchestrator:
             "last_step_complete": False,
             "mission_failed": False,
             "step_attempts": 0,
+            "handoff_interaction": False,
         }
 
     def _make_decision(self, current_plan: list, current_step: int, state: ProjectState) -> dict:

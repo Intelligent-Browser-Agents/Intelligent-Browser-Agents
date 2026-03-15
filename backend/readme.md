@@ -16,18 +16,29 @@ docker run --name some-postgres -e POSTGRES_PASSWORD=mysecretpassword -p 5432:54
 -d: Runs the container in detached mode, meaning it runs in the background.\
 postgres: Specifies the Docker image to use.
 
-To run uvicorn
-```bash
-    uvicorn server:app --host 127.0.0.1 --port 8000 --reload 
+You will need to modify `backend/configs/user_db_config.yaml` to account for the username and password you have selected, as well as the host port you are running this database on. The following example works for the example commands displayed above:
 ```
+dbname : "postgres"
+user : "postgres"
+password : "mysecretpassword"
+port : "5432"
+host : "127.0.0.1"
+```
+
+Before we can run the uvicorn server, we must create the Users table. This must be done through docker's command line. 
 
 Connect in terminal to postgres
 ```bash
-    psql -h localhost -U postgres -p 5432 -d user_database
+    psql -h localhost -U postgres -p 5432 -d postgres
 ```
 
-- user_database is the database
-- users is the table
+- (Note: if you'd like to use postgres from your command line instead of Docker's, run this command:
+  `docker exec -it some-postgres psql -U postgres -d postgres`, `\dt` to view tables, and `\q` to quit.
+
+-(if that doesn't work, try running `docker ps` to list the docker instances running and use the name you see there instead)
+
+Check for tables using the following command: `\l`
+
 
 Used to create the table
 ```SQL
@@ -45,12 +56,22 @@ CREATE TABLE Users (
 );
 
 ```
+- user_database is the database
+- users is the table
 
-Adding a new user 
+To add a new user: 
 ```SQL
 INSERT INTO users (username, firstname, lastname, email, isverified, chng_pass, password)
 VALUES ('testuser', 'Caleb', 'Yaghoubi', 'test@email.com', true, false, example_password);
 ```
+
+To run uvicorn
+```bash
+    uvicorn server:app --host 127.0.0.1 --port 8000 --reload 
+```
+
+You may get Bcrypt errors. If so, you do not have the right values in your `.env` file. Let one of us know to help you with this. 
+
 Testing 
 ```bash
 pytest -q testing.py

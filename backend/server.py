@@ -37,6 +37,13 @@ import subprocess
 
 
 import asyncio
+
+# Windows requires ProactorEventLoop for asyncio subprocess support.
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception as e:
+        print(f"Warning: could not set Windows Proactor event loop policy: {e}")
 """
 To-DO List:
 -Create Verify Email endpoint, using app.get and token sent as query param

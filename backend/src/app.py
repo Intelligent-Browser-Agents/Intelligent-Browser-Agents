@@ -46,8 +46,9 @@ async def main(prompt: str, video_port: int):
     # This is a sample initial input. Notice the fields we are passing in.
 
     # from frontend (use after backend testing)
-    user_request = prompt
-    #user_request = "navigate to https://ucf.edu. Then, go to google.com, look up nintendo, and give me information you found on the director of super smash bros."
+    # user_input = str(sys.argv[1])
+    # user_request = user_input
+    user_request = "find out the weather for me"
 
     initial_input = {
         "messages": [{"role": "user", "content": f"USER REQUEST: {user_request}"}],
