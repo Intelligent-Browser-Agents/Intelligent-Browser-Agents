@@ -216,6 +216,14 @@ export default function Dashboard() {
   const [currentRunSessionId, setCurrentRunSessionId] = useState(null);
   const currentRunSessionIdRef = useRef(null);
 
+  const [userCredentialsList, setUserCredentialsList] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [serviceForm, setServiceForm] = useState({ ...defaultServiceForm });
+  const [serviceView, setServiceView] = useState({ mode: "list", selectedId: null });
+  const [paymentForm, setPaymentForm] = useState({ ...defaultPaymentForm });
+  const [paymentView, setPaymentView] = useState({ mode: "list", selectedId: null });
+
+  
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
