@@ -26,13 +26,25 @@ function UserCredentials({
   onSavePayment,
   onDeletePayment,
   onBackToPayments,
+  experienceEntries,
+  experienceView,
+  experienceForm,
+  onCreateExperience,
+  onOpenExperience,
+  onExperienceFormChange,
+  onSaveExperience,
+  onDeleteExperience,
+  onBackToExperience,
 }) {
   const [activeCredentialsTab, setActiveCredentialsTab] = useState("services");
   const isDetailView = serviceView.mode === "edit" || serviceView.mode === "create";
   const isCreateMode = serviceView.mode === "create";
   const isPaymentDetailView = paymentView.mode === "edit" || paymentView.mode === "create";
   const isPaymentCreateMode = paymentView.mode === "create";
+  const isExperienceDetailView = experienceView.mode === "edit" || experienceView.mode === "create";
+  const isExperienceCreateMode = experienceView.mode === "create";
   const showingServices = activeCredentialsTab === "services";
+  const showingPayments = activeCredentialsTab === "payments";
 
   return (
     <div className="user-creds-container">
@@ -81,12 +93,14 @@ function UserCredentials({
           onChange={(e) => setEmail(e.target.value)}
           />
         </div>
+
       </div>
 
       <div className="services-container">
         <div className="credentials-tabs">
           <button type="button" className={`credentials-tab ${showingServices ? "active" : ""}`} onClick={() => setActiveCredentialsTab("services")}>Services</button>
-          <button type="button" className={`credentials-tab ${!showingServices ? "active" : ""}`} onClick={() => setActiveCredentialsTab("payments")}>Payment Info</button>
+          <button type="button" className={`credentials-tab ${showingPayments ? "active" : ""}`} onClick={() => setActiveCredentialsTab("payments")}>Payment Info</button>
+          <button type="button" className={`credentials-tab ${activeCredentialsTab === "experience" ? "active" : ""}`} onClick={() => setActiveCredentialsTab("experience")}>Experience</button>
         </div>
         <div className="credentials-tab-body">
           {showingServices ? (
@@ -120,16 +134,50 @@ function UserCredentials({
                 </div>
               </div>
             )
-          ) : !isPaymentDetailView ? (
+          ) : showingPayments ? (
+            !isPaymentDetailView ? (
+              <div className="services-grid cards-scroll">
+                {paymentMethods.length === 0 ? (
+                  <p className="services-empty-state">No payment methods saved yet.</p>
+                ) : (
+                  paymentMethods.map((payment) => (
+                    <button type="button" key={payment.id} className="service-card" onClick={() => onOpenPayment(payment.id)}>
+                      <span className="service-card-name">{payment.cardNickname || "Card"}</span>
+                      <span className="service-card-username">{payment.cardholderName || "No cardholder name"}</span>
+                      <span className="service-card-username">{payment.maskedCardNumber || "No number"}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="cards-scroll">
+                <div className="service-detail-header">
+                  <h3>{isPaymentCreateMode ? "Add Payment Method" : "Edit Payment Method"}</h3>
+                  <button type="button" className="setting-btn back-services-btn" onClick={onBackToPayments}>Back</button>
+                </div>
+                <div className="creds-field"><label htmlFor="cardNickname">Card Name</label><input id="cardNickname" type="text" placeholder="Personal Visa" value={paymentForm.cardNickname} onChange={(e) => onPaymentFormChange("cardNickname", e.target.value)} /></div>
+                <div className="creds-field"><label htmlFor="cardholderName">Cardholder Name</label><input id="cardholderName" type="text" placeholder="John Doe" value={paymentForm.cardholderName} onChange={(e) => onPaymentFormChange("cardholderName", e.target.value)} /></div>
+                <div className="creds-field"><label htmlFor="cardNumber">Card Number</label><input id="cardNumber" type="text" inputMode="numeric" placeholder="4111111111111111" value={paymentForm.cardNumber} onChange={(e) => onPaymentFormChange("cardNumber", e.target.value)} /></div>
+                <div className="creds-field"><label htmlFor="expiryMonth">Expiry Month</label><input id="expiryMonth" type="text" inputMode="numeric" placeholder="MM" value={paymentForm.expiryMonth} onChange={(e) => onPaymentFormChange("expiryMonth", e.target.value)} /></div>
+                <div className="creds-field"><label htmlFor="expiryYear">Expiry Year</label><input id="expiryYear" type="text" inputMode="numeric" placeholder="YYYY" value={paymentForm.expiryYear} onChange={(e) => onPaymentFormChange("expiryYear", e.target.value)} /></div>
+                <div className="creds-field"><label htmlFor="cvv">CVV</label><input id="cvv" type="password" inputMode="numeric" placeholder="123" value={paymentForm.cvv} onChange={(e) => onPaymentFormChange("cvv", e.target.value)} /></div>
+                <div className="creds-field"><label htmlFor="billingZip">Billing ZIP</label><input id="billingZip" type="text" placeholder="32816" value={paymentForm.billingZip} onChange={(e) => onPaymentFormChange("billingZip", e.target.value)} /></div>
+                <div className="service-detail-actions">
+                  <button className="setting-btn" onClick={onSavePayment}>{isPaymentCreateMode ? "Add Card" : "Save Card"}</button>
+                  {!isPaymentCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeletePayment}>Delete</button>)}
+                </div>
+              </div>
+            )
+          ) : !isExperienceDetailView ? (
             <div className="services-grid cards-scroll">
-              {paymentMethods.length === 0 ? (
-                <p className="services-empty-state">No payment methods saved yet.</p>
+              {experienceEntries.length === 0 ? (
+                <p className="services-empty-state">No experience entries saved yet.</p>
               ) : (
-                paymentMethods.map((payment) => (
-                  <button type="button" key={payment.id} className="service-card" onClick={() => onOpenPayment(payment.id)}>
-                    <span className="service-card-name">{payment.cardNickname || "Card"}</span>
-                    <span className="service-card-username">{payment.cardholderName || "No cardholder name"}</span>
-                    <span className="service-card-username">{payment.maskedCardNumber || "No number"}</span>
+                experienceEntries.map((entry) => (
+                  <button type="button" key={entry.id} className="service-card" onClick={() => onOpenExperience(entry.id)}>
+                    <span className="service-card-name">{entry.title || "Untitled Experience"}</span>
+                    <span className="service-card-username">{entry.organization || "No organization"}</span>
+                    <span className="service-card-username">{entry.entryType === "education" ? "Education" : "Work"}</span>
                   </button>
                 ))
               )}
@@ -137,19 +185,20 @@ function UserCredentials({
           ) : (
             <div className="cards-scroll">
               <div className="service-detail-header">
-                <h3>{isPaymentCreateMode ? "Add Payment Method" : "Edit Payment Method"}</h3>
-                <button type="button" className="setting-btn back-services-btn" onClick={onBackToPayments}>Back</button>
+                <h3>{isExperienceCreateMode ? "Add Experience Entry" : "Edit Experience Entry"}</h3>
+                <button type="button" className="setting-btn back-services-btn" onClick={onBackToExperience}>Back</button>
               </div>
-              <div className="creds-field"><label htmlFor="cardNickname">Card Name</label><input id="cardNickname" type="text" placeholder="Personal Visa" value={paymentForm.cardNickname} onChange={(e) => onPaymentFormChange("cardNickname", e.target.value)} /></div>
-              <div className="creds-field"><label htmlFor="cardholderName">Cardholder Name</label><input id="cardholderName" type="text" placeholder="John Doe" value={paymentForm.cardholderName} onChange={(e) => onPaymentFormChange("cardholderName", e.target.value)} /></div>
-              <div className="creds-field"><label htmlFor="cardNumber">Card Number</label><input id="cardNumber" type="text" inputMode="numeric" placeholder="4111111111111111" value={paymentForm.cardNumber} onChange={(e) => onPaymentFormChange("cardNumber", e.target.value)} /></div>
-              <div className="creds-field"><label htmlFor="expiryMonth">Expiry Month</label><input id="expiryMonth" type="text" inputMode="numeric" placeholder="MM" value={paymentForm.expiryMonth} onChange={(e) => onPaymentFormChange("expiryMonth", e.target.value)} /></div>
-              <div className="creds-field"><label htmlFor="expiryYear">Expiry Year</label><input id="expiryYear" type="text" inputMode="numeric" placeholder="YYYY" value={paymentForm.expiryYear} onChange={(e) => onPaymentFormChange("expiryYear", e.target.value)} /></div>
-              <div className="creds-field"><label htmlFor="cvv">CVV</label><input id="cvv" type="password" inputMode="numeric" placeholder="123" value={paymentForm.cvv} onChange={(e) => onPaymentFormChange("cvv", e.target.value)} /></div>
-              <div className="creds-field"><label htmlFor="billingZip">Billing ZIP</label><input id="billingZip" type="text" placeholder="32816" value={paymentForm.billingZip} onChange={(e) => onPaymentFormChange("billingZip", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceType">Entry Type</label><select id="experienceType" value={experienceForm.entryType} onChange={(e) => onExperienceFormChange("entryType", e.target.value)}><option value="work">Work</option><option value="education">Education</option></select></div>
+              <div className="creds-field"><label htmlFor="experienceTitle">{experienceForm.entryType === "education" ? "Degree / Program" : "Job Title"}</label><input id="experienceTitle" type="text" placeholder={experienceForm.entryType === "education" ? "B.S. Computer Science" : "Software Engineer"} value={experienceForm.title} onChange={(e) => onExperienceFormChange("title", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceOrg">{experienceForm.entryType === "education" ? "School / Institution" : "Company"}</label><input id="experienceOrg" type="text" placeholder={experienceForm.entryType === "education" ? "University of Central Florida" : "Google"} value={experienceForm.organization} onChange={(e) => onExperienceFormChange("organization", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceLocation">Location</label><input id="experienceLocation" type="text" placeholder="Orlando, FL" value={experienceForm.location} onChange={(e) => onExperienceFormChange("location", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceStartDate">Start Date</label><input id="experienceStartDate" type="month" value={experienceForm.startDate} onChange={(e) => onExperienceFormChange("startDate", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceEndDate">End Date</label><input id="experienceEndDate" type="month" value={experienceForm.endDate} disabled={experienceForm.isCurrent} onChange={(e) => onExperienceFormChange("endDate", e.target.value)} /></div>
+              <div className="creds-field creds-checkbox-row"><label htmlFor="experienceCurrent">Current</label><input id="experienceCurrent" type="checkbox" checked={experienceForm.isCurrent} onChange={(e) => onExperienceFormChange("isCurrent", e.target.checked)} /></div>
+              <div className="creds-field"><label htmlFor="experienceDescription">Description</label><textarea id="experienceDescription" className="creds-textarea" placeholder="Responsibilities, achievements, or relevant coursework..." value={experienceForm.description} onChange={(e) => onExperienceFormChange("description", e.target.value)} /></div>
               <div className="service-detail-actions">
-                <button className="setting-btn" onClick={onSavePayment}>{isPaymentCreateMode ? "Add Card" : "Save Card"}</button>
-                {!isPaymentCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeletePayment}>Delete</button>)}
+                <button className="setting-btn" onClick={onSaveExperience}>{isExperienceCreateMode ? "Add Experience" : "Save Experience"}</button>
+                {!isExperienceCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeleteExperience}>Delete</button>)}
               </div>
             </div>
           )}
@@ -157,8 +206,11 @@ function UserCredentials({
         {showingServices && !isDetailView && (
           <button className="setting-btn credentials-add-btn" onClick={onCreateService}>Add New Credentials</button>
         )}
-        {!showingServices && !isPaymentDetailView && (
+        {showingPayments && !isPaymentDetailView && (
           <button className="setting-btn credentials-add-btn" onClick={onCreatePayment}>Add Payment Method</button>
+        )}
+        {activeCredentialsTab === "experience" && !isExperienceDetailView && (
+          <button className="setting-btn credentials-add-btn" onClick={onCreateExperience}>Add Experience Entry</button>
         )}
       </div>
     </div>
@@ -183,6 +235,17 @@ export default function Dashboard() {
     expiryYear: "",
     cvv: "",
     billingZip: "",
+  };
+  const defaultExperienceForm = {
+    id: null,
+    entryType: "work",
+    title: "",
+    organization: "",
+    location: "",
+    startDate: "",
+    endDate: "",
+    isCurrent: false,
+    description: "",
   };
   
   // ⬅ Stores the settings text
@@ -240,6 +303,18 @@ export default function Dashboard() {
   });
   const [paymentView, setPaymentView] = useState({ mode: "list", selectedId: null });
   const [paymentForm, setPaymentForm] = useState(defaultPaymentForm);
+  const [experienceEntries, setExperienceEntries] = useState(() => {
+    const raw = localStorage.getItem("userExperienceEntries");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [experienceView, setExperienceView] = useState({ mode: "list", selectedId: null });
+  const [experienceForm, setExperienceForm] = useState(defaultExperienceForm);
 
   {/*}
   const handleSend = async() => {
@@ -603,6 +678,86 @@ export default function Dashboard() {
     handleBackToPayments();
   };
 
+  const createExperienceEntry = () => {
+    setExperienceView({ mode: "create", selectedId: null });
+    setExperienceForm({ ...defaultExperienceForm });
+  };
+
+  const openExperienceCard = (entryId) => {
+    const entry = experienceEntries.find((item) => item.id === entryId);
+    if (!entry) return;
+    setExperienceForm({
+      id: entry.id,
+      entryType: entry.entryType || "work",
+      title: entry.title || "",
+      organization: entry.organization || "",
+      location: entry.location || "",
+      startDate: entry.startDate || "",
+      endDate: entry.endDate || "",
+      isCurrent: Boolean(entry.isCurrent),
+      description: entry.description || "",
+    });
+    setExperienceView({ mode: "edit", selectedId: entryId });
+  };
+
+  const handleExperienceFormChange = (field, value) => {
+    setExperienceForm((prev) => {
+      if (field === "isCurrent" && value === true) {
+        return { ...prev, isCurrent: true, endDate: "" };
+      }
+      return { ...prev, [field]: value };
+    });
+  };
+
+  const handleBackToExperience = () => {
+    setExperienceView({ mode: "list", selectedId: null });
+    setExperienceForm({ ...defaultExperienceForm });
+  };
+
+  const saveExperienceEntry = () => {
+    if (!experienceForm.title.trim()) {
+      alert(experienceForm.entryType === "education" ? "Degree/program is required." : "Job title is required.");
+      return;
+    }
+    if (!experienceForm.organization.trim()) {
+      alert(experienceForm.entryType === "education" ? "School/institution is required." : "Company is required.");
+      return;
+    }
+    if (!experienceForm.startDate) {
+      alert("Start date is required.");
+      return;
+    }
+    if (!experienceForm.isCurrent && !experienceForm.endDate) {
+      alert("End date is required unless this is current.");
+      return;
+    }
+
+    const payload = {
+      id: experienceForm.id || crypto.randomUUID(),
+      entryType: experienceForm.entryType,
+      title: experienceForm.title.trim(),
+      organization: experienceForm.organization.trim(),
+      location: experienceForm.location.trim(),
+      startDate: experienceForm.startDate,
+      endDate: experienceForm.isCurrent ? "" : experienceForm.endDate,
+      isCurrent: Boolean(experienceForm.isCurrent),
+      description: experienceForm.description.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setExperienceEntries((prev) => {
+      if (experienceView.mode === "create") return [...prev, payload];
+      return prev.map((entry) => (entry.id === payload.id ? payload : entry));
+    });
+    handleBackToExperience();
+  };
+
+  const deleteExperienceEntry = () => {
+    if (!experienceView.selectedId) return;
+    setExperienceEntries((prev) => prev.filter((entry) => entry.id !== experienceView.selectedId));
+    handleBackToExperience();
+  };
+
   const handleSaveGeneralUserData = () => {
     localStorage.setItem("fullName", fullName); // persistence
     localStorage.setItem("address", address); // persistence
@@ -610,6 +765,7 @@ export default function Dashboard() {
     localStorage.setItem("email", email); // persistence
     localStorage.setItem("userCredentialsList", JSON.stringify(userCredentialsList)); // persistence
     localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods)); // persistence
+    localStorage.setItem("userExperienceEntries", JSON.stringify(experienceEntries)); // persistence
 
     setShowUserCredentials(false)
   };
@@ -621,6 +777,10 @@ export default function Dashboard() {
   useEffect(() => {
     localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods));
   }, [paymentMethods]);
+
+  useEffect(() => {
+    localStorage.setItem("userExperienceEntries", JSON.stringify(experienceEntries));
+  }, [experienceEntries]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -770,6 +930,15 @@ export default function Dashboard() {
                 onSavePayment={savePaymentMethod}
                 onDeletePayment={deletePaymentMethod}
                 onBackToPayments={handleBackToPayments}
+                experienceEntries={experienceEntries}
+                experienceView={experienceView}
+                experienceForm={experienceForm}
+                onCreateExperience={createExperienceEntry}
+                onOpenExperience={openExperienceCard}
+                onExperienceFormChange={handleExperienceFormChange}
+                onSaveExperience={saveExperienceEntry}
+                onDeleteExperience={deleteExperienceEntry}
+                onBackToExperience={handleBackToExperience}
               />
               </div>
 
