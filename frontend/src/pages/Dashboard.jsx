@@ -45,6 +45,9 @@ function UserCredentials({
   const isExperienceCreateMode = experienceView.mode === "create";
   const showingServices = activeCredentialsTab === "services";
   const showingPayments = activeCredentialsTab === "payments";
+  const safeServiceCredentials = Array.isArray(serviceCredentials) ? serviceCredentials : [];
+  const safePaymentMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
+  const safeExperienceEntries = Array.isArray(experienceEntries) ? experienceEntries : [];
 
   return (
     <div className="user-creds-container">
@@ -106,10 +109,10 @@ function UserCredentials({
           {showingServices ? (
             !isDetailView ? (
               <div className="services-grid cards-scroll">
-                {serviceCredentials.length === 0 ? (
+                {safeServiceCredentials.length === 0 ? (
                   <p className="services-empty-state">No credentials saved yet.</p>
                 ) : (
-                  serviceCredentials.map((service) => (
+                  safeServiceCredentials.map((service) => (
                     <button type="button" key={service.id} className="service-card" onClick={() => onOpenService(service.id)}>
                       <span className="service-card-name">{service.serviceName || "Unnamed Service"}</span>
                       <span className="service-card-username">@{service.username || "no-username"}</span>
@@ -136,44 +139,44 @@ function UserCredentials({
             )
           ) : showingPayments ? (
             !isPaymentDetailView ? (
-              <div className="services-grid cards-scroll">
-                {paymentMethods.length === 0 ? (
+            <div className="services-grid cards-scroll">
+                {safePaymentMethods.length === 0 ? (
                   <p className="services-empty-state">No payment methods saved yet.</p>
                 ) : (
-                  paymentMethods.map((payment) => (
+                  safePaymentMethods.map((payment) => (
                     <button type="button" key={payment.id} className="service-card" onClick={() => onOpenPayment(payment.id)}>
                       <span className="service-card-name">{payment.cardNickname || "Card"}</span>
                       <span className="service-card-username">{payment.cardholderName || "No cardholder name"}</span>
-                      <span className="service-card-username">{payment.maskedCardNumber || "No number"}</span>
-                    </button>
-                  ))
-                )}
+                    <span className="service-card-username">{payment.maskedCardNumber || "No number"}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="cards-scroll">
+              <div className="service-detail-header">
+                <h3>{isPaymentCreateMode ? "Add Payment Method" : "Edit Payment Method"}</h3>
+                <button type="button" className="setting-btn back-services-btn" onClick={onBackToPayments}>Back</button>
               </div>
-            ) : (
-              <div className="cards-scroll">
-                <div className="service-detail-header">
-                  <h3>{isPaymentCreateMode ? "Add Payment Method" : "Edit Payment Method"}</h3>
-                  <button type="button" className="setting-btn back-services-btn" onClick={onBackToPayments}>Back</button>
-                </div>
-                <div className="creds-field"><label htmlFor="cardNickname">Card Name</label><input id="cardNickname" type="text" placeholder="Personal Visa" value={paymentForm.cardNickname} onChange={(e) => onPaymentFormChange("cardNickname", e.target.value)} /></div>
-                <div className="creds-field"><label htmlFor="cardholderName">Cardholder Name</label><input id="cardholderName" type="text" placeholder="John Doe" value={paymentForm.cardholderName} onChange={(e) => onPaymentFormChange("cardholderName", e.target.value)} /></div>
-                <div className="creds-field"><label htmlFor="cardNumber">Card Number</label><input id="cardNumber" type="text" inputMode="numeric" placeholder="4111111111111111" value={paymentForm.cardNumber} onChange={(e) => onPaymentFormChange("cardNumber", e.target.value)} /></div>
-                <div className="creds-field"><label htmlFor="expiryMonth">Expiry Month</label><input id="expiryMonth" type="text" inputMode="numeric" placeholder="MM" value={paymentForm.expiryMonth} onChange={(e) => onPaymentFormChange("expiryMonth", e.target.value)} /></div>
-                <div className="creds-field"><label htmlFor="expiryYear">Expiry Year</label><input id="expiryYear" type="text" inputMode="numeric" placeholder="YYYY" value={paymentForm.expiryYear} onChange={(e) => onPaymentFormChange("expiryYear", e.target.value)} /></div>
-                <div className="creds-field"><label htmlFor="cvv">CVV</label><input id="cvv" type="password" inputMode="numeric" placeholder="123" value={paymentForm.cvv} onChange={(e) => onPaymentFormChange("cvv", e.target.value)} /></div>
-                <div className="creds-field"><label htmlFor="billingZip">Billing ZIP</label><input id="billingZip" type="text" placeholder="32816" value={paymentForm.billingZip} onChange={(e) => onPaymentFormChange("billingZip", e.target.value)} /></div>
-                <div className="service-detail-actions">
-                  <button className="setting-btn" onClick={onSavePayment}>{isPaymentCreateMode ? "Add Card" : "Save Card"}</button>
-                  {!isPaymentCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeletePayment}>Delete</button>)}
+              <div className="creds-field"><label htmlFor="cardNickname">Card Name</label><input id="cardNickname" type="text" placeholder="Personal Visa" value={paymentForm.cardNickname} onChange={(e) => onPaymentFormChange("cardNickname", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="cardholderName">Cardholder Name</label><input id="cardholderName" type="text" placeholder="John Doe" value={paymentForm.cardholderName} onChange={(e) => onPaymentFormChange("cardholderName", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="cardNumber">Card Number</label><input id="cardNumber" type="text" inputMode="numeric" placeholder="4111111111111111" value={paymentForm.cardNumber} onChange={(e) => onPaymentFormChange("cardNumber", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="expiryMonth">Expiry Month</label><input id="expiryMonth" type="text" inputMode="numeric" placeholder="MM" value={paymentForm.expiryMonth} onChange={(e) => onPaymentFormChange("expiryMonth", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="expiryYear">Expiry Year</label><input id="expiryYear" type="text" inputMode="numeric" placeholder="YYYY" value={paymentForm.expiryYear} onChange={(e) => onPaymentFormChange("expiryYear", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="cvv">CVV</label><input id="cvv" type="password" inputMode="numeric" placeholder="123" value={paymentForm.cvv} onChange={(e) => onPaymentFormChange("cvv", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="billingZip">Billing ZIP</label><input id="billingZip" type="text" placeholder="32816" value={paymentForm.billingZip} onChange={(e) => onPaymentFormChange("billingZip", e.target.value)} /></div>
+              <div className="service-detail-actions">
+                <button className="setting-btn" onClick={onSavePayment}>{isPaymentCreateMode ? "Add Card" : "Save Card"}</button>
+                {!isPaymentCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeletePayment}>Delete</button>)}
                 </div>
               </div>
             )
           ) : !isExperienceDetailView ? (
             <div className="services-grid cards-scroll">
-              {experienceEntries.length === 0 ? (
+              {safeExperienceEntries.length === 0 ? (
                 <p className="services-empty-state">No experience entries saved yet.</p>
               ) : (
-                experienceEntries.map((entry) => (
+                safeExperienceEntries.map((entry) => (
                   <button type="button" key={entry.id} className="service-card" onClick={() => onOpenExperience(entry.id)}>
                     <span className="service-card-name">{entry.title || "Untitled Experience"}</span>
                     <span className="service-card-username">{entry.organization || "No organization"}</span>
@@ -256,7 +259,12 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [firstname, setFirstname] = useState("");
+  const [fullName, setFullName] = useState("");
+
   const [input, setInput] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [address, setAddress] = useState("");
+  const [email, setEmail] = useState("");
 
   // verify user values
   const [password, setPassword] = useState("");
@@ -266,43 +274,25 @@ export default function Dashboard() {
   const chatListRef = useRef(null);
   const bottomRef = useRef(null);
   const navigate = useNavigate();
+  const activeChatIdRef = useRef(activeChatId);
 
   //Store llive frames
   const [liveFrame, setLiveFrame] = useState(null);
   const socketRef = useRef(null);
 
-  // User Credentials Values
-  const [fullName, setFullName] = useState(localStorage.getItem("fullName") || "");
-  const [address, setAddress] = useState(localStorage.getItem("address") || "");
-  const [phoneNumber, setPhoneNumber] = useState(localStorage.getItem("phoneNumber") || "");
-  const [phoneNumberError, setPhoneNumberError] = useState("");
-  const [email, setEmail] = useState(localStorage.getItem("email") || "");
-  const [emailError, setEmailError] = useState(""); 
+  const [isAgentRunning, setIsAgentRunning] = useState(false);
+  const isAgentRunningRef = useRef(false);
+  const chatSocketRef = useRef(null);
+  const [agentSessionsByChat, setAgentSessionsByChat] = useState({});
+  const [currentRunSessionId, setCurrentRunSessionId] = useState(null);
+  const currentRunSessionIdRef = useRef(null);
 
-  const [userCredentialsList, setUserCredentialsList] = useState(() => {
-    const raw = localStorage.getItem("userCredentialsList");
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [userCredentialsList, setUserCredentialsList] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [serviceForm, setServiceForm] = useState({ ...defaultServiceForm });
   const [serviceView, setServiceView] = useState({ mode: "list", selectedId: null });
-  const [serviceForm, setServiceForm] = useState(defaultServiceForm);
-  const [paymentMethods, setPaymentMethods] = useState(() => {
-    const raw = localStorage.getItem("userPaymentMethods");
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [paymentForm, setPaymentForm] = useState({ ...defaultPaymentForm });
   const [paymentView, setPaymentView] = useState({ mode: "list", selectedId: null });
-  const [paymentForm, setPaymentForm] = useState(defaultPaymentForm);
   const [experienceEntries, setExperienceEntries] = useState(() => {
     const raw = localStorage.getItem("userExperienceEntries");
     if (!raw) return [];
@@ -315,6 +305,116 @@ export default function Dashboard() {
   });
   const [experienceView, setExperienceView] = useState({ mode: "list", selectedId: null });
   const [experienceForm, setExperienceForm] = useState(defaultExperienceForm);
+
+
+  
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  useEffect(() => {
+    isAgentRunningRef.current = isAgentRunning;
+  }, [isAgentRunning]);
+
+  useEffect(() => {
+    currentRunSessionIdRef.current = currentRunSessionId;
+  }, [currentRunSessionId]);
+
+  const createTextMessage = (text, isUser, channel = "main") => ({
+    id: crypto.randomUUID(),
+    type: "text",
+    text,
+    isUser,
+    channel,
+  });
+
+  const appendMessageToChat = (chatId, text, isUser, channel = "main") => {
+    setConversations((prev) =>
+      prev.map((chat) =>
+        chat.id === chatId
+          ? {
+              ...chat,
+              messages: [...chat.messages, createTextMessage(text, isUser, channel)],
+              title: chat.messages.length === 0 && isUser ? text.slice(0, 20) : chat.title,
+            }
+          : chat
+      )
+    );
+  };
+
+  const startAgentSession = (chatId, prompt) => {
+    const sessionId = crypto.randomUUID();
+    setAgentSessionsByChat((prev) => ({
+      ...prev,
+      [chatId]: [
+        ...(prev[chatId] || []),
+        {
+          id: sessionId,
+          prompt,
+          logs: [],
+          chatMessages: [],
+          status: "running",
+        },
+      ],
+    }));
+    return sessionId;
+  };
+
+  const appendAgentLogLine = (chatId, sessionId, line) => {
+    setAgentSessionsByChat((prev) => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map((session) =>
+        session.id === sessionId
+          ? { ...session, logs: [...session.logs, line] }
+          : session
+      ),
+    }));
+  };
+
+  const appendSessionChatMessage = (chatId, sessionId, text, isUser) => {
+    setAgentSessionsByChat((prev) => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map((session) =>
+        session.id === sessionId
+          ? {
+              ...session,
+              chatMessages: [...session.chatMessages, createTextMessage(text, isUser, "chat-socket")],
+            }
+          : session
+      ),
+    }));
+  };
+
+  const markSessionFinished = (chatId, sessionId) => {
+    setAgentSessionsByChat((prev) => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map((session) =>
+        session.id === sessionId
+          ? { ...session, status: "finished" }
+          : session
+      ),
+    }));
+  };
+
+  const sendThroughChatSocket = (text) => {
+    const socket = chatSocketRef.current;
+    if (!socket || !text.trim()) return;
+
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(text);
+      return;
+    }
+
+    if (socket.readyState === WebSocket.CONNECTING) {
+      socket.addEventListener(
+        "open",
+        () => {
+          socket.send(text);
+        },
+        { once: true }
+      );
+    }
+  };
 
   {/*}
   const handleSend = async() => {
@@ -371,30 +471,30 @@ export default function Dashboard() {
 
     const currentInput = input;
     setInput("");
+    const selectedChatId = activeChatIdRef.current;
 
-    // 1. Add user message to UI
-    setConversations((prev) =>
-      prev.map((chat) =>
-        chat.id === activeChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, { text: currentInput, isUser: true }],
-              title: chat.messages.length === 0 ? currentInput.slice(0, 20) : chat.title,
-            }
-          : chat
-      )
-    );
+    // 1. While agent is running, route future chats to current run session
+    if (isAgentRunning) {
+      const runningSessionId = currentRunSessionIdRef.current;
+      if (runningSessionId) {
+        appendSessionChatMessage(selectedChatId, runningSessionId, currentInput, true);
+      }
+      sendThroughChatSocket(currentInput);
+      return;
+    }
 
-    // 2. Open WebSocket for the Live Stream
-    // If there's an existing socket, close it
+    // 2. Agent is not running: start a new run session
+    const sessionId = startAgentSession(selectedChatId, currentInput);
+
+    // 3. Start a read-only live video run
     if (socketRef.current) socketRef.current.close();
 
     const encodedPrompt = encodeURIComponent(currentInput);
-    const token = localStorage.getItem('token'); // Use your existing token for ID
+    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}`;
+    socketRef.current = new WebSocket(wsVideoUrl);
     
-    // Connect to the new backend endpoint we discussed
-    const wsUrl = `ws://localhost:8000/ws/stream/${activeChatId}?prompt=${encodedPrompt}`;
-    socketRef.current = new WebSocket(wsUrl);
+    setIsAgentRunning(true);
+    setCurrentRunSessionId(sessionId);
 
     socketRef.current.onmessage = (event) => {
       const msg = JSON.parse(event.data);
@@ -402,44 +502,18 @@ export default function Dashboard() {
       if (msg.type === "FRAME") {
         setLiveFrame(`data:image/jpeg;base64,${msg.data}`);
       } else if (msg.type === "STATUS") {
-        setConversations((prev) =>
-        prev.map((chat) =>
-          chat.id === activeChatId
-            ? {
-                ...chat,
-                messages: [
-                  ...chat.messages, 
-                  { 
-                    text: msg.content, 
-                    isUser: false,
-                  }
-                ],
-              }
-            : chat
-        )
-      );
+        appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
       } else if (msg.type === "LOG") {
-        setConversations((prev) =>
-        prev.map((chat) =>
-          chat.id === activeChatId
-            ? {
-                ...chat,
-                messages: [
-                  ...chat.messages, 
-                  { 
-                    text: msg.source + ": " + msg.content, 
-                    isUser: false,
-                  }
-                ],
-              }
-            : chat
-        )
-      );
+        appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
       }
     };
 
     socketRef.current.onclose = () => {
       setLiveFrame(null); // Clear video when finished
+      appendAgentLogLine(selectedChatId, sessionId, "STATUS: Agent finished task.");
+      markSessionFinished(selectedChatId, sessionId);
+      setIsAgentRunning(false);
+      setCurrentRunSessionId(null);
       console.log("Agent finished task.");
     };
   };
@@ -448,10 +522,11 @@ export default function Dashboard() {
     const newChat = {
       id: crypto.randomUUID(),
       title: `Browse ${conversations.length + 1}`,
-      messages: [{ text: "How can I be of assistance today?", isUser: false }]
+      messages: [createTextMessage("How can I be of assistance today?", false)]
     };
 
     setConversations((prev) => [...prev, newChat]);
+    setAgentSessionsByChat((prev) => ({ ...prev, [newChat.id]: [] }));
     setActiveChatId(newChat.id);
 
     setTimeout(() => {
@@ -492,6 +567,45 @@ export default function Dashboard() {
 
   useEffect(() => {
     handleGetUserInfo();
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token') || '';
+    const wsChatUrl = `ws://localhost:8000/ws/chat/1?token=${encodeURIComponent(token)}`;
+    const chatSocket = new WebSocket(wsChatUrl);
+    chatSocketRef.current = chatSocket;
+
+    chatSocket.onmessage = (event) => {
+      const chatId = activeChatIdRef.current;
+      const runningSessionId = currentRunSessionIdRef.current;
+
+      if (isAgentRunningRef.current && runningSessionId) {
+        appendSessionChatMessage(chatId, runningSessionId, event.data, false);
+        return;
+      }
+
+      appendMessageToChat(chatId, event.data, false, "chat-socket");
+    };
+
+    chatSocket.onerror = (error) => {
+      console.error('Chat socket error:', error);
+    };
+
+    chatSocket.onclose = () => {
+      console.log('Chat socket closed.');
+    };
+
+    return () => {
+      if (chatSocketRef.current) {
+        chatSocketRef.current.close();
+        chatSocketRef.current = null;
+      }
+
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+    };
   }, []);
 
   const handleLogout = () => {
@@ -786,6 +900,9 @@ export default function Dashboard() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeChat.messages]);
 
+  const mainLaneMessages = activeChat.messages.filter((msg) => msg.channel !== "chat-socket");
+  const activeChatSessions = agentSessionsByChat[activeChatId] || [];
+
   return (
     <div className="dashboard-container">
       <button
@@ -838,19 +955,55 @@ export default function Dashboard() {
           <h2 className="welcome-text">Welcome, {firstname}!</h2>
         )}
 
-        {activeChat.messages.map((msg, index) => (
-          <div key={index} className={msg.isUser ? "chat-user" : "chat-system"}>
+        {mainLaneMessages.map((msg, index) => (
+          <div key={msg.id || index} className={msg.isUser ? "chat-user" : "chat-system"}>
             {msg.text}
           </div>
         ))}
 
-        {/* 📺 NEW: Live Browser Feed */}
-        {liveFrame && (
+        {activeChatSessions.map((session) => (
+          <div key={session.id} className="agent-session-block">
+            <div className="chat-user">{session.prompt}</div>
+
+            {session.logs.length > 0 && (
+              <div className="chat-system agent-log-bundle">
+                <details className="agent-log-details">
+                  <summary>Agent Status Logs ({session.logs.length})</summary>
+                  <div className="agent-log-content">
+                    {session.logs.map((line, lineIndex) => (
+                      <div key={`${session.id}-line-${lineIndex}`} className="agent-log-line">
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            )}
+
+            {session.status === "running" ? (
+              <div className="agent-running-badge">● Agent running...</div>
+            ) : (
+              <div className="agent-finished-badge">✓ Agent finished running</div>
+            )}
+
+            {session.status === "running" && liveFrame && session.id === currentRunSessionId && (
           <div className="live-browser-container">
             <div className="browser-header">Live Agent View</div>
             <img src={liveFrame} alt="Browser Stream" className="browser-frame" />
           </div>
         )}
+
+            {session.chatMessages.length > 0 && (
+              <div className="chat-socket-lane">
+                {session.chatMessages.map((msg, index) => (
+                  <div key={msg.id || index} className={msg.isUser ? "chat-user" : "chat-system"}>
+                    {msg.text}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
         <div ref={bottomRef}></div>
 
       </main>
