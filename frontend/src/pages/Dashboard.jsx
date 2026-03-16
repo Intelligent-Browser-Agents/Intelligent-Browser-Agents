@@ -259,12 +259,12 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [firstname, setFirstname] = useState("");
-  const [fullName, setFullName] = useState("");
+  const [fullName, setFullName] = useState(localStorage.getItem("fullName") || "");
 
   const [input, setInput] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [address, setAddress] = useState("");
-  const [email, setEmail] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState(localStorage.getItem("phoneNumber") || "");
+  const [address, setAddress] = useState(localStorage.getItem("address") || "");
+  const [email, setEmail] = useState(localStorage.getItem("email") || "");
 
   // verify user values
   const [password, setPassword] = useState("");
@@ -287,8 +287,26 @@ export default function Dashboard() {
   const [currentRunSessionId, setCurrentRunSessionId] = useState(null);
   const currentRunSessionIdRef = useRef(null);
 
-  const [userCredentialsList, setUserCredentialsList] = useState(null);
-  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [userCredentialsList, setUserCredentialsList] = useState(() => {
+    const raw = localStorage.getItem("userCredentialsList");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [paymentMethods, setPaymentMethods] = useState(() => {
+    const raw = localStorage.getItem("userPaymentMethods");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [serviceForm, setServiceForm] = useState({ ...defaultServiceForm });
   const [serviceView, setServiceView] = useState({ mode: "list", selectedId: null });
   const [paymentForm, setPaymentForm] = useState({ ...defaultPaymentForm });
@@ -666,7 +684,9 @@ export default function Dashboard() {
   }
 
   const openServiceCard = (serviceId) => {
-    const credential = userCredentialsList.find((service) => service.id === serviceId);
+    const credential = (Array.isArray(userCredentialsList) ? userCredentialsList : []).find(
+      (service) => service.id === serviceId
+    );
     if (!credential) return;
     setServiceForm({
       id: credential.id,
@@ -709,15 +729,18 @@ export default function Dashboard() {
     };
 
     setUserCredentialsList((prev) => {
-      if (serviceView.mode === "create") return [...prev, payload];
-      return prev.map((service) => (service.id === payload.id ? payload : service));
+      const safePrev = Array.isArray(prev) ? prev : [];
+      if (serviceView.mode === "create") return [...safePrev, payload];
+      return safePrev.map((service) => (service.id === payload.id ? payload : service));
     });
     handleBackToServices();
   };
 
   const deleteServiceCredential = () => {
     if (!serviceView.selectedId) return;
-    setUserCredentialsList((prev) => prev.filter((service) => service.id !== serviceView.selectedId));
+    setUserCredentialsList((prev) =>
+      (Array.isArray(prev) ? prev : []).filter((service) => service.id !== serviceView.selectedId)
+    );
     handleBackToServices();
   };
 

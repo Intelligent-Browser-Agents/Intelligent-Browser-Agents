@@ -34,3 +34,4 @@ backend/__pycache__
 
 # config
 *.yaml
+*.yml
