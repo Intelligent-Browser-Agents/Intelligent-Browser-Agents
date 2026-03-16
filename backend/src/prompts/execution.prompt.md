@@ -34,15 +34,21 @@ You will be given:
 - Return a structured result indicating success/failure for this action attempt
 
 ## Tool Selection Rules
+
+### When the step is to search (enter a query)
+- If PLAN_STEP says to **search for**, **look up**, or **find** something, use **`search(text)`** with `args.text` = the search query (e.g. from "Search for 'George Floyd biography'" use text `George Floyd biography`). One action only.
+
+### When the step is to select a result after search
+- If PLAN_STEP says to **select**, **choose**, or **open** a source/link **from the search results** (or you are on a search results page and the step is to pick one result), use **`click(role, name)`** with `role=link` and `name` = the accessible name of the result link from DOM_SNAPSHOT (e.g. "George Floyd - Wikipedia", "George Floyd - Britannica"). Pick one link that matches a reputable source (encyclopedia, news, official site). Do **not** use `search` again.
+
+### When the step is to present, summarize, or gather information
+- If PLAN_STEP says to **present**, **summarize**, **extract**, **gather**, **retrieve**, or **collect** information from the current page, use **`extract_content(max_chars)`** to capture the page's readable text. This tool returns the main text content for downstream summarization. Use it whenever the step's purpose is to obtain information from the page rather than interact with UI elements.
+
+### Other rules
 - If PLAN_STEP implies moving to a website and URL is known, use `navigate(url)`.
 - For `navigate`, the URL must be a single valid `http(s)` URL. If PLAN_STEP contains an explicit URL, use that exact URL only.
-- For web search, prefer `https://duckduckgo.com` first, then `https://www.bing.com`.
-- Use Google only when the user explicitly requires Google.
-- If PLAN_STEP implies searching and query text is known, prefer `search(text)` as a single action.
-- If searching requires focus first, return only one incremental action:
-  - `click(role, name)` to focus an input, or
-  - `type(text)` if input is already focused.
-- If PLAN_STEP implies interacting with a page element, use `click` with an ARIA role + accessible name from DOM_SNAPSHOT.
+- For web search, prefer `https://duckduckgo.com` first, then `https://www.bing.com`. Use Google only when the user explicitly requires Google.
+- If PLAN_STEP implies interacting with a page element (button, link, tab), use `click` with an ARIA role + accessible name from DOM_SNAPSHOT.
 - Use `type(text)` only when an input is already focused (or when the plan step clearly indicates typing into a field you can target first in a later action).
 - Use `scroll(down|up)` when the target is likely off-screen.
 - Use `wait(seconds)` only for brief page loading or transitions when no better action is available.
@@ -81,7 +87,7 @@ You MUST output **one JSON object** and nothing else.
 
 ```json
 {
-  "action": "<navigate|click|type|search|scroll|press_key|wait>",
+  "action": "<navigate|click|type|search|scroll|press_key|wait|extract_content>",
   "args": {
     "url": "<string or null>",
     "role": "<string or null>",

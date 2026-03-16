@@ -34,7 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # start agent endpoint
 import sys
 import subprocess
-
+import threading
 
 import asyncio
 
@@ -489,6 +489,7 @@ async def start_agent(requests: Request):
     #! start the agent on the SERVER
     # start main with subprocess
     current_env = os.environ.copy()
+    current_env["PYTHONIOENCODING"] = "utf-8"
     python_path = sys.executable
 
     result = subprocess.run(
@@ -513,6 +514,26 @@ async def wait_for_port(port: int, timeout: float = 10.0):
             await asyncio.sleep(0.5)
     return False
 
+HITL_PREFIX = "@@HITL@@"
+
+import json as _json
+
+# Shared map: user_id → asyncio.Queue  for HITL replies.
+# Any endpoint (REST, /ws/chat, or /ws/stream) can push a reply here.
+HITL_REPLY_QUEUES: dict[str, asyncio.Queue] = {}
+
+
+@app.post("/api/hitl_reply/{user_id}")
+async def hitl_reply(user_id: str, request: Request):
+    """REST endpoint the frontend can call to answer a clarification request."""
+    body = await request.json()
+    user_input = body.get("content", body.get("user_input", ""))
+    queue = HITL_REPLY_QUEUES.get(user_id)
+    if queue is None:
+        return {"status": "error", "message": "No agent is waiting for input with that user_id."}
+    await queue.put({"content": user_input})
+    return {"status": "ok"}
+
 @app.websocket("/ws/stream/{user_id}")
 async def stream_endpoint(websocket: WebSocket, user_id: str):
     await websocket.accept()
@@ -526,61 +547,200 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     print(f"DEBUG 2: Got Port {port}")
 
     current_env = os.environ.copy()
+    current_env["PYTHONUNBUFFERED"] = "1"
+    current_env["PYTHONIOENCODING"] = "utf-8"
     python_path = sys.executable
-    
-    # 1. Launch Agent with full pipe access
-    process = await asyncio.create_subprocess_exec(
-        python_path, "src/app.py", "--port", str(port), "--prompt", prompt,
-        env=current_env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    loop = asyncio.get_running_loop()
+
+    # 1. Launch Agent with stdin pipe for HITL replies
+    def start_process():
+        return subprocess.Popen(
+            [python_path, "src/app.py", "--port", str(port), "--prompt", prompt],
+            env=current_env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+    process = await loop.run_in_executor(None, start_process)
     print("DEBUG 3: Agent Subprocess Started")
 
-    is_ready = await wait_for_port(port)
-    print(f"DEBUG 4: Browser Ready: {is_ready}")
+    # 2. Feed stdout/stderr into asyncio queue via threads
+    log_queue = asyncio.Queue()
 
-    # 2. Monitor Logs in the background
-    async def log_reader(pipe, log_type):
-        while True:
-            line = await pipe.readline()
-            if not line: break
-            content = line.decode().strip()
+    def pipe_reader(pipe, log_type):
+        try:
+            for line in iter(pipe.readline, b""):
+                line_str = line.decode("utf-8", errors="replace").strip()
+                if line_str:
+                    loop.call_soon_threadsafe(log_queue.put_nowait, (log_type, line_str))
+        except Exception:
+            pass
+        loop.call_soon_threadsafe(log_queue.put_nowait, (f"{log_type}_DONE", None))
+
+    threading.Thread(target=pipe_reader, args=(process.stdout, "STDOUT"), daemon=True).start()
+    threading.Thread(target=pipe_reader, args=(process.stderr, "STDERR"), daemon=True).start()
+
+    # Register a shared reply queue so any endpoint can push replies
+    reply_queue = asyncio.Queue()
+    HITL_REPLY_QUEUES[user_id] = reply_queue
+
+    # ── Listener: reads messages the frontend sends back through this WebSocket ──
+    async def ws_reply_listener():
+        try:
+            while True:
+                try:
+                    msg = await websocket.receive_json()
+                except Exception:
+                    raw = await websocket.receive_text()
+                    msg = {"content": raw}
+                print(f"[HITL] Received reply via WebSocket: {str(msg)[:200]}")
+                await reply_queue.put(msg)
+        except Exception:
+            pass
+
+    reply_listener_task = asyncio.create_task(ws_reply_listener())
+
+    # ── HITL-aware log consumer ──
+    # Detects @@HITL@@ lines and sends structured WebSocket messages.
+    # Also forwards every HITL message as a LOG line so existing
+    # frontends always display something.
+    async def log_consumer():
+        done_stdout, done_stderr = False, False
+        while not (done_stdout and done_stderr):
+            try:
+                log_type, content = await asyncio.wait_for(log_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+            if content is None:
+                if log_type == "STDOUT_DONE":
+                    done_stdout = True
+                elif log_type == "STDERR_DONE":
+                    done_stderr = True
+                continue
+
+            # Check for HITL messages from the subprocess
+            if log_type == "STDOUT" and content.startswith(HITL_PREFIX):
+                raw_json = content[len(HITL_PREFIX):]
+                try:
+                    hitl_payload = _json.loads(raw_json)
+                except _json.JSONDecodeError:
+                    hitl_payload = {"type": "finish", "message": raw_json}
+
+                hitl_type = hitl_payload.get("type", "finish")
+                hitl_message = hitl_payload.get("message", "")
+
+                try:
+                    if hitl_type == "finish":
+                        print(f"[HITL] Sending final response to frontend")
+                        await websocket.send_json({
+                            "type": "RESPONSE",
+                            "content": hitl_message,
+                        })
+                        # Also forward as a LOG so existing frontends display it
+                        await websocket.send_json({
+                            "type": "LOG",
+                            "source": "AGENT",
+                            "content": hitl_message,
+                        })
+                    else:
+                        print(f"[HITL] Sending clarification request to frontend")
+                        await websocket.send_json({
+                            "type": "CLARIFICATION",
+                            "message": hitl_message,
+                            "requested_fields": hitl_payload.get("requested_fields", []),
+                        })
+                        # Also forward as a LOG so existing frontends display it
+                        await websocket.send_json({
+                            "type": "LOG",
+                            "source": "AGENT",
+                            "content": f"[NEEDS INPUT] {hitl_message}",
+                        })
+
+                        print(f"[HITL] Waiting for user reply (user_id={user_id})…")
+                        try:
+                            ws_msg = await asyncio.wait_for(reply_queue.get(), timeout=300)
+                            user_input = ws_msg.get("content", ws_msg.get("user_input", ""))
+                            print(f"[HITL] Got reply: {str(user_input)[:200]}")
+                        except asyncio.TimeoutError:
+                            user_input = ""
+                            print("[HITL] Timed out waiting for reply")
+
+                        reply_line = _json.dumps({"user_input": user_input}) + "\n"
+                        try:
+                            process.stdin.write(reply_line.encode("utf-8"))
+                            process.stdin.flush()
+                            print(f"[HITL] Wrote reply to subprocess stdin")
+                        except Exception as exc:
+                            print(f"[HITL] Failed to write to stdin: {exc}")
+                            break
+                except Exception:
+                    break
+                continue
+
+            # Regular log line
             print(f"[{log_type}] {content}")
-            await websocket.send_json({"type": "LOG", "source": log_type, "content": content})
+            try:
+                await websocket.send_json({"type": "LOG", "source": log_type, "content": content})
+            except Exception:
+                break
 
-    # Start log monitoring tasks
-    stdout_task = asyncio.create_task(log_reader(process.stdout, "STDOUT"))
-    stderr_task = asyncio.create_task(log_reader(process.stderr, "STDERR"))
+    log_task = asyncio.create_task(log_consumer())
 
     try:
         # 3. Wait for Browser
         await websocket.send_json({"type": "STATUS", "content": "Warming up browser..."})
         if await wait_for_port(port):
-            async with async_playwright() as p:
-                browser = await p.chromium.connect_over_cdp(f"http://localhost:{port}")
-                page = browser.contexts[0].pages[0]
-                client = await page.context.new_cdp_session(page)
+            try:
+                async with async_playwright() as p:
+                    browser = await p.chromium.connect_over_cdp(f"http://localhost:{port}")
+                    page = browser.contexts[0].pages[0]
+                    client = await page.context.new_cdp_session(page)
 
-                # 4. Stream Setup
-                async def on_frame(payload):
-                    try:
-                        await websocket.send_json({"type": "FRAME", "data": payload['data']})
-                        await client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
-                    except: pass
+                    async def on_frame(payload):
+                        try:
+                            await websocket.send_json({"type": "FRAME", "data": payload['data']})
+                            await client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
+                        except Exception:
+                            pass
 
-                client.on("Page.screencastFrame", on_frame)
-                await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
-                
-                # Keep alive until process ends
-                await process.wait()
+                    client.on("Page.screencastFrame", on_frame)
+                    await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
+
+                    await loop.run_in_executor(None, process.wait)
+            except NotImplementedError:
+                await websocket.send_json({
+                    "type": "STATUS",
+                    "content": "Video streaming not available on this platform; continuing with logs only.",
+                })
+                await loop.run_in_executor(None, process.wait)
         else:
             await websocket.send_json({"type": "STATUS", "content": "Browser failed to open."})
 
     finally:
         # 5. Cleanup
-        stdout_task.cancel()
-        stderr_task.cancel()
+        HITL_REPLY_QUEUES.pop(user_id, None)
+
+        reply_listener_task.cancel()
+        try:
+            await reply_listener_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
+            await asyncio.wait_for(log_task, timeout=3.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            log_task.cancel()
+            try:
+                await log_task
+            except asyncio.CancelledError:
+                pass
+
+        try:
+            await websocket.send_json({"type": "STATUS", "content": "Agent finished task."})
+        except Exception:
+            pass
+
         if process.returncode is None:
             process.terminate()
         await PORT_POOL.put(port)
@@ -611,10 +771,19 @@ async def websocket_endpoint(websocket: WebSocket, client_id: int):
     token = query_params.get("token", "Default Prompt")
     try:
         while True:
-            # Wait for message from a client
             data = await websocket.receive_text()
             print(f"Received message from client #{client_id}: {data}")
-            # Broadcast it to everyone else
+
+            # Forward to any waiting HITL agent for this user
+            queue = HITL_REPLY_QUEUES.get(str(client_id))
+            if queue is not None:
+                try:
+                    payload = _json.loads(data)
+                except (ValueError, TypeError):
+                    payload = {"content": data}
+                await queue.put(payload)
+                print(f"[HITL] Forwarded chat message to agent for client {client_id}")
+
             await manager.broadcast(f"Client #{client_id} says: {data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)

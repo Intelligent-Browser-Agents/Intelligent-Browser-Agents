@@ -78,8 +78,7 @@ def build_workflow(runtime):
     workflow.add_edge("fallback", "orchestrator")
 
 
-    # Interaction ends the process
-    workflow.add_edge("interaction", END)
+    # Interaction: END when mission complete/aborted, else back to orchestrator (e.g. after clarification)
     workflow.add_conditional_edges(
         "interaction",
         lambda state: "END" if state.get("is_complete", False) else "orchestrator",

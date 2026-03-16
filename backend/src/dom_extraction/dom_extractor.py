@@ -297,6 +297,74 @@ def retrieve_interactive_elements(page_data: str) -> str:
         data = FuncFailed(tool_name = 'retrieve_interactive_elements', status = 'failed', error = e, execution_time = time.perf_counter() - start)
         return data.model_dump_json(indent = 4)
 
+async def get_page_text(page: Page, max_chars: int = 15000) -> str:
+    """
+    Extract main readable text from the current page (for storage and summarization).
+    Uses the same DOM access as the rest of the extraction pipeline.
+    """
+    try:
+        html = await page.content()
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+        text = (soup.get_text(separator="\n", strip=True) or "").strip()
+        text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n... (truncated)"
+        return text
+    except Exception:
+        try:
+            raw = await page.evaluate("() => (document.body && (document.body.innerText || document.body.textContent || '').trim()) || ''")
+            return (raw or "")[:max_chars]
+        except Exception:
+            return ""
+
+
+def search_dom_text(dom_snapshots: list[str], query: str, max_results: int = 20) -> list[str]:
+    """
+    Simple text search over saved DOM/text snapshots (dom_cache).
+
+    Returns short snippets containing the query for navigation or inspection.
+    """
+    if not query or not dom_snapshots:
+        return []
+    q = query.lower()
+    results: list[str] = []
+    for snap in dom_snapshots:
+        for line in (snap or "").splitlines():
+            if q in line.lower():
+                results.append(line.strip())
+                if len(results) >= max_results:
+                    return results
+    return results
+
+
+def list_dom_links_from_interactive_json(interactive_json: str, filter_text: str | None = None, max_results: int = 50) -> list[dict]:
+    """
+    Utility to list link-like interactive elements from retrieve_interactive_elements() output.
+
+    Not wired as a tool yet; meant to be called from agents or tests to inspect
+    the DOM in a more structured way.
+    """
+    try:
+        data = json.loads(interactive_json)
+    except Exception:
+        return []
+    elements = data.get("interactive_elements") or []
+    out: list[dict] = []
+    f = (filter_text or "").lower()
+    for el in elements:
+        if el.get("role") != "link":
+            continue
+        name = (el.get("name") or "").strip()
+        if f and f not in name.lower():
+            continue
+        out.append({"role": el.get("role"), "name": name, "url": el.get("url"), "title": el.get("title")})
+        if len(out) >= max_results:
+            break
+    return out
+
+
 async def main(page: Page):
 
     print("DOM EXTRACTION CALLED!")

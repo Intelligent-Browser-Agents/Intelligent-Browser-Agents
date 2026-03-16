@@ -88,3 +88,7 @@ class ExecutionOutput(BaseModel):
         ...,
         description="Time taken to execute the action in milliseconds"
     )
+    extracted_text: Optional[str] = Field(
+        default=None,
+        description="When action is extract_content, the main text extracted from the page"
+    )

@@ -383,13 +383,18 @@ export default function Dashboard() {
     setInput("");
     const selectedChatId = activeChatIdRef.current;
 
-    // 1. While agent is running, route future chats to current run session
+    // 1. While agent is running, send reply through the stream WebSocket (HITL)
     if (isAgentRunning) {
       const runningSessionId = currentRunSessionIdRef.current;
       if (runningSessionId) {
         appendSessionChatMessage(selectedChatId, runningSessionId, currentInput, true);
       }
-      sendThroughChatSocket(currentInput);
+      const streamSocket = socketRef.current;
+      if (streamSocket && streamSocket.readyState === WebSocket.OPEN) {
+        streamSocket.send(JSON.stringify({ content: currentInput }));
+      } else {
+        sendThroughChatSocket(currentInput);
+      }
       return;
     }
 
@@ -415,6 +420,10 @@ export default function Dashboard() {
         appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
+      } else if (msg.type === "CLARIFICATION") {
+        appendSessionChatMessage(selectedChatId, sessionId, msg.message, false);
+      } else if (msg.type === "RESPONSE") {
+        appendSessionChatMessage(selectedChatId, sessionId, msg.content, false);
       }
     };
 

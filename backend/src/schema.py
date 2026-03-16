@@ -34,6 +34,23 @@ class OrchestratorPlan(BaseModel):
     )
 
 
+class OrchestratorDecision(BaseModel):
+    """
+    Schema for the Orchestration Agent's reasoning-and-action output.
+    Used after each execution/verification to decide: advance, retry, or plan_complete.
+    """
+    reasoning: str = Field(
+        default="",
+        description="1-3 sentences explaining why this action was chosen.",
+        validation_alias=AliasChoices("reasoning", "Reasoning", "reason", "explanation", "rationale"),
+    )
+    action: Literal["advance", "retry", "plan_complete"] = Field(
+        default="retry",
+        description="Next action: advance to next step, retry current step, or mark plan complete.",
+        validation_alias=AliasChoices("action", "Action", "next_action"),
+    )
+
+
 # =============================================================================
 # EXECUTION LAYER
 # Aligned with: prompts/execution.prompt.md

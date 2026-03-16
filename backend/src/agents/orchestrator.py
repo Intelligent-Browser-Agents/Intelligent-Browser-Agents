@@ -1,27 +1,30 @@
 """
 Orchestration Agent
-Converts user requests into ordered high-level subtasks for browser automation.
+Converts user requests into ordered high-level subtasks (plan) and reasons over
+execution outcomes to decide next action (advance / retry / plan_complete).
 """
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from schema import OrchestratorPlan
+from schema import OrchestratorPlan, OrchestratorDecision
 from state import ProjectState
 from models import Models
-from prompt_loader import get_orchestration_prompt
+from prompt_loader import get_orchestration_plan_prompt, get_orchestration_reasoning_prompt
 
 
 class Orchestrator:
     """
-    LLM-powered planner plus deterministic step router.
+    Dual-prompt orchestration: plan creation + reasoning/action.
 
-    - Planning uses an LLM.
-    - Step routing uses verifier outputs to avoid controller loops.
+    - Planning: LLM creates initial plan (or asks for clarification).
+    - Reasoning and action: LLM decides advance, retry, or plan_complete from verification state.
     """
 
     def __init__(self):
         self.planner = Models.planner(OrchestratorPlan)
-        self.planning_prompt = get_orchestration_prompt()
+        self.decision_maker = Models.decision_maker(OrchestratorDecision)
+        self.planning_prompt = get_orchestration_plan_prompt()
+        self.reasoning_prompt = get_orchestration_reasoning_prompt()
 
     def __call__(self, state: ProjectState) -> dict:
         abort_reason = self._get_abort_reason(state)
@@ -45,6 +48,24 @@ class Orchestrator:
         return self._make_decision(current_plan, current_step, state)
 
     def _create_plan(self, user_intent: str, page_state: str, state: ProjectState) -> dict:
+        # Build a conversation recap so the planner sees any clarification replies
+        conversation_block = ""
+        raw_msgs = state.get("messages", [])
+        if len(raw_msgs) > 1:
+            lines = []
+            for m in raw_msgs:
+                if isinstance(m, dict):
+                    role, text = m.get("role", "?"), m.get("content", "")
+                elif hasattr(m, "type"):
+                    role, text = m.type, getattr(m, "content", "")
+                else:
+                    role, text = "?", str(m)
+                lines.append(f"  [{role.upper()}]: {text}")
+            conversation_block = (
+                "\n\nCONVERSATION SO FAR (includes any user clarifications):\n"
+                + "\n".join(lines)
+            )
+
         context = f"""
         USER REQUEST: {user_intent}
 
@@ -52,6 +73,7 @@ class Orchestrator:
 
         PAGE STATE:
         {page_state}
+        {conversation_block}
 
         Based on this request, create a plan following the output format specified.
         """
@@ -110,12 +132,34 @@ class Orchestrator:
         step_complete = state.get("last_step_complete", False)
         total_steps = len(current_plan)
         safe_step = min(max(current_step, 0), max(total_steps - 1, 0))
+        current_task = state.get("current_task") or (current_plan[safe_step] if current_plan else "No task")
+        user_intent = self._get_user_intent(state)
+        recent_log = (state.get("reasoning_log") or [])[-3:]
 
+        context = f"""
+USER GOAL: {user_intent}
+
+CURRENT PLAN (steps 1 to {total_steps}):
+{chr(10).join(f"  {i+1}. {s}" for i, s in enumerate(current_plan))}
+
+CURRENT STEP INDEX: {safe_step + 1} (1-based)
+LAST STEP COMPLETE: {step_complete}
+CURRENT TASK: {current_task}
+
+RECENT CONTEXT (execution/verification):
+{chr(10).join(recent_log) if recent_log else "  (none yet)"}
+
+Based on the rules, output exactly one action: advance, retry, or plan_complete.
+"""
+
+        messages = [
+            SystemMessage(content=self.reasoning_prompt),
+            HumanMessage(content=context.strip()),
+        ]
+
+        # Unambiguous cases: skip LLM to avoid wrong "retry" and prevent loops
         if step_complete and safe_step >= total_steps - 1:
-            reasoning = (
-                f"[Decision] Status: MAINTAIN | Step: {safe_step + 1}/{total_steps} | Complete: True\n"
-                "[Decision] Rule: Final step verified as complete."
-            )
+            reasoning = "[Decision] Final step verified complete; marking plan complete."
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": safe_step,
@@ -123,17 +167,14 @@ class Orchestrator:
                 "current_task": current_plan[safe_step],
                 "reasoning_log": [reasoning],
                 "is_complete": True,
+                "handoff_interaction": True,
                 "needs_fallback": False,
                 "mission_failed": False,
             }
-
-        if step_complete:
+        if step_complete and safe_step < total_steps - 1:
             next_step = min(safe_step + 1, total_steps - 1)
             next_task = current_plan[next_step]
-            reasoning = (
-                f"[Decision] Status: MAINTAIN | Step: {next_step + 1}/{total_steps} | Complete: False\n"
-                "[Decision] Rule: Previous step succeeded; advancing to next step."
-            )
+            reasoning = f"[Decision] Step {safe_step + 1}/{total_steps} complete; advancing to next step."
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": next_step,
@@ -143,13 +184,52 @@ class Orchestrator:
                 "is_complete": False,
                 "needs_fallback": False,
                 "mission_failed": False,
+                "last_step_complete": False,
             }
 
-        current_task = state.get("current_task") or current_plan[safe_step]
-        reasoning = (
-            f"[Decision] Status: MAINTAIN | Step: {safe_step + 1}/{total_steps} | Complete: False\n"
-            "[Decision] Rule: Current step not complete; retrying with updated task context."
-        )
+        try:
+            decision: OrchestratorDecision = self.decision_maker.invoke(messages)
+        except Exception as e:
+            reasoning = f"[Decision] LLM failed: {e}; using rule-based fallback."
+            return self._decision_fallback(
+                state, current_plan, safe_step, step_complete, current_task, reasoning
+            )
+
+        decision_reasoning = getattr(decision, "reasoning", "") or (decision.model_dump().get("reasoning") if hasattr(decision, "model_dump") else "") or ""
+        decision_action = getattr(decision, "action", None) or (decision.model_dump().get("action") if hasattr(decision, "model_dump") else None)
+        if decision_action not in ("advance", "retry", "plan_complete"):
+            decision_action = "retry"
+        reasoning = f"[Decision] {decision_reasoning or '(no reasoning)'}\n[Decision] Action: {decision_action}"
+
+        if decision_action == "plan_complete":
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_step_index": safe_step,
+                "plan_status": "MAINTAIN",
+                "current_task": current_plan[safe_step],
+                "reasoning_log": [reasoning],
+                "is_complete": True,
+                "handoff_interaction": True,
+                "needs_fallback": False,
+                "mission_failed": False,
+            }
+
+        if decision_action == "advance":
+            next_step = min(safe_step + 1, total_steps - 1)
+            next_task = current_plan[next_step]
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_step_index": next_step,
+                "plan_status": "MAINTAIN",
+                "current_task": next_task,
+                "reasoning_log": [reasoning],
+                "is_complete": False,
+                "needs_fallback": False,
+                "mission_failed": False,
+                "last_step_complete": False,
+            }
+
+        # retry: keep same step and task
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_step_index": safe_step,
@@ -160,6 +240,73 @@ class Orchestrator:
             "needs_fallback": False,
             "mission_failed": False,
         }
+
+    def _decision_fallback(
+        self,
+        state: ProjectState,
+        current_plan: list,
+        safe_step: int,
+        step_complete: bool,
+        current_task: str,
+        reasoning: str,
+    ) -> dict:
+        """Rule-based fallback when the reasoning LLM fails."""
+        total_steps = len(current_plan)
+        if step_complete and safe_step >= total_steps - 1:
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_step_index": safe_step,
+                "plan_status": "MAINTAIN",
+                "current_task": current_plan[safe_step],
+                "reasoning_log": [reasoning],
+                "is_complete": True,
+                "handoff_interaction": True,
+                "needs_fallback": False,
+                "mission_failed": False,
+            }
+        if step_complete:
+            next_step = min(safe_step + 1, total_steps - 1)
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_step_index": next_step,
+                "plan_status": "MAINTAIN",
+                "current_task": current_plan[next_step],
+                "reasoning_log": [reasoning],
+                "is_complete": False,
+                "needs_fallback": False,
+                "mission_failed": False,
+                "last_step_complete": False,
+            }
+        return {
+            "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+            "current_step_index": safe_step,
+            "plan_status": "MAINTAIN",
+            "current_task": current_task,
+            "reasoning_log": [reasoning],
+            "is_complete": False,
+            "needs_fallback": False,
+            "mission_failed": False,
+        }
+
+    def _is_presentation_only_step(self, task: str) -> bool:
+        """True if the step is only about presenting/summarizing for the user (no browser action)."""
+        if not (task or "").strip():
+            return False
+        t = task.lower().strip()
+        presentation_markers = (
+            "present the",
+            "present the gathered",
+            "summarize",
+            "summarise",
+            "tell the user",
+            "tell the user about",
+            "report back",
+            "report to the user",
+            "give the user",
+            "provide the user",
+            "share the",
+        )
+        return any(m in t for m in presentation_markers)
 
     def _get_user_intent(self, state: ProjectState) -> str:
         user_message = state["messages"][0] if state["messages"] else None
@@ -195,6 +342,7 @@ class Orchestrator:
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "is_complete": True,
+            "handoff_interaction": True,
             "needs_fallback": False,
             "mission_failed": True,
             "abort_reason": reason,

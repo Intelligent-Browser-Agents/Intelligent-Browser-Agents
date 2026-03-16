@@ -66,8 +66,18 @@ def get_prompts_directory() -> Path:
 
 # Convenience functions for each agent type
 def get_orchestration_prompt() -> str:
-    """Load the orchestration agent prompt."""
+    """Load the orchestration agent prompt (planning). Backward-compat: same as plan."""
     return load_prompt("orchestration")
+
+
+def get_orchestration_plan_prompt() -> str:
+    """Load the orchestration prompt for creating a plan (first phase)."""
+    return load_prompt("orchestration")
+
+
+def get_orchestration_reasoning_prompt() -> str:
+    """Load the orchestration prompt for reasoning and action (advance/retry/plan_complete)."""
+    return load_prompt("orchestration_reasoning")
 
 
 def get_execution_prompt() -> str:
