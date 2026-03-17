@@ -81,7 +81,7 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
     print("INTELLIGENT BROWSER AGENT - SIMULATION")
     print("=" * 60)
     print(f"\nUser Request: {user_request}")
-    print(f"Credentials Received: {credentials}")
+    # print(f"Credentials Received: {credentials}")
     print(f"Starting URL: {initial_input['current_url']}")
     print("=" * 60)
     
