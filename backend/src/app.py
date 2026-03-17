@@ -22,20 +22,21 @@ Course of action:
 """
 
 from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
-from dom_extraction import dom_extractor
 from execution import Action, dispatch_action, ActionArgs
 from langgraph.checkpoint.memory import MemorySaver
+from dom_extraction import dom_extractor
 from agents.verifier import Verifier
 from main import build_workflow
-import asyncio
 import argparse
+import asyncio
+import json
 import sys
 
 
 # Reset verifier counter for consistent simulation
 Verifier.reset_simulation()
 
-async def main(prompt: str, video_port: int):
+async def main(prompt: str, video_port: int, credentials: dict | None = None):
     
     # 1. Setup the initial mission
     config = {
@@ -49,6 +50,7 @@ async def main(prompt: str, video_port: int):
     # user_input = str(sys.argv[1])
     # user_request = user_input
     user_request = "find out the weather for me"
+    # user_request = prompt
 
     initial_input = {
         "messages": [{"role": "user", "content": f"USER REQUEST: {user_request}"}],
@@ -71,6 +73,7 @@ async def main(prompt: str, video_port: int):
         "mission_failed": False,
         "abort_reason": None,
         "screenshot": None,
+        "user_credentials": credentials or {},
     }
 
     # 2. Stream the execution
@@ -78,6 +81,7 @@ async def main(prompt: str, video_port: int):
     print("INTELLIGENT BROWSER AGENT - SIMULATION")
     print("=" * 60)
     print(f"\nUser Request: {user_request}")
+    print(f"Credentials Received: {credentials}")
     print(f"Starting URL: {initial_input['current_url']}")
     print("=" * 60)
     
@@ -174,5 +178,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", type=str, required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--credentials_json", type=str, default="{}")
     args = parser.parse_args()
-    asyncio.run(main(args.prompt, args.port))
+
+    try: 
+        credentials = json.loads(args.credentials_json) if args.credentials_json else {}
+    except json.JSONDecodeError: 
+        credentials = {}
+
+    asyncio.run(main(args.prompt, args.port, credentials))

@@ -276,7 +276,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const activeChatIdRef = useRef(activeChatId);
 
-  //Store llive frames
+  //Store live frames
   const [liveFrame, setLiveFrame] = useState(null);
   const socketRef = useRef(null);
 
@@ -360,7 +360,17 @@ export default function Dashboard() {
     );
   };
 
-  const startAgentSession = (chatId, prompt) => {
+  const buildAgentCredentialsPayload = () => ({
+    fullName: fullName || "",
+    address: address || "",
+    phoneNumber: phoneNumber || "",
+    email: email || "",
+    userCredentialsList: Array.isArray(userCredentialsList) ? userCredentialsList : [],
+    userPaymentMethods: Array.isArray(paymentMethods) ? paymentMethods : [],
+    userExperienceEntries: Array.isArray(experienceEntries) ? experienceEntries : [],
+  });
+
+  const startAgentSession = (chatId, prompt, userCredentials) => {
     const sessionId = crypto.randomUUID();
     setAgentSessionsByChat((prev) => ({
       ...prev,
@@ -372,6 +382,7 @@ export default function Dashboard() {
           logs: [],
           chatMessages: [],
           status: "running",
+          userCredentials,
         },
       ],
     }));
@@ -501,14 +512,35 @@ export default function Dashboard() {
       return;
     }
 
+    // Build fresh credentials at send time so the run always uses latest values.
+    const userCredentials = buildAgentCredentialsPayload();
+
     // 2. Agent is not running: start a new run session
-    const sessionId = startAgentSession(selectedChatId, currentInput);
+    const sessionId = startAgentSession(selectedChatId, currentInput, userCredentials);
 
     // 3. Start a read-only live video run
     if (socketRef.current) socketRef.current.close();
 
+    try {
+      const token = localStorage.getItem("token") || "";
+      await fetch("/api/users/store-credentials", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          credentials: userCredentials,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to store credentials for session:", err);
+    }
+
     const encodedPrompt = encodeURIComponent(currentInput);
-    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}`;
+    const encodedSessionId = encodeURIComponent(sessionId);
+    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}&session_id=${encodedSessionId}`;
     socketRef.current = new WebSocket(wsVideoUrl);
     
     setIsAgentRunning(true);
@@ -895,7 +927,7 @@ export default function Dashboard() {
     handleBackToExperience();
   };
 
-  const handleSaveGeneralUserData = () => {
+  const handleSaveGeneralUserData = async () => {
     localStorage.setItem("fullName", fullName); // persistence
     localStorage.setItem("address", address); // persistence
     localStorage.setItem("phoneNumber", phoneNumber); // persistence
@@ -1047,7 +1079,7 @@ export default function Dashboard() {
       {showSettings && (
         <div className="modal-overlay" >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close settings">✖</button>
+            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
             <h2 className="modal-title">Settings</h2>
 
             <label className="modal-label">Agent Prompt</label>
@@ -1075,7 +1107,7 @@ export default function Dashboard() {
       {showUserCredentials && (
         <div className="modal-overlay">
           <div className="modal-content user-credentials-modal">
-            <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
+            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close user credentials">✖</button>
             <h2 className="modal-title">User Credentials</h2>
             <hr className="modal-title-divider"/>
 
