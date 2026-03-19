@@ -48,7 +48,7 @@ async def main(prompt: str, video_port: int):
     # from frontend (use after backend testing)
     # user_input = str(sys.argv[1])
     # user_request = user_input
-    user_request = "find out the weather for me"
+    user_request = prompt
 
     initial_input = {
         "messages": [{"role": "user", "content": f"USER REQUEST: {user_request}"}],
@@ -86,7 +86,7 @@ async def main(prompt: str, video_port: int):
         
         #initialize the browser instance
         print(f"Launching browser on port {video_port}...")
-        browser = await p.chromium.launch(headless=False, args=[f'--remote-debugging-port={video_port}'])
+        browser = await p.chromium.launch(headless=True, args=[f'--remote-debugging-port={video_port}'])
         print(f"Browser launched on port {video_port}. Waiting for frontend connection...")
         context = await browser.new_context()
         page = await context.new_page()
