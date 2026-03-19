@@ -521,7 +521,7 @@ export default function Dashboard() {
     // 3. Start a read-only live video run
     if (socketRef.current) socketRef.current.close();
 
-    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${selectedChatId}`, {
+    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${parseInt(selectedChatId)}`, {
       prompt: currentInput,
     });
     socketRef.current = new WebSocket(wsVideoUrl);
