@@ -339,6 +339,16 @@ export default function Dashboard() {
     return url.toString();
   };
 
+  const chatIdToStableInt = (chatId) => {
+    // Deterministic 31-bit positive hash so UUID chat IDs map to a stable integer.
+    let hash = 0;
+    for (let i = 0; i < chatId.length; i += 1) {
+      hash = (hash * 31 + chatId.charCodeAt(i)) | 0;
+    }
+
+    return (Math.abs(hash) % 2147483646) + 1;
+  };
+
   
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -521,7 +531,16 @@ export default function Dashboard() {
     // 3. Start a read-only live video run
     if (socketRef.current) socketRef.current.close();
 
-    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${parseInt(selectedChatId)}`, {
+    const token = localStorage.getItem('token');
+    const response = await fetch('/api/users/', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      }
+    });
+
+    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${chatIdToStableInt(selectedChatId)}`, {
       prompt: currentInput,
     });
     socketRef.current = new WebSocket(wsVideoUrl);
@@ -604,7 +623,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const token = localStorage.getItem('token') || '';
-    const wsChatUrl = buildWebSocketUrl(`/ws/chat/${parseInt(activeChatIdRef.current)}`, { token });
+    const wsChatUrl = buildWebSocketUrl(`/ws/chat/${chatIdToStableInt(activeChatIdRef.current)}`, { token });
     const chatSocket = new WebSocket(wsChatUrl);
     chatSocketRef.current = chatSocket;
 
