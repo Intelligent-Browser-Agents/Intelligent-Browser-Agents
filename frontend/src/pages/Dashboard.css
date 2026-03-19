@@ -860,8 +860,26 @@
   text-transform: uppercase;
 }
 
+.browser-frame-wrapper {
+  position: relative;
+  width: 100%;
+  user-select: none;
+  outline: none;
+}
+
+.browser-frame-wrapper.browser-interactive {
+  cursor: pointer;
+  outline: 2px solid #4fc3f7;
+  outline-offset: -2px;
+}
+
+.browser-frame-wrapper.browser-interactive:focus {
+  outline: 2px solid #29b6f6;
+}
+
 .browser-frame {
   width: 100%;
   height: auto;
   display: block;
+  pointer-events: none;
 }

@@ -44,6 +44,9 @@ You will be given:
 ### When the step is to present, summarize, or gather information
 - If PLAN_STEP says to **present**, **summarize**, **extract**, **gather**, **retrieve**, or **collect** information from the current page, use **`extract_content(max_chars)`** to capture the page's readable text. This tool returns the main text content for downstream summarization. Use it whenever the step's purpose is to obtain information from the page rather than interact with UI elements.
 
+### When the step requires human interaction (login, CAPTCHA, 2FA, credentials)
+- If PLAN_STEP says to **prompt the user**, **ask the user**, or involves the user **logging in**, **solving a CAPTCHA**, or **entering credentials**, return `status="failure"` with `error_type="tool_limit"` and a message like `"This step requires human interaction: <what the user needs to do>"`. The system will route this to the user for browser interaction. Do **not** attempt to automate login forms, CAPTCHAs, or credential entry.
+
 ### Other rules
 - If PLAN_STEP implies moving to a website and URL is known, use `navigate(url)`.
 - For `navigate`, the URL must be a single valid `http(s)` URL. If PLAN_STEP contains an explicit URL, use that exact URL only.
@@ -64,6 +67,7 @@ Before outputting `status="success"`, verify required args are present and non-e
 - scroll -> `args.direction`
 - press_key -> `args.key`
 - wait -> `args.seconds` (> 0)
+- extract_content -> no required args (optional `args.max_chars`, default 15000)
 
 If any required arg is missing:
 - Do NOT output `status="success"`.
@@ -95,7 +99,8 @@ You MUST output **one JSON object** and nothing else.
     "text": "<string or null>",
     "direction": "<up|down|null>",
     "key": "<string or null>",
-    "seconds": "<number or null>"
+    "seconds": "<number or null>",
+    "max_chars": "<number or null, default 15000>"
   },
   "status": "<success|failure>",
   "error_type": "<none|element_not_found|ambiguous_step|tool_limit|navigation_blocked|unknown>",

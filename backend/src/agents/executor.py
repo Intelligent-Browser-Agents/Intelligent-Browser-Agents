@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from execution import Action, dispatch_action, ActionArgs
+from execution.handlers import handle_extract_content
 from execution.langchain_tools import get_browser_tools
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from schema import ExecutionResult
@@ -30,6 +31,12 @@ class Executor:
         self.system_prompt = get_execution_prompt()
         self.runtime = runtime
 
+    _EXTRACT_PATTERNS = re.compile(
+        r"\bextract\b|\bsummariz|\bretrieve\b|\bcollect\b|\bgather\b|\bpresent\b"
+        r"|\bdisplay\b.{0,30}\b(?:information|schedule|data|content|details|results)",
+        re.IGNORECASE,
+    )
+
     async def __call__(self, state: ProjectState) -> dict:
         page = self.runtime.get("page")
         if page is None:
@@ -38,6 +45,15 @@ class Executor:
         current_task = state.get("current_task", "No task specified")
         current_url = state.get("current_url", "unknown")
         user_intent = self._get_user_intent(state)
+
+        # --- Deterministic short-circuit: extraction/presentation steps ---
+        if self._EXTRACT_PATTERNS.search(current_task):
+            result = await handle_extract_content(page, max_chars=15000)
+            print(f"[executor - {result.action} result]: ", result)
+            return await self._finish_from_result(state, page, current_url, result)
+
+        # --- Normal LLM-driven path ---
+
         dom_snapshot = await self._get_real_dom_snapshot(page)
         plan_step_url = self._extract_first_url(current_task) or "none"
         
@@ -137,6 +153,7 @@ class Executor:
                     direction=validated.args.direction,
                     key=validated.args.key,
                     seconds=validated.args.seconds,
+                    max_chars=getattr(validated.args, "max_chars", None) or 15000,
                 ),
             )
             result = await dispatch_action(page, tool_action)
@@ -157,6 +174,20 @@ class Executor:
         result_status = result.status
         result_error_type = result.error_type
         result_message = result.message
+
+        # Handle links that open in a new tab/window: switch to the new page
+        if result_status == "success":
+            try:
+                pages = page.context.pages
+                if len(pages) > 1 and pages[-1] != page:
+                    new_page = pages[-1]
+                    await new_page.wait_for_load_state("domcontentloaded", timeout=8000)
+                    self.runtime["page"] = new_page
+                    page = new_page
+                    result_message += " (switched to new tab)"
+            except Exception:
+                pass
+
         if result_status == "success" and self._is_anti_bot_page(page.url):
             result_status = "failure"
             result_error_type = "navigation_blocked"
@@ -171,6 +202,12 @@ class Executor:
             after_state = await self._get_real_dom_snapshot(page)
         except Exception:
             after_state = f"[URL after action: {new_url}]"
+
+        # For extract_content, show the extracted text to the verifier
+        extracted = getattr(result, "extracted_text", None)
+        if extracted and result.action == "extract_content":
+            after_state = f"EXTRACTED_TEXT:\n{extracted.strip()[:4000]}\n\nDOM_SNAPSHOT:\n{after_state}"
+
         execution_log = self._build_execution_log(
             action=result.action,
             args=result.args,
@@ -318,6 +355,7 @@ class Executor:
             "scroll": ["direction"],
             "press_key": ["key"],
             "wait": ["seconds"],
+            "extract_content": [],
         }
         missing = []
         for field in required.get(action_name, []):
@@ -470,15 +508,57 @@ class Executor:
 
 
     async def _get_real_dom_snapshot(self, page) -> str:
-        """Get a role/name snapshot of the page from Playwright accessibility tree for the LLM and verifier."""
+        """Get a role/name snapshot including iframes from Playwright accessibility tree."""
+        all_lines: list[str] = []
+
+        # Main frame
         try:
             snapshot = await page.accessibility.snapshot(interesting_only=True)
+            if snapshot:
+                all_lines.extend(self._format_accessibility_tree(snapshot, max_lines=300))
         except Exception as e:
-            return f"[DOM snapshot failed: {e}]"
-        if not snapshot:
-            return "[No accessibility snapshot]"
-        lines = self._format_accessibility_tree(snapshot, max_lines=500)
-        return "\n".join(lines) if lines else "[No interactive elements in snapshot]"
+            all_lines.append(f"[DOM snapshot failed: {e}]")
+
+        # Child frames / iframes (PeopleSoft, etc.)
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            try:
+                frame_snap = await frame.evaluate(
+                    """() => {
+                        const walk = (el) => {
+                            if (!el) return [];
+                            const items = [];
+                            const role = el.getAttribute && (el.getAttribute('role') || el.tagName.toLowerCase());
+                            const name = el.getAttribute && (
+                                el.getAttribute('aria-label') ||
+                                el.getAttribute('title') ||
+                                (el.innerText || '').trim().slice(0, 120)
+                            );
+                            if (name && role) items.push({role, name});
+                            for (const child of (el.children || []))
+                                items.push(...walk(child));
+                            return items;
+                        };
+                        return walk(document.body);
+                    }"""
+                )
+                if frame_snap:
+                    all_lines.append(f'[iframe: {frame.url[:80]}]')
+                    for item in frame_snap[:200]:
+                        r = item.get("role", "")
+                        n = (item.get("name", "") or "").strip()
+                        if n:
+                            line = f'[role="{r}"] "{n}"'
+                            if len(line) > 200:
+                                line = line[:197] + "..."
+                            all_lines.append(line)
+            except Exception:
+                continue
+
+        if not all_lines:
+            return "[No interactive elements in snapshot]"
+        return "\n".join(all_lines[:500])
 
     def _format_accessibility_tree(self, node: dict | None, prefix: str = "", max_lines: int = 500) -> list[str]:
         """Flatten accessibility tree to lines like [role=\"button\"] \"Submit\" for verifier and LLM."""

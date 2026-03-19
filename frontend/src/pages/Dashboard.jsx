@@ -205,9 +205,11 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const activeChatIdRef = useRef(activeChatId);
 
-  //Store llive frames
+  //Store live frames
   const [liveFrame, setLiveFrame] = useState(null);
   const socketRef = useRef(null);
+  const [isHITL, setIsHITL] = useState(false);
+  const browserImgRef = useRef(null);
 
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const isAgentRunningRef = useRef(false);
@@ -310,6 +312,75 @@ export default function Dashboard() {
           : session
       ),
     }));
+  };
+
+  const sendBrowserInput = (payload) => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "INPUT", ...payload }));
+    }
+  };
+
+  const handleBrowserClick = (e) => {
+    const img = browserImgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const scaleX = 1280 / rect.width;
+    const scaleY = 720 / rect.height;
+    const x = Math.round((e.clientX - rect.left) * scaleX);
+    const y = Math.round((e.clientY - rect.top) * scaleY);
+    sendBrowserInput({ inputType: "mouse", action: "mousePressed", x, y, button: "left", clickCount: 1 });
+    sendBrowserInput({ inputType: "mouse", action: "mouseReleased", x, y, button: "left", clickCount: 1 });
+  };
+
+  const handleBrowserKeyDown = (e) => {
+    e.preventDefault();
+    const isPrintable = e.key.length === 1;
+    sendBrowserInput({
+      inputType: "key",
+      action: isPrintable ? "keyDown" : "rawKeyDown",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      modifiers:
+        (e.altKey ? 1 : 0) |
+        (e.ctrlKey ? 2 : 0) |
+        (e.metaKey ? 4 : 0) |
+        (e.shiftKey ? 8 : 0),
+    });
+    if (isPrintable) {
+      sendBrowserInput({
+        inputType: "key",
+        action: "char",
+        key: e.key,
+        code: e.code,
+        keyCode: e.key.charCodeAt(0),
+        text: e.key,
+        unmodifiedText: e.key,
+      });
+    }
+  };
+
+  const handleBrowserKeyUp = (e) => {
+    e.preventDefault();
+    sendBrowserInput({
+      inputType: "key",
+      action: "keyUp",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+    });
+  };
+
+  const handleBrowserScroll = (e) => {
+    const img = browserImgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const scaleX = 1280 / rect.width;
+    const scaleY = 720 / rect.height;
+    const x = Math.round((e.clientX - rect.left) * scaleX);
+    const y = Math.round((e.clientY - rect.top) * scaleY);
+    sendBrowserInput({ inputType: "scroll", x, y, deltaX: e.deltaX, deltaY: e.deltaY });
   };
 
   const sendThroughChatSocket = (text) => {
@@ -420,15 +491,24 @@ export default function Dashboard() {
         appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
+        if (msg.content && msg.content.includes("[NODE]: __INTERRUPT__")) {
+          setIsHITL(true);
+        }
+        if (msg.content && msg.source === "STDOUT" && msg.content.includes("[NODE]: ORCHESTRATOR")) {
+          setIsHITL(false);
+        }
       } else if (msg.type === "CLARIFICATION") {
+        setIsHITL(true);
         appendSessionChatMessage(selectedChatId, sessionId, msg.message, false);
       } else if (msg.type === "RESPONSE") {
+        setIsHITL(false);
         appendSessionChatMessage(selectedChatId, sessionId, msg.content, false);
       }
     };
 
     socketRef.current.onclose = () => {
-      setLiveFrame(null); // Clear video when finished
+      setLiveFrame(null);
+      setIsHITL(false);
       appendAgentLogLine(selectedChatId, sessionId, "STATUS: Agent finished task.");
       markSessionFinished(selectedChatId, sessionId);
       setIsAgentRunning(false);
@@ -822,8 +902,26 @@ export default function Dashboard() {
 
             {session.status === "running" && liveFrame && session.id === currentRunSessionId && (
               <div className="live-browser-container">
-                <div className="browser-header">Live Agent View</div>
-                <img src={liveFrame} alt="Browser Stream" className="browser-frame" />
+                <div className="browser-header">
+                  {isHITL ? "Live Browser — You can interact" : "Live Agent View"}
+                </div>
+                {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+                <div
+                  className={`browser-frame-wrapper${isHITL ? " browser-interactive" : ""}`}
+                  tabIndex={isHITL ? 0 : -1}
+                  onClick={isHITL ? handleBrowserClick : undefined}
+                  onKeyDown={isHITL ? handleBrowserKeyDown : undefined}
+                  onKeyUp={isHITL ? handleBrowserKeyUp : undefined}
+                  onWheel={isHITL ? handleBrowserScroll : undefined}
+                >
+                  <img
+                    ref={browserImgRef}
+                    src={liveFrame}
+                    alt="Browser Stream"
+                    className="browser-frame"
+                    draggable={false}
+                  />
+                </div>
               </div>
             )}
 

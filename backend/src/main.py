@@ -74,8 +74,15 @@ def build_workflow(runtime):
         }
     )
 
-    # Fallback -> Back to Orchestration for new planning
-    workflow.add_edge("fallback", "orchestrator")
+    # Fallback -> Interaction (if human browser help needed) or Orchestration
+    workflow.add_conditional_edges(
+        "fallback",
+        lambda state: "interaction" if state.get("handoff_interaction", False) else "orchestrator",
+        {
+            "interaction": "interaction",
+            "orchestrator": "orchestrator",
+        }
+    )
 
 
     # Interaction: END when mission complete/aborted, else back to orchestrator (e.g. after clarification)

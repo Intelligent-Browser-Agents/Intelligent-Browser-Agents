@@ -14,7 +14,8 @@ from .handlers import (
     handle_search,
     handle_scroll,
     handle_press_key,
-    handle_wait
+    handle_wait,
+    handle_extract_content,
 )
 
 
@@ -45,7 +46,8 @@ async def dispatch_action(page: Page, action: Action) -> ExecutionOutput:
         "search": lambda: handle_search(page, action.args.text),
         "scroll": lambda: handle_scroll(page, action.args.direction),
         "press_key": lambda: handle_press_key(page, action.args.key),
-        "wait": lambda: handle_wait(page, action.args.seconds)
+        "wait": lambda: handle_wait(page, action.args.seconds),
+        "extract_content": lambda: handle_extract_content(page, max_chars=action.args.max_chars or 15000),
     }
 
     # Get handler for the action

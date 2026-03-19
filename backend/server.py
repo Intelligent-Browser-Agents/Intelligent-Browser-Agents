@@ -534,6 +534,15 @@ async def hitl_reply(user_id: str, request: Request):
     await queue.put({"content": user_input})
     return {"status": "ok"}
 
+async def _switch_to_new_page(new_page, start_screencast_fn):
+    """Wait for a popup/new-tab page to load, then switch screencast to it."""
+    try:
+        await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
+        await start_screencast_fn(new_page)
+    except Exception as exc:
+        print(f"[screencast] Failed to switch to new tab: {exc}")
+
+
 @app.websocket("/ws/stream/{user_id}")
 async def stream_endpoint(websocket: WebSocket, user_id: str):
     await websocket.accept()
@@ -585,6 +594,58 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     reply_queue = asyncio.Queue()
     HITL_REPLY_QUEUES[user_id] = reply_queue
 
+    # Mutable ref so the listener can dispatch CDP input events once the
+    # session is established (set after browser connects).
+    cdp_session_ref = {"client": None}
+
+    async def _dispatch_cdp_input(msg: dict):
+        """Forward a browser input event from the frontend to the CDP session."""
+        client = cdp_session_ref.get("client")
+        if client is None:
+            return
+        try:
+            input_type = msg.get("inputType")  # "mouse" or "key"
+            if input_type == "mouse":
+                await client.send("Input.dispatchMouseEvent", {
+                    "type": msg.get("action", "mousePressed"),
+                    "x": msg.get("x", 0),
+                    "y": msg.get("y", 0),
+                    "button": msg.get("button", "left"),
+                    "clickCount": msg.get("clickCount", 1),
+                })
+            elif input_type == "key":
+                action = msg.get("action", "keyDown")
+                key = msg.get("key", "")
+                code = msg.get("code", "")
+                key_code = msg.get("keyCode", 0)
+                modifiers = msg.get("modifiers", 0)
+
+                params = {
+                    "type": action,
+                    "key": key,
+                    "code": code,
+                    "windowsVirtualKeyCode": key_code,
+                    "nativeVirtualKeyCode": key_code,
+                    "modifiers": modifiers,
+                }
+                if action == "char":
+                    params["text"] = msg.get("text", key)
+                    params["unmodifiedText"] = msg.get("unmodifiedText", key)
+                elif action in ("keyDown", "rawKeyDown"):
+                    params["text"] = msg.get("text", "")
+
+                await client.send("Input.dispatchKeyEvent", params)
+            elif input_type == "scroll":
+                await client.send("Input.dispatchMouseEvent", {
+                    "type": "mouseWheel",
+                    "x": msg.get("x", 0),
+                    "y": msg.get("y", 0),
+                    "deltaX": msg.get("deltaX", 0),
+                    "deltaY": msg.get("deltaY", 0),
+                })
+        except Exception as e:
+            print(f"[INPUT] CDP dispatch error: {e}")
+
     # ── Listener: reads messages the frontend sends back through this WebSocket ──
     async def ws_reply_listener():
         try:
@@ -594,6 +655,11 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                 except Exception:
                     raw = await websocket.receive_text()
                     msg = {"content": raw}
+
+                if msg.get("type") == "INPUT":
+                    await _dispatch_cdp_input(msg)
+                    continue
+
                 print(f"[HITL] Received reply via WebSocket: {str(msg)[:200]}")
                 await reply_queue.put(msg)
         except Exception:
@@ -694,18 +760,38 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
             try:
                 async with async_playwright() as p:
                     browser = await p.chromium.connect_over_cdp(f"http://localhost:{port}")
-                    page = browser.contexts[0].pages[0]
-                    client = await page.context.new_cdp_session(page)
+                    context = browser.contexts[0]
+                    page = context.pages[0]
+                    client = await context.new_cdp_session(page)
+                    cdp_session_ref["client"] = client
 
                     async def on_frame(payload):
+                        cur_client = cdp_session_ref.get("client")
                         try:
                             await websocket.send_json({"type": "FRAME", "data": payload['data']})
-                            await client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
+                            await cur_client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
                         except Exception:
                             pass
 
+                    async def start_screencast_on(target_page):
+                        """Switch screencast + CDP input to a new page."""
+                        old_client = cdp_session_ref.get("client")
+                        if old_client:
+                            try:
+                                await old_client.send("Page.stopScreencast")
+                            except Exception:
+                                pass
+                        new_client = await context.new_cdp_session(target_page)
+                        cdp_session_ref["client"] = new_client
+                        new_client.on("Page.screencastFrame", on_frame)
+                        await new_client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
+
                     client.on("Page.screencastFrame", on_frame)
                     await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
+
+                    context.on("page", lambda new_page: asyncio.ensure_future(
+                        _switch_to_new_page(new_page, start_screencast_on)
+                    ))
 
                     await loop.run_in_executor(None, process.wait)
             except NotImplementedError:

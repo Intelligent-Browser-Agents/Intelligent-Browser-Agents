@@ -299,19 +299,28 @@ def retrieve_interactive_elements(page_data: str) -> str:
 
 async def get_page_text(page: Page, max_chars: int = 15000) -> str:
     """
-    Extract main readable text from the current page (for storage and summarization).
-    Uses the same DOM access as the rest of the extraction pipeline.
+    Extract main readable text from the current page **and all iframes**.
+    PeopleSoft-style portals load content in nested iframes that
+    page.content() alone will miss.
     """
     try:
-        html = await page.content()
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
-            tag.decompose()
-        text = (soup.get_text(separator="\n", strip=True) or "").strip()
-        text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-        if len(text) > max_chars:
-            text = text[:max_chars] + "\n... (truncated)"
-        return text
+        parts: list[str] = []
+        for frame in page.frames:
+            try:
+                html = await frame.content()
+            except Exception:
+                continue
+            soup = BeautifulSoup(html, "html.parser")
+            for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
+                tag.decompose()
+            text = (soup.get_text(separator="\n", strip=True) or "").strip()
+            text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+            if text:
+                parts.append(text)
+        combined = "\n\n".join(parts)
+        if len(combined) > max_chars:
+            combined = combined[:max_chars] + "\n... (truncated)"
+        return combined
     except Exception:
         try:
             raw = await page.evaluate("() => (document.body && (document.body.innerText || document.body.textContent || '').trim()) || ''")

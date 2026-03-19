@@ -69,12 +69,14 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 f"[Fallback] Error: {err}\n"
                 f"[Fallback] Message to Orchestration: Retry the current step."
             )
+            needs_human = False
         else:
             revised_task = (
                 (strategy.proposed_step or "").strip()
                 or (strategy.insert_step or "").strip()
                 or current_task
             )
+            needs_human = strategy.update_type == "request_human_action"
             fallback_log = (
                 f"[Fallback] Update Type: {strategy.update_type}\n"
                 f"[Fallback] Diagnosis: {strategy.diagnosis}\n"
@@ -83,12 +85,15 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 f"[Fallback] Last Verification: {last_verification[:180]}"
             )
 
-        return {
+        out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_task": revised_task,
             "reasoning_log": [fallback_log],
             "needs_fallback": False,
         }
+        if needs_human:
+            out["handoff_interaction"] = True
+        return out
 
     def _find_latest_log(self, reasoning_log: list, prefix: str) -> str:
         for entry in reversed(reasoning_log or []):

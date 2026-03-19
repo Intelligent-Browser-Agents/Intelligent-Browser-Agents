@@ -159,12 +159,32 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
 
         # Unambiguous cases: skip LLM to avoid wrong "retry" and prevent loops
         if step_complete and safe_step >= total_steps - 1:
+            original_step = current_plan[safe_step]
+            completed_fallback_prereq = (
+                current_task.strip() != original_step.strip()
+            )
+            if completed_fallback_prereq:
+                reasoning = (
+                    f"[Decision] Fallback prerequisite completed; "
+                    f"retrying original step {safe_step + 1}/{total_steps}."
+                )
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": safe_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": original_step,
+                    "reasoning_log": [reasoning],
+                    "is_complete": False,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                    "last_step_complete": False,
+                }
             reasoning = "[Decision] Final step verified complete; marking plan complete."
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": safe_step,
                 "plan_status": "MAINTAIN",
-                "current_task": current_plan[safe_step],
+                "current_task": original_step,
                 "reasoning_log": [reasoning],
                 "is_complete": True,
                 "handoff_interaction": True,
@@ -172,6 +192,23 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "mission_failed": False,
             }
         if step_complete and safe_step < total_steps - 1:
+            original_step = current_plan[safe_step]
+            if current_task.strip() != original_step.strip():
+                reasoning = (
+                    f"[Decision] Fallback prerequisite completed; "
+                    f"retrying original step {safe_step + 1}/{total_steps}."
+                )
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": safe_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": original_step,
+                    "reasoning_log": [reasoning],
+                    "is_complete": False,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                    "last_step_complete": False,
+                }
             next_step = min(safe_step + 1, total_steps - 1)
             next_task = current_plan[next_step]
             reasoning = f"[Decision] Step {safe_step + 1}/{total_steps} complete; advancing to next step."

@@ -58,7 +58,18 @@ class InteractionAgent:
             if dom_cache:
                 extracted_content = dom_cache[-2:]  # most recent page snapshots
 
-        system_status = "goal_completed" if is_complete else "needs_clarification"
+        # Detect if fallback requested human browser interaction
+        needs_human_action = any(
+            "[Fallback] Update Type: request_human_action" in (log or "")
+            for log in reasoning_log
+        )
+
+        if needs_human_action:
+            system_status = "needs_human_action"
+        elif is_complete:
+            system_status = "goal_completed"
+        else:
+            system_status = "needs_clarification"
 
         actions_summary = "\n".join([
             f"- {log[:150]}..." if len(log) > 150 else f"- {log}"
@@ -127,6 +138,7 @@ class InteractionAgent:
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "reasoning_log": [interaction_log],
                 "handoff_interaction": False,
+                "is_complete": False,
                 "messages": [
                     {"role": "assistant", "content": final_message},
                     {"role": "user", "content": str(user_reply)},
