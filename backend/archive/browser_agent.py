@@ -56,7 +56,6 @@ Your responsibility:
 - Given a final goal, create a numbered list of high-level steps.
 - Assume the agent starts on https://google.com.
 - Steps should describe WHAT to do, not HOW.
-- Output 3–8 steps maximum.
 
 Rules:
 - Do NOT include technical details (selectors, DOM, coordinates).

@@ -33,6 +33,38 @@ class InteractionAgent:
         mission_failed = state.get("mission_failed", False)
         abort_reason = state.get("abort_reason", "")
 
+        # ── Fast path: orchestrator already generated clarification questions ──
+        if state.get("plan_status") == "NEEDS_CLARIFICATION":
+            questions = self._extract_planner_questions(reasoning_log)
+            message = "Before I begin, I need a bit more information:"
+            fields = []
+            for q in questions:
+                message += f"\n- {q}"
+                fields.append(q)
+            if not fields:
+                message = "Could you provide more details about what you'd like me to do?"
+                fields = ["additional details"]
+
+            user_reply = interrupt({
+                "type": "request",
+                "message": message,
+                "requested_fields": fields,
+            })
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "reasoning_log": [
+                    f"[Interaction] Type: request (planner clarification)\n"
+                    f"[Interaction] Forwarded {len(fields)} questions\n"
+                    f"[Interaction] User replied: {str(user_reply)[:200]}"
+                ],
+                "handoff_interaction": False,
+                "is_complete": False,
+                "messages": [
+                    {"role": "assistant", "content": message},
+                    {"role": "user", "content": str(user_reply)},
+                ],
+            }
+
         if mission_failed:
             final_message = (
                 "The agent stopped before completing the request.\n"
@@ -66,10 +98,8 @@ class InteractionAgent:
 
         if needs_human_action:
             system_status = "needs_human_action"
-        elif is_complete:
-            system_status = "goal_completed"
         else:
-            system_status = "needs_clarification"
+            system_status = "goal_completed"
 
         actions_summary = "\n".join([
             f"- {log[:150]}..." if len(log) > 150 else f"- {log}"
@@ -183,6 +213,19 @@ class InteractionAgent:
             for field in response.requested_fields:
                 msg += f"\n- {field}"
         return msg
+
+    @staticmethod
+    def _extract_planner_questions(reasoning_log: list) -> list[str]:
+        """Pull clarification questions from the orchestrator's reasoning log."""
+        questions = []
+        for entry in reasoning_log:
+            if not isinstance(entry, str) or "Needs clarification" not in entry:
+                continue
+            for line in entry.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("- "):
+                    questions.append(stripped[2:].strip())
+        return questions
 
     def _get_user_intent(self, state: ProjectState) -> str:
         user_message = state["messages"][0] if state["messages"] else None
