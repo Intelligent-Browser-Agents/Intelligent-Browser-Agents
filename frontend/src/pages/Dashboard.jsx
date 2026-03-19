@@ -604,7 +604,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const token = localStorage.getItem('token') || '';
-    const wsChatUrl = buildWebSocketUrl('/ws/chat/1', { token });
+    const wsChatUrl = buildWebSocketUrl(`/ws/chat/${parseInt(activeChatIdRef.current)}`, { token });
     const chatSocket = new WebSocket(wsChatUrl);
     chatSocketRef.current = chatSocket;
 
