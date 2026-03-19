@@ -71,13 +71,18 @@ jobs:
 
             source main_venv/bin/activate
 
-            # 2. Navigate to backend folder
+            # 2. Install dependencies (optional, can be skipped if you ensure the server is always up-to-date)
+            pip install -r requirements.txt
+
+            # 3. Navigate to backend folder
             cd /home/bitnami/Intelligent-Browser-Agents/backend
 
             git fetch origin main
             git reset --hard origin/main
 
-            # 3. Start Uvicorn in a detached screen
+            
+
+            # 4. Start Uvicorn in a detached screen
             # -d -m starts it detached immediately
             # Use 'python3 -m uvicorn' to ensure it uses the correct path
             screen -d -m -S uvicorn-backend python3 -m uvicorn server:app --host 0.0.0.0 --port 8000
