@@ -810,6 +810,16 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                     "content": "Video streaming not available on this platform; continuing with logs only.",
                 })
                 await loop.run_in_executor(None, process.wait)
+            except Exception as exc:
+                print(f"[STREAM] Browser/screencast error: {exc}")
+                try:
+                    await websocket.send_json({
+                        "type": "STATUS",
+                        "content": "Browser video disconnected; agent still running.",
+                    })
+                except Exception:
+                    pass
+                await loop.run_in_executor(None, process.wait)
         else:
             await websocket.send_json({"type": "STATUS", "content": "Browser failed to open."})
 

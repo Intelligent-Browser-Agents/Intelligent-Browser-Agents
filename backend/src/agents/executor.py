@@ -56,7 +56,9 @@ class Executor:
 
         dom_snapshot = await self._get_real_dom_snapshot(page)
         plan_step_url = self._extract_first_url(current_task) or "none"
-        
+        credentials_block = self._build_credentials_context(state, current_task, current_url)
+        recent_actions_block = self._build_recent_actions(state)
+
         context = f"""
         MAIN_GOAL: {user_intent}
 
@@ -68,6 +70,8 @@ class Executor:
 
         DOM_SNAPSHOT:
         {dom_snapshot}
+        {credentials_block}
+        {recent_actions_block}
 
         Use exactly one of the available tools to perform this plan step. Prefer duckduckgo.com or bing.com over google.com unless explicitly required.
         """
@@ -446,6 +450,155 @@ class Executor:
     def _user_explicitly_requires_google(self, current_task: str, user_intent: str) -> bool:
         text = f"{current_task}\n{user_intent}".lower()
         return "google.com" in text or re.search(r"\bgoogle\b", text) is not None
+
+    @staticmethod
+    def _build_recent_actions(state: ProjectState) -> str:
+        """Summarise recent executor actions so the LLM doesn't repeat itself."""
+        logs = state.get("reasoning_log") or []
+        executor_logs = [
+            log for log in logs
+            if isinstance(log, str) and log.startswith("[Executor]")
+        ]
+        if not executor_logs:
+            return ""
+        recent = executor_logs[-6:]
+        summaries = []
+        for i, log in enumerate(recent, 1):
+            action_line = ""
+            args_line = ""
+            status_line = ""
+            for line in log.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("[Executor] Action:"):
+                    action_line = stripped.replace("[Executor] ", "")
+                elif stripped.startswith("[Executor] Args:"):
+                    args_line = stripped.replace("[Executor] ", "")
+                elif stripped.startswith("[Executor] Status:"):
+                    status_line = stripped.replace("[Executor] ", "")
+            if action_line:
+                summaries.append(f"  {i}. {action_line} | {args_line} | {status_line}")
+        if not summaries:
+            return ""
+        return (
+            "\n\nPREVIOUS_ACTIONS (already executed — do NOT repeat a successful action; do the NEXT step in the login sequence):\n"
+            + "\n".join(summaries)
+        )
+
+    _LOGIN_KEYWORDS = re.compile(
+        r"\blog\s*in\b|\bsign\s*in\b|\bcredential|\busername\b|\bpassword\b"
+        r"|\bauthenticat|\bsaved credentials\b",
+        re.IGNORECASE,
+    )
+    _FORM_FILL_KEYWORDS = re.compile(
+        r"\bfill\b|\benter\b|\bsubmit\b|\bapply\b|\bregister\b|\bsign\s*up\b"
+        r"|\bpersonal\s+info|\bprofile\b|\bpayment\b|\bcheckout\b",
+        re.IGNORECASE,
+    )
+
+    def _build_credentials_context(self, state: ProjectState, current_task: str, current_url: str) -> str:
+        """Inject relevant credentials when the step involves login or form-filling."""
+        creds = state.get("user_credentials") or {}
+        if not creds:
+            print("[executor] No user_credentials in state", flush=True)
+            return ""
+
+        is_login_step = bool(self._LOGIN_KEYWORDS.search(current_task))
+        is_form_step = bool(self._FORM_FILL_KEYWORDS.search(current_task))
+
+        if not is_login_step and not is_form_step:
+            return ""
+
+        print(f"[executor] Credential injection: login={is_login_step} form={is_form_step}", flush=True)
+        parts = []
+
+        if is_login_step:
+            match = self._find_matching_service(creds, current_task, current_url)
+            if match:
+                print(f"[executor] Matched service: {match.get('serviceName', '?')}", flush=True)
+                username = match.get('username', '')
+                password = match.get('password', '')
+                parts.append(
+                    f"SERVICE_CREDENTIALS (use these EXACT values — do NOT make up values):\n"
+                    f"  Username/Email: {username}\n"
+                    f"  Password: {password}\n\n"
+                    f"FIELD MATCHING RULES:\n"
+                    f"  - Look at DOM_SNAPSHOT for visible input fields (textbox, input, password field, etc.).\n"
+                    f"  - Match each field to the correct credential by its label/name/placeholder "
+                    f"(e.g. 'Email', 'Username', 'NID' → type the Username value; 'Password' → type the Password value).\n"
+                    f"  - Fill ONE field per turn: `type` the matching value into the currently focused or next unfilled field.\n"
+                    f"  - After all visible fields are filled (check PREVIOUS_ACTIONS), click the submit/sign-in/next button.\n"
+                    f"  - If only ONE input field is visible (e.g. Microsoft login), fill it first, then click Next; "
+                    f"the system will re-invoke you for the next field on the new page."
+                )
+            else:
+                print(f"[executor] No matching service found for task='{current_task[:60]}' url='{current_url[:60]}'", flush=True)
+
+        if is_form_step:
+            personal = []
+            for key in ("fullName", "email", "phoneNumber", "address"):
+                val = creds.get(key, "").strip()
+                if val:
+                    personal.append(f"  {key}: {val}")
+            if personal:
+                parts.append("PERSONAL_INFO (use to fill form fields):\n" + "\n".join(personal))
+
+            payments = creds.get("userPaymentMethods") or []
+            if payments:
+                p = payments[0]
+                payment_lines = [f"  {k}: {v}" for k, v in p.items() if k != "id" and v]
+                if payment_lines:
+                    parts.append("PAYMENT_INFO:\n" + "\n".join(payment_lines))
+
+            experience = creds.get("userExperienceEntries") or []
+            if experience:
+                exp_lines = []
+                for entry in experience[:3]:
+                    exp_lines.append(
+                        f"  - {entry.get('title', '')} at {entry.get('organization', '')} "
+                        f"({entry.get('startDate', '')} – {entry.get('endDate', '') or 'present'})"
+                    )
+                if exp_lines:
+                    parts.append("EXPERIENCE/EDUCATION:\n" + "\n".join(exp_lines))
+
+        if not parts:
+            return ""
+        return "\n\nUSER_CREDENTIALS (available for auto-fill — use `type` to enter these values):\n" + "\n".join(parts)
+
+    @staticmethod
+    def _find_matching_service(creds: dict, task: str, url: str) -> dict | None:
+        """Find the best-matching saved service credential for the current task/URL."""
+        services = creds.get("userCredentialsList") or []
+        if not services:
+            return None
+
+        task_lower = task.lower()
+        url_lower = url.lower()
+
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            name = (service.get("serviceName") or "").lower()
+            svc_url = (service.get("serviceUrl") or "").lower()
+
+            # Direct name match in the task or current URL
+            if name and (name in task_lower or name in url_lower):
+                return service
+            # Saved service URL matches the current page
+            if svc_url and svc_url in url_lower:
+                return service
+            # Check if the service URL's domain appears in the current URL
+            if svc_url:
+                from urllib.parse import urlparse as _urlparse
+                svc_domain = _urlparse(svc_url).netloc.lower().replace("www.", "")
+                cur_domain = _urlparse(url).netloc.lower().replace("www.", "")
+                if svc_domain and svc_domain in cur_domain:
+                    return service
+
+        # If only one service is saved and the task mentions login, use it
+        if len(services) == 1:
+            return services[0]
+
+        return None
 
     def _is_anti_bot_page(self, url: str) -> bool:
         text = (url or "").lower()

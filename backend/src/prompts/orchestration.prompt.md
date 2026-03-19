@@ -29,10 +29,16 @@ Decompose the goal into **3-8** ordered steps:
 - Avoid irreversible or risky actions unless explicitly requested.
 - Ensure each step is necessary and moves toward completion.
 
+### Saved Credentials & Auto-Fill
+The context may include an `AVAILABLE USER CREDENTIALS` section listing what information the system already has (service logins, personal info, payment methods, experience/education). When credentials are available for a service:
+- Plan the login step as an **automated** step, e.g. "Log in to [service] using saved credentials." Do **not** phrase it as a human-in-the-loop step.
+- The executor will auto-fill username/password from saved credentials.
+
 ### Human-in-the-Loop Steps
-The user has a **live interactive browser view** and can click, type, and scroll in the browser directly. When a task requires actions the agent cannot automate (login, CAPTCHA, 2FA, entering personal credentials), include a step that explicitly hands off to the user:
-- Phrase it as: "Prompt the user to [log in / solve the CAPTCHA / complete 2FA / enter credentials] in the browser, then confirm when done."
-- **Always plan steps AFTER the human interaction step** to continue the task. For example, if the user needs to log in, also plan the steps to navigate to the target page and extract the information after login.
+The user has a **live interactive browser view** and can click, type, and scroll in the browser directly. Only hand off to the user for actions that **cannot** be automated even with saved credentials (CAPTCHA, 2FA, OAuth popups):
+- Phrase it as: "Prompt the user to [solve the CAPTCHA / complete 2FA] in the browser, then confirm when done."
+- If no saved credentials exist for a required login, phrase it as: "Prompt the user to log in to [service] in the browser, then confirm when done."
+- **Always plan steps AFTER the human interaction step** to continue the task.
 
 ### Structured Decomposition Rules
 - Begin with discovery/search if the destination site is unknown.

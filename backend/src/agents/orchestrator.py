@@ -66,6 +66,8 @@ class Orchestrator:
                 + "\n".join(lines)
             )
 
+        credentials_block = self._build_credentials_summary(state)
+
         context = f"""
         USER REQUEST: {user_intent}
 
@@ -74,6 +76,7 @@ class Orchestrator:
         PAGE STATE:
         {page_state}
         {conversation_block}
+        {credentials_block}
 
         Based on this request, create a plan following the output format specified.
         """
@@ -385,6 +388,38 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             "abort_reason": reason,
             "reasoning_log": [reasoning],
         }
+
+    @staticmethod
+    def _build_credentials_summary(state: ProjectState) -> str:
+        """Build a summary of available credentials for the planner (names only, no secrets)."""
+        creds = state.get("user_credentials") or {}
+        if not creds:
+            return ""
+
+        parts = []
+        full_name = creds.get("fullName", "").strip()
+        if full_name:
+            parts.append(f"- Personal info on file (name, email, phone, address)")
+
+        services = creds.get("userCredentialsList") or []
+        if services:
+            names = [s.get("serviceName", "unnamed") for s in services if isinstance(s, dict)]
+            parts.append(f"- Saved login credentials for: {', '.join(names)}")
+
+        payments = creds.get("userPaymentMethods") or []
+        if payments:
+            parts.append(f"- {len(payments)} saved payment method(s)")
+
+        experience = creds.get("userExperienceEntries") or []
+        if experience:
+            parts.append(f"- {len(experience)} experience/education entries")
+
+        if not parts:
+            return ""
+        return (
+            "\n\nAVAILABLE USER CREDENTIALS (the agent can auto-fill these — no need for human-in-the-loop):\n"
+            + "\n".join(parts)
+        )
 
     def _get_simulated_page_context(self, url: str, step: int, intent: str) -> str:
         if "ucf" in url.lower() or "login" in intent.lower():

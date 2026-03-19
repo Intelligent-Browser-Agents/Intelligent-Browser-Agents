@@ -93,6 +93,10 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         }
         if needs_human:
             out["handoff_interaction"] = True
+            # Reset step_attempts so that human-in-the-loop pauses do not trigger
+            # the orchestrator safety stop immediately after the user completes
+            # the required action.
+            out["step_attempts"] = 0
         return out
 
     def _find_latest_log(self, reasoning_log: list, prefix: str) -> str:
