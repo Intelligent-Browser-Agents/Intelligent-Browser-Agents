@@ -26,13 +26,28 @@ function UserCredentials({
   onSavePayment,
   onDeletePayment,
   onBackToPayments,
+  experienceEntries,
+  experienceView,
+  experienceForm,
+  onCreateExperience,
+  onOpenExperience,
+  onExperienceFormChange,
+  onSaveExperience,
+  onDeleteExperience,
+  onBackToExperience,
 }) {
   const [activeCredentialsTab, setActiveCredentialsTab] = useState("services");
   const isDetailView = serviceView.mode === "edit" || serviceView.mode === "create";
   const isCreateMode = serviceView.mode === "create";
   const isPaymentDetailView = paymentView.mode === "edit" || paymentView.mode === "create";
   const isPaymentCreateMode = paymentView.mode === "create";
+  const isExperienceDetailView = experienceView.mode === "edit" || experienceView.mode === "create";
+  const isExperienceCreateMode = experienceView.mode === "create";
   const showingServices = activeCredentialsTab === "services";
+  const showingPayments = activeCredentialsTab === "payments";
+  const safeServiceCredentials = Array.isArray(serviceCredentials) ? serviceCredentials : [];
+  const safePaymentMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
+  const safeExperienceEntries = Array.isArray(experienceEntries) ? experienceEntries : [];
 
   return (
     <div className="user-creds-container">
@@ -81,21 +96,23 @@ function UserCredentials({
           onChange={(e) => setEmail(e.target.value)}
           />
         </div>
+
       </div>
 
       <div className="services-container">
         <div className="credentials-tabs">
           <button type="button" className={`credentials-tab ${showingServices ? "active" : ""}`} onClick={() => setActiveCredentialsTab("services")}>Services</button>
-          <button type="button" className={`credentials-tab ${!showingServices ? "active" : ""}`} onClick={() => setActiveCredentialsTab("payments")}>Payment Info</button>
+          <button type="button" className={`credentials-tab ${showingPayments ? "active" : ""}`} onClick={() => setActiveCredentialsTab("payments")}>Payment Info</button>
+          <button type="button" className={`credentials-tab ${activeCredentialsTab === "experience" ? "active" : ""}`} onClick={() => setActiveCredentialsTab("experience")}>Experience</button>
         </div>
         <div className="credentials-tab-body">
           {showingServices ? (
             !isDetailView ? (
               <div className="services-grid cards-scroll">
-                {serviceCredentials.length === 0 ? (
+                {safeServiceCredentials.length === 0 ? (
                   <p className="services-empty-state">No credentials saved yet.</p>
                 ) : (
-                  serviceCredentials.map((service) => (
+                  safeServiceCredentials.map((service) => (
                     <button type="button" key={service.id} className="service-card" onClick={() => onOpenService(service.id)}>
                       <span className="service-card-name">{service.serviceName || "Unnamed Service"}</span>
                       <span className="service-card-username">@{service.username || "no-username"}</span>
@@ -120,15 +137,16 @@ function UserCredentials({
                 </div>
               </div>
             )
-          ) : !isPaymentDetailView ? (
+          ) : showingPayments ? (
+            !isPaymentDetailView ? (
             <div className="services-grid cards-scroll">
-              {paymentMethods.length === 0 ? (
-                <p className="services-empty-state">No payment methods saved yet.</p>
-              ) : (
-                paymentMethods.map((payment) => (
-                  <button type="button" key={payment.id} className="service-card" onClick={() => onOpenPayment(payment.id)}>
-                    <span className="service-card-name">{payment.cardNickname || "Card"}</span>
-                    <span className="service-card-username">{payment.cardholderName || "No cardholder name"}</span>
+                {safePaymentMethods.length === 0 ? (
+                  <p className="services-empty-state">No payment methods saved yet.</p>
+                ) : (
+                  safePaymentMethods.map((payment) => (
+                    <button type="button" key={payment.id} className="service-card" onClick={() => onOpenPayment(payment.id)}>
+                      <span className="service-card-name">{payment.cardNickname || "Card"}</span>
+                      <span className="service-card-username">{payment.cardholderName || "No cardholder name"}</span>
                     <span className="service-card-username">{payment.maskedCardNumber || "No number"}</span>
                   </button>
                 ))
@@ -150,6 +168,40 @@ function UserCredentials({
               <div className="service-detail-actions">
                 <button className="setting-btn" onClick={onSavePayment}>{isPaymentCreateMode ? "Add Card" : "Save Card"}</button>
                 {!isPaymentCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeletePayment}>Delete</button>)}
+                </div>
+              </div>
+            )
+          ) : !isExperienceDetailView ? (
+            <div className="services-grid cards-scroll">
+              {safeExperienceEntries.length === 0 ? (
+                <p className="services-empty-state">No experience entries saved yet.</p>
+              ) : (
+                safeExperienceEntries.map((entry) => (
+                  <button type="button" key={entry.id} className="service-card" onClick={() => onOpenExperience(entry.id)}>
+                    <span className="service-card-name">{entry.title || "Untitled Experience"}</span>
+                    <span className="service-card-username">{entry.organization || "No organization"}</span>
+                    <span className="service-card-username">{entry.entryType === "education" ? "Education" : "Work"}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="cards-scroll">
+              <div className="service-detail-header">
+                <h3>{isExperienceCreateMode ? "Add Experience Entry" : "Edit Experience Entry"}</h3>
+                <button type="button" className="setting-btn back-services-btn" onClick={onBackToExperience}>Back</button>
+              </div>
+              <div className="creds-field"><label htmlFor="experienceType">Entry Type</label><select id="experienceType" value={experienceForm.entryType} onChange={(e) => onExperienceFormChange("entryType", e.target.value)}><option value="work">Work</option><option value="education">Education</option></select></div>
+              <div className="creds-field"><label htmlFor="experienceTitle">{experienceForm.entryType === "education" ? "Degree / Program" : "Job Title"}</label><input id="experienceTitle" type="text" placeholder={experienceForm.entryType === "education" ? "B.S. Computer Science" : "Software Engineer"} value={experienceForm.title} onChange={(e) => onExperienceFormChange("title", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceOrg">{experienceForm.entryType === "education" ? "School / Institution" : "Company"}</label><input id="experienceOrg" type="text" placeholder={experienceForm.entryType === "education" ? "University of Central Florida" : "Google"} value={experienceForm.organization} onChange={(e) => onExperienceFormChange("organization", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceLocation">Location</label><input id="experienceLocation" type="text" placeholder="Orlando, FL" value={experienceForm.location} onChange={(e) => onExperienceFormChange("location", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceStartDate">Start Date</label><input id="experienceStartDate" type="month" value={experienceForm.startDate} onChange={(e) => onExperienceFormChange("startDate", e.target.value)} /></div>
+              <div className="creds-field"><label htmlFor="experienceEndDate">End Date</label><input id="experienceEndDate" type="month" value={experienceForm.endDate} disabled={experienceForm.isCurrent} onChange={(e) => onExperienceFormChange("endDate", e.target.value)} /></div>
+              <div className="creds-field creds-checkbox-row"><label htmlFor="experienceCurrent">Current</label><input id="experienceCurrent" type="checkbox" checked={experienceForm.isCurrent} onChange={(e) => onExperienceFormChange("isCurrent", e.target.checked)} /></div>
+              <div className="creds-field"><label htmlFor="experienceDescription">Description</label><textarea id="experienceDescription" className="creds-textarea" placeholder="Responsibilities, achievements, or relevant coursework..." value={experienceForm.description} onChange={(e) => onExperienceFormChange("description", e.target.value)} /></div>
+              <div className="service-detail-actions">
+                <button className="setting-btn" onClick={onSaveExperience}>{isExperienceCreateMode ? "Add Experience" : "Save Experience"}</button>
+                {!isExperienceCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeleteExperience}>Delete</button>)}
               </div>
             </div>
           )}
@@ -157,8 +209,11 @@ function UserCredentials({
         {showingServices && !isDetailView && (
           <button className="setting-btn credentials-add-btn" onClick={onCreateService}>Add New Credentials</button>
         )}
-        {!showingServices && !isPaymentDetailView && (
+        {showingPayments && !isPaymentDetailView && (
           <button className="setting-btn credentials-add-btn" onClick={onCreatePayment}>Add Payment Method</button>
+        )}
+        {activeCredentialsTab === "experience" && !isExperienceDetailView && (
+          <button className="setting-btn credentials-add-btn" onClick={onCreateExperience}>Add Experience Entry</button>
         )}
       </div>
     </div>
@@ -184,6 +239,17 @@ export default function Dashboard() {
     cvv: "",
     billingZip: "",
   };
+  const defaultExperienceForm = {
+    id: null,
+    entryType: "work",
+    title: "",
+    organization: "",
+    location: "",
+    startDate: "",
+    endDate: "",
+    isCurrent: false,
+    description: "",
+  };
   
   // ⬅ Stores the settings text
   const [conversations, setConversations] = useState([ { id: crypto.randomUUID(), title: "Browse 1", messages: [] }]);
@@ -193,7 +259,12 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [firstname, setFirstname] = useState("");
+  const [fullName, setFullName] = useState(localStorage.getItem("fullName") || "");
+
   const [input, setInput] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState(localStorage.getItem("phoneNumber") || "");
+  const [address, setAddress] = useState(localStorage.getItem("address") || "");
+  const [email, setEmail] = useState(localStorage.getItem("email") || "");
 
   // verify user values
   const [password, setPassword] = useState("");
@@ -218,12 +289,43 @@ export default function Dashboard() {
   const [currentRunSessionId, setCurrentRunSessionId] = useState(null);
   const currentRunSessionIdRef = useRef(null);
 
-  const [userCredentialsList, setUserCredentialsList] = useState(null);
-  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [userCredentialsList, setUserCredentialsList] = useState(() => {
+    const raw = localStorage.getItem("userCredentialsList");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [paymentMethods, setPaymentMethods] = useState(() => {
+    const raw = localStorage.getItem("userPaymentMethods");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [serviceForm, setServiceForm] = useState({ ...defaultServiceForm });
   const [serviceView, setServiceView] = useState({ mode: "list", selectedId: null });
   const [paymentForm, setPaymentForm] = useState({ ...defaultPaymentForm });
   const [paymentView, setPaymentView] = useState({ mode: "list", selectedId: null });
+  const [experienceEntries, setExperienceEntries] = useState(() => {
+    const raw = localStorage.getItem("userExperienceEntries");
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [experienceView, setExperienceView] = useState({ mode: "list", selectedId: null });
+  const [experienceForm, setExperienceForm] = useState(defaultExperienceForm);
+
 
   
   useEffect(() => {
@@ -260,7 +362,17 @@ export default function Dashboard() {
     );
   };
 
-  const startAgentSession = (chatId, prompt) => {
+  const buildAgentCredentialsPayload = () => ({
+    fullName: fullName || "",
+    address: address || "",
+    phoneNumber: phoneNumber || "",
+    email: email || "",
+    userCredentialsList: Array.isArray(userCredentialsList) ? userCredentialsList : [],
+    userPaymentMethods: Array.isArray(paymentMethods) ? paymentMethods : [],
+    userExperienceEntries: Array.isArray(experienceEntries) ? experienceEntries : [],
+  });
+
+  const startAgentSession = (chatId, prompt, userCredentials) => {
     const sessionId = crypto.randomUUID();
     setAgentSessionsByChat((prev) => ({
       ...prev,
@@ -272,6 +384,7 @@ export default function Dashboard() {
           logs: [],
           chatMessages: [],
           status: "running",
+          userCredentials,
         },
       ],
     }));
@@ -450,6 +563,12 @@ export default function Dashboard() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
+    // 🛑 STOP: Close any existing ghost connections first
+    if (socketRef.current) {
+      console.log("Closing existing socket...");
+      socketRef.current.close();
+    }
+
     const currentInput = input;
     setInput("");
     const selectedChatId = activeChatIdRef.current;
@@ -469,14 +588,35 @@ export default function Dashboard() {
       return;
     }
 
+    // Build fresh credentials at send time so the run always uses latest values.
+    const userCredentials = buildAgentCredentialsPayload();
+
     // 2. Agent is not running: start a new run session
-    const sessionId = startAgentSession(selectedChatId, currentInput);
+    const sessionId = startAgentSession(selectedChatId, currentInput, userCredentials);
 
     // 3. Start a read-only live video run
     if (socketRef.current) socketRef.current.close();
 
+    try {
+      const token = localStorage.getItem("token") || "";
+      await fetch("/api/users/store-credentials", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          credentials: userCredentials,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to store credentials for session:", err);
+    }
+
     const encodedPrompt = encodeURIComponent(currentInput);
-    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}`;
+    const encodedSessionId = encodeURIComponent(sessionId);
+    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}&session_id=${encodedSessionId}`;
     socketRef.current = new WebSocket(wsVideoUrl);
     
     setIsAgentRunning(true);
@@ -665,7 +805,9 @@ export default function Dashboard() {
   }
 
   const openServiceCard = (serviceId) => {
-    const credential = userCredentialsList.find((service) => service.id === serviceId);
+    const credential = (Array.isArray(userCredentialsList) ? userCredentialsList : []).find(
+      (service) => service.id === serviceId
+    );
     if (!credential) return;
     setServiceForm({
       id: credential.id,
@@ -708,15 +850,18 @@ export default function Dashboard() {
     };
 
     setUserCredentialsList((prev) => {
-      if (serviceView.mode === "create") return [...prev, payload];
-      return prev.map((service) => (service.id === payload.id ? payload : service));
+      const safePrev = Array.isArray(prev) ? prev : [];
+      if (serviceView.mode === "create") return [...safePrev, payload];
+      return safePrev.map((service) => (service.id === payload.id ? payload : service));
     });
     handleBackToServices();
   };
 
   const deleteServiceCredential = () => {
     if (!serviceView.selectedId) return;
-    setUserCredentialsList((prev) => prev.filter((service) => service.id !== serviceView.selectedId));
+    setUserCredentialsList((prev) =>
+      (Array.isArray(prev) ? prev : []).filter((service) => service.id !== serviceView.selectedId)
+    );
     handleBackToServices();
   };
 
@@ -791,13 +936,94 @@ export default function Dashboard() {
     handleBackToPayments();
   };
 
-  const handleSaveGeneralUserData = () => {
+  const createExperienceEntry = () => {
+    setExperienceView({ mode: "create", selectedId: null });
+    setExperienceForm({ ...defaultExperienceForm });
+  };
+
+  const openExperienceCard = (entryId) => {
+    const entry = experienceEntries.find((item) => item.id === entryId);
+    if (!entry) return;
+    setExperienceForm({
+      id: entry.id,
+      entryType: entry.entryType || "work",
+      title: entry.title || "",
+      organization: entry.organization || "",
+      location: entry.location || "",
+      startDate: entry.startDate || "",
+      endDate: entry.endDate || "",
+      isCurrent: Boolean(entry.isCurrent),
+      description: entry.description || "",
+    });
+    setExperienceView({ mode: "edit", selectedId: entryId });
+  };
+
+  const handleExperienceFormChange = (field, value) => {
+    setExperienceForm((prev) => {
+      if (field === "isCurrent" && value === true) {
+        return { ...prev, isCurrent: true, endDate: "" };
+      }
+      return { ...prev, [field]: value };
+    });
+  };
+
+  const handleBackToExperience = () => {
+    setExperienceView({ mode: "list", selectedId: null });
+    setExperienceForm({ ...defaultExperienceForm });
+  };
+
+  const saveExperienceEntry = () => {
+    if (!experienceForm.title.trim()) {
+      alert(experienceForm.entryType === "education" ? "Degree/program is required." : "Job title is required.");
+      return;
+    }
+    if (!experienceForm.organization.trim()) {
+      alert(experienceForm.entryType === "education" ? "School/institution is required." : "Company is required.");
+      return;
+    }
+    if (!experienceForm.startDate) {
+      alert("Start date is required.");
+      return;
+    }
+    if (!experienceForm.isCurrent && !experienceForm.endDate) {
+      alert("End date is required unless this is current.");
+      return;
+    }
+
+    const payload = {
+      id: experienceForm.id || crypto.randomUUID(),
+      entryType: experienceForm.entryType,
+      title: experienceForm.title.trim(),
+      organization: experienceForm.organization.trim(),
+      location: experienceForm.location.trim(),
+      startDate: experienceForm.startDate,
+      endDate: experienceForm.isCurrent ? "" : experienceForm.endDate,
+      isCurrent: Boolean(experienceForm.isCurrent),
+      description: experienceForm.description.trim(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setExperienceEntries((prev) => {
+      if (experienceView.mode === "create") return [...prev, payload];
+      return prev.map((entry) => (entry.id === payload.id ? payload : entry));
+    });
+    handleBackToExperience();
+  };
+
+  const deleteExperienceEntry = () => {
+    if (!experienceView.selectedId) return;
+    setExperienceEntries((prev) => prev.filter((entry) => entry.id !== experienceView.selectedId));
+    handleBackToExperience();
+  };
+
+  const handleSaveGeneralUserData = async () => {
     localStorage.setItem("fullName", fullName); // persistence
     localStorage.setItem("address", address); // persistence
     localStorage.setItem("phoneNumber", phoneNumber); // persistence
     localStorage.setItem("email", email); // persistence
     localStorage.setItem("userCredentialsList", JSON.stringify(userCredentialsList)); // persistence
     localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods)); // persistence
+    localStorage.setItem("userExperienceEntries", JSON.stringify(experienceEntries)); // persistence
 
     setShowUserCredentials(false)
   };
@@ -809,6 +1035,10 @@ export default function Dashboard() {
   useEffect(() => {
     localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods));
   }, [paymentMethods]);
+
+  useEffect(() => {
+    localStorage.setItem("userExperienceEntries", JSON.stringify(experienceEntries));
+  }, [experienceEntries]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -956,7 +1186,7 @@ export default function Dashboard() {
       {showSettings && (
         <div className="modal-overlay" >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close settings">✖</button>
+            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
             <h2 className="modal-title">Settings</h2>
 
             <label className="modal-label">Agent Prompt</label>
@@ -984,7 +1214,7 @@ export default function Dashboard() {
       {showUserCredentials && (
         <div className="modal-overlay">
           <div className="modal-content user-credentials-modal">
-            <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
+            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close user credentials">✖</button>
             <h2 className="modal-title">User Credentials</h2>
             <hr className="modal-title-divider"/>
 
@@ -1015,6 +1245,15 @@ export default function Dashboard() {
                 onSavePayment={savePaymentMethod}
                 onDeletePayment={deletePaymentMethod}
                 onBackToPayments={handleBackToPayments}
+                experienceEntries={experienceEntries}
+                experienceView={experienceView}
+                experienceForm={experienceForm}
+                onCreateExperience={createExperienceEntry}
+                onOpenExperience={openExperienceCard}
+                onExperienceFormChange={handleExperienceFormChange}
+                onSaveExperience={saveExperienceEntry}
+                onDeleteExperience={deleteExperienceEntry}
+                onBackToExperience={handleBackToExperience}
               />
               </div>
 

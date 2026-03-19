@@ -8,14 +8,13 @@ Runs the LangGraph workflow and communicates with the server via:
 """
 
 from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
-from dom_extraction import dom_extractor
 from execution import Action, dispatch_action, ActionArgs
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from agents.verifier import Verifier
 from main import build_workflow
-import asyncio
 import argparse
+import asyncio
 import json
 import sys
 import traceback
@@ -47,7 +46,7 @@ async def read_stdin_line() -> str:
 
 
 def print_event(node_name: str, state_update: dict):
-    """Pretty-print a single graph event (unchanged from original logging)."""
+    """Pretty-print a single graph event."""
     print(f"\n{'-' * 40}", flush=True)
     print(f"[NODE]: {node_name.upper()}", flush=True)
     print(f"{'-' * 40}", flush=True)
@@ -79,7 +78,7 @@ def print_event(node_name: str, state_update: dict):
         print(f"  Transactions Completed: {state_update['number_of_transactions']}", flush=True)
 
 
-async def main(prompt: str, video_port: int):
+async def main(prompt: str, video_port: int, credentials: dict | None = None):
     config = {
         "configurable": {"thread_id": "simulation_001"},
         "recursion_limit": 80,
@@ -106,6 +105,7 @@ async def main(prompt: str, video_port: int):
         "mission_failed": False,
         "abort_reason": None,
         "screenshot": None,
+        "user_credentials": credentials or {},
     }
 
     print("=" * 60, flush=True)
@@ -214,5 +214,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", type=str, required=True)
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--credentials_json", type=str, default="{}")
     args = parser.parse_args()
-    asyncio.run(main(args.prompt, args.port))
+    try:
+        credentials = json.loads(args.credentials_json) if args.credentials_json else {}
+    except json.JSONDecodeError:
+        credentials = {}
+
+    asyncio.run(main(args.prompt, args.port, credentials))

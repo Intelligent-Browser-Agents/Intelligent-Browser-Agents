@@ -28,7 +28,6 @@ from email.mime.multipart import MIMEMultipart
 
 # Random Password Generation
 import secrets
-
 from fastapi.middleware.cors import CORSMiddleware
 
 # start agent endpoint
@@ -37,6 +36,10 @@ import subprocess
 import threading
 
 import asyncio
+import json
+
+# credential storage 
+CREDENTIALS_BY_SESSION = {}
 
 # Windows requires ProactorEventLoop for asyncio subprocess support.
 if sys.platform == "win32":
@@ -108,10 +111,7 @@ async def lifespan(app: FastAPI):
         conn.close()
         print('Database connection closed.')
 
-    
-
 app = FastAPI(lifespan=lifespan)
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -135,7 +135,6 @@ def user_exists_id(userId: int) -> bool:
     cur.execute(query, (str(userId),))
     results = cur.fetchone()
     return results is not None
-
 
 def send_forgot_password(to_email: str, new_password: str) -> None:
     from_email = os.getenv('EMAIL_ACCOUNT')
@@ -161,7 +160,6 @@ def send_forgot_password(to_email: str, new_password: str) -> None:
         print(f"Password reset email sent to {to_email}")
     except Exception as e:
         print(f"Failed to send email: {e}")
-
 
 """
 User CRUD Endpoints
@@ -206,7 +204,6 @@ async def get_user(request: Request):
         error = f'No Users Found in Database'
         return {'error': error}
     
-
 @app.post('/api/users/insert/') # Insert New User 
 async def insert_user(request: Request):
     #incoming: username, firstname, lastname, email, password
@@ -474,7 +471,6 @@ Placeholder for Agent API Endpoints
 
 
 """ ===== EDWIN TEST ENDPOINTS ===== """
-
 # # todo: handle user input and start app.py on the user's hardware
 @app.post('/api/start_agent')
 async def start_agent(requests: Request): 
@@ -500,6 +496,20 @@ async def start_agent(requests: Request):
     )
 
     return {"STDOUT": result.stdout, "STDERR": result.stderr}
+
+# store credetials from this session
+@app.post('/api/users/store-credentials')
+async def store_credentials(request: Request): 
+    body = await request.json()
+    session_id = body.get("session_id")
+    credentials = body.get("credentials", {})
+
+    if not session_id: 
+        return {"ok": False, "error": "session_id is required."}
+
+    CREDENTIALS_BY_SESSION[session_id] = credentials
+    return {"ok": True, "error": ""}
+
 
 async def wait_for_port(port: int, timeout: float = 10.0):
     start_time = asyncio.get_event_loop().time()
@@ -550,6 +560,11 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
 
     query_params = websocket.query_params
     prompt = query_params.get("prompt", "Default Prompt")
+    session_id = query_params.get("session_id")
+    credentials = CREDENTIALS_BY_SESSION.pop(session_id, {}) if session_id else {}
+    credentials_json = json.dumps(credentials)
+    print(f"[STREAM] session_id={session_id} credentials={credentials}")
+
     print("Prompt Received in WebSocket Endpoint: ")
 
     port = await PORT_POOL.get()
@@ -564,7 +579,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     # 1. Launch Agent with stdin pipe for HITL replies
     def start_process():
         return subprocess.Popen(
-            [python_path, "src/app.py", "--port", str(port), "--prompt", prompt],
+            [python_path, "src/app.py", "--port", str(port), "--prompt", prompt, "--credentials_json", credentials_json],
             env=current_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -668,9 +683,6 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     reply_listener_task = asyncio.create_task(ws_reply_listener())
 
     # ── HITL-aware log consumer ──
-    # Detects @@HITL@@ lines and sends structured WebSocket messages.
-    # Also forwards every HITL message as a LOG line so existing
-    # frontends always display something.
     async def log_consumer():
         done_stdout, done_stderr = False, False
         while not (done_stdout and done_stderr):
@@ -703,7 +715,6 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                             "type": "RESPONSE",
                             "content": hitl_message,
                         })
-                        # Also forward as a LOG so existing frontends display it
                         await websocket.send_json({
                             "type": "LOG",
                             "source": "AGENT",
@@ -716,7 +727,6 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                             "message": hitl_message,
                             "requested_fields": hitl_payload.get("requested_fields", []),
                         })
-                        # Also forward as a LOG so existing frontends display it
                         await websocket.send_json({
                             "type": "LOG",
                             "source": "AGENT",
@@ -829,6 +839,10 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
 
         if process.returncode is None:
             process.terminate()
+            if sys.platform == "win32":
+                await asyncio.to_thread(process.wait)
+            else:
+                await process.wait()
         await PORT_POOL.put(port)
 
 from typing import List
@@ -874,7 +888,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: int):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         await manager.broadcast(f"Client #{client_id} left the chat")
-
 
 # todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)
 @app.get('/send_logs')
