@@ -326,7 +326,7 @@ export default function Dashboard() {
 
 
   const buildWebSocketUrl = (path, queryParams = {}) => {
-    const protocol = "ws";
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const baseUrl = `${protocol}://${window.location.host}`;
     const url = new URL(path, baseUrl);
 
