@@ -113,9 +113,6 @@ pygetwindow==0.0.9
 pyjwt==2.12.1
 pympler==1.1
 pymsgbox==2.0.1
-pyobjc-core==12.1
-pyobjc-framework-cocoa==12.1
-pyobjc-framework-quartz==12.1
 pyopenssl==25.3.0
 pyperclip==1.11.0
 pypika==0.51.1
