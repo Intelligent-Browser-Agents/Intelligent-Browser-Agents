@@ -11,6 +11,12 @@ export default defineConfig({
         target: 'http://localhost:8000', // The URL of your backend server
         changeOrigin: true, // Changes the origin header to the target host
         //rewrite: (path) => path.replace(/^\/api/, '') 
+      },
+      // Proxy websocket requests in dev so frontend can connect via same-origin
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true,
       }
     }
   }

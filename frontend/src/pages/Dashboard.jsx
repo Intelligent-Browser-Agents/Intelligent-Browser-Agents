@@ -325,6 +325,20 @@ export default function Dashboard() {
   const [experienceForm, setExperienceForm] = useState(defaultExperienceForm);
 
 
+  const buildWebSocketUrl = (path, queryParams = {}) => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const baseUrl = `${protocol}://${window.location.host}`;
+    const url = new URL(path, baseUrl);
+
+    Object.entries(queryParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        url.searchParams.set(key, String(value));
+      }
+    });
+
+    return url.toString();
+  };
+
   
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -507,8 +521,9 @@ export default function Dashboard() {
     // 3. Start a read-only live video run
     if (socketRef.current) socketRef.current.close();
 
-    const encodedPrompt = encodeURIComponent(currentInput);
-    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}`;
+    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${selectedChatId}`, {
+      prompt: currentInput,
+    });
     socketRef.current = new WebSocket(wsVideoUrl);
     
     setIsAgentRunning(true);
@@ -589,7 +604,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const token = localStorage.getItem('token') || '';
-    const wsChatUrl = `ws://localhost:8000/ws/chat/1?token=${encodeURIComponent(token)}`;
+    const wsChatUrl = buildWebSocketUrl('/ws/chat/1', { token });
     const chatSocket = new WebSocket(wsChatUrl);
     chatSocketRef.current = chatSocket;
 
