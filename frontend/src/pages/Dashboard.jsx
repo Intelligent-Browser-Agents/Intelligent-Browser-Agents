@@ -563,12 +563,6 @@ export default function Dashboard() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    // 🛑 STOP: Close any existing ghost connections first
-    if (socketRef.current) {
-      console.log("Closing existing socket...");
-      socketRef.current.close();
-    }
-
     const currentInput = input;
     setInput("");
     const selectedChatId = activeChatIdRef.current;
@@ -586,6 +580,12 @@ export default function Dashboard() {
         sendThroughChatSocket(currentInput);
       }
       return;
+    }
+
+    // Agent is NOT running: close any existing ghost stream connection first
+    if (socketRef.current) {
+      console.log("Closing existing socket...");
+      socketRef.current.close();
     }
 
     // Build fresh credentials at send time so the run always uses latest values.
