@@ -638,16 +638,28 @@ export default function Dashboard() {
       console.error("Failed to store credentials for session:", err);
     }
 
-    const token = localStorage.getItem('token');
-    const response = await fetch('/api/users/', {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      }
-    });
 
-    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${chatIdToStableInt(selectedChatId)}`, {
+/*
+
+    
+    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}&session_id=${encodedSessionId}`;
+*/
+    // const token = localStorage.getItem('token');
+    // const response = await fetch('/api/users/', {
+    //   method: 'GET',
+    //   headers: {
+    //     'Content-Type': 'application/json',
+    //     'Authorization': `Bearer ${token}`,
+    //   }
+    // });
+
+    // const data = response.data;
+    // setFirstname(data.firstname);
+
+    const encodedPrompt = encodeURIComponent(currentInput);
+    const encodedSessionId = encodeURIComponent(sessionId);
+    
+    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${chatIdToStableInt(selectedChatId)}?prompt=${encodedPrompt}&session_id=${encodedSessionId}`, {
       prompt: currentInput,
     });
     socketRef.current = new WebSocket(wsVideoUrl);

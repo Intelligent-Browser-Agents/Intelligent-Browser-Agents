@@ -32,6 +32,8 @@ Verifier.reset_simulation()
 
 HITL_PREFIX = "@@HITL@@"
 
+# if sys.platform == 'win32':
+#     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 def send_hitl(payload: dict):
     """Send a structured HITL message to the server over stdout."""
