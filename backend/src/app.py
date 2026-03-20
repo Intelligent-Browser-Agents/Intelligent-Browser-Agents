@@ -120,7 +120,7 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
     async with async_playwright() as p:
         print(f"Launching browser on port {video_port}...", flush=True)
         browser = await p.chromium.launch(
-            headless=False, args=[f"--remote-debugging-port={video_port}"]
+            headless=True, args=[f"--remote-debugging-port={video_port}"]
         )
         print(f"Browser launched on port {video_port}. Waiting for frontend connection...", flush=True)
         context = await browser.new_context()
