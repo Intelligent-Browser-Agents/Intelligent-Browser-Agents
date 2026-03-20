@@ -34,6 +34,23 @@ class OrchestratorPlan(BaseModel):
     )
 
 
+class OrchestratorDecision(BaseModel):
+    """
+    Schema for the Orchestration Agent's reasoning-and-action output.
+    Used after each execution/verification to decide: advance, retry, or plan_complete.
+    """
+    reasoning: str = Field(
+        default="",
+        description="1-3 sentences explaining why this action was chosen.",
+        validation_alias=AliasChoices("reasoning", "Reasoning", "reason", "explanation", "rationale"),
+    )
+    action: Literal["advance", "retry", "plan_complete"] = Field(
+        default="retry",
+        description="Next action: advance to next step, retry current step, or mark plan complete.",
+        validation_alias=AliasChoices("action", "Action", "next_action"),
+    )
+
+
 # =============================================================================
 # EXECUTION LAYER
 # Aligned with: prompts/execution.prompt.md
@@ -53,10 +70,11 @@ class ExecutionArgs(BaseModel):
     direction: Optional[Literal["up", "down"]] = Field(default=None, description="Scroll direction.")
     key: Optional[str] = Field(default=None, description="Key to press (e.g., 'Enter', 'Escape').")
     seconds: Optional[float] = Field(default=None, description="Duration for wait actions.")
+    max_chars: Optional[int] = Field(default=15000, description="Max characters for extract_content.")
 
 
 class ExecutionResult(BaseModel):
-    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait"]
+    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait", "extract_content"]
     args: ExecutionArgs
     status: Literal["success", "failure"]
     error_type: Literal[
@@ -75,6 +93,7 @@ class ExecutionResult(BaseModel):
             "scroll": ["direction"],
             "press_key": ["key"],
             "wait": ["seconds"],
+            "extract_content": [],
         }
 
         if self.status == "success":
@@ -156,7 +175,7 @@ class FallbackStrategy(BaseModel):
     Schema for the Fallback Agent's recovery output.
     Diagnoses failures and proposes revised instructions.
     """
-    update_type: Literal["revise_step", "insert_step_before", "request_context", "abort"] = Field(
+    update_type: Literal["revise_step", "insert_step_before", "request_context", "request_human_action", "abort"] = Field(
         description="The type of plan modification needed."
     )
     diagnosis: str = Field(

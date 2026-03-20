@@ -164,9 +164,18 @@ class Models:
     
     @staticmethod
     def executor(schema: Type[BaseModel]):
-        """Model for translating tasks to browser actions."""
+        """Model for translating tasks to browser actions (structured output)."""
         return get_llm(
-            schema=schema, 
+            schema=schema,
+            temperature=TEMPERATURES["executor"],
+            model_key=AGENT_MODELS["executor"]
+        )
+
+    @staticmethod
+    def executor_chat():
+        """Raw chat model for executor when using LangChain tool calls (no structured output)."""
+        return get_llm(
+            schema=None,
             temperature=TEMPERATURES["executor"],
             model_key=AGENT_MODELS["executor"]
         )

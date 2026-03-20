@@ -1,28 +1,31 @@
 """
 Fallback Agent
-Creates deterministic recovery instructions from real execution failures.
+Uses an LLM to diagnose failures and propose a revised step or recovery.
 """
 
-import re
+from langchain_core.messages import SystemMessage, HumanMessage
 
 from state import ProjectState
+from schema import FallbackStrategy
+from models import Models
+from prompt_loader import get_fallback_prompt
 
 
 class Fallback:
     """
-    Deterministic fallback to avoid hallucinated recovery plans.
-
-    It rewrites the current task based on actual executor/verifier logs.
+    LLM-based fallback: given the failed step and execution/verification logs,
+    the model decides how to recover (revise step, insert step, request context, or abort).
     """
 
     def __init__(self):
-        # Compatibility constructor
-        pass
+        self.llm = Models.fallback(FallbackStrategy)
+        self.prompt = get_fallback_prompt()
 
     def __call__(self, state: ProjectState) -> dict:
         current_task = state.get("current_task", "Unknown task")
         reasoning_log = state.get("reasoning_log", [])
         user_intent = self._get_user_intent(state)
+        current_url = state.get("current_url", "")
 
         last_verification = self._find_latest_log(reasoning_log, "[Verifier]") or "Verification failed."
         last_execution = (
@@ -31,165 +34,70 @@ class Fallback:
             or "No execution log."
         )
 
-        revised_task, diagnosis = self._revise_task(current_task, user_intent, last_execution)
+        context = f"""
+MAIN_GOAL: {user_intent}
 
-        fallback_log = (
-            "[Fallback] Update Type: revise_step\n"
-            f"[Fallback] Diagnosis: {diagnosis}\n"
-            f"[Fallback] Message to Orchestration: Retry the current step with a grounded instruction.\n"
-            f"[Fallback] Proposed Step: {revised_task}\n"
-            f"[Fallback] Last Verification: {last_verification[:180]}"
-        )
+PLAN_STEP (failed): {current_task}
 
-        return {
+VERIFICATION_OUTPUT:
+{last_verification[:500]}
+
+EXECUTION_OUTPUT:
+{last_execution[:500]}
+
+CURRENT_URL: {current_url}
+
+Diagnose the failure and propose a recovery. Use update_type: revise_step with proposed_step for a single revised instruction; use insert_step_before with insert_step to add a prerequisite; use request_context if user input is needed; use abort only if the goal cannot be continued.
+"""
+
+        messages = [
+            SystemMessage(content=self.prompt),
+            HumanMessage(content=context.strip()),
+        ]
+
+        err = None
+        try:
+            strategy: FallbackStrategy = self.llm.invoke(messages)
+        except Exception as e:
+            err = e
+            strategy = None
+
+        if strategy is None:
+            revised_task = current_task
+            fallback_log = (
+                "[Fallback] LLM failed; retrying same step.\n"
+                f"[Fallback] Error: {err}\n"
+                f"[Fallback] Message to Orchestration: Retry the current step."
+            )
+            needs_human = False
+        else:
+            revised_task = (
+                (strategy.proposed_step or "").strip()
+                or (strategy.insert_step or "").strip()
+                or current_task
+            )
+            needs_human = strategy.update_type == "request_human_action"
+            fallback_log = (
+                f"[Fallback] Update Type: {strategy.update_type}\n"
+                f"[Fallback] Diagnosis: {strategy.diagnosis}\n"
+                f"[Fallback] Message to Orchestration: {strategy.message_to_orchestration}\n"
+                f"[Fallback] Proposed Step: {revised_task}\n"
+                f"[Fallback] Last Verification: {last_verification[:180]}"
+            )
+
+        out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_task": revised_task,
             "reasoning_log": [fallback_log],
             "needs_fallback": False,
         }
-
-    def _revise_task(self, current_task: str, user_intent: str, last_execution: str) -> tuple[str, str]:
-        text = last_execution.lower()
-        task = (current_task or "").strip()
-        intent = (user_intent or "").lower()
-
-        if "missing required args for click" in text:
-            query = self._infer_query(task, user_intent)
-            if query:
-                return (
-                    f"Search DuckDuckGo for '{query}' using a single search action.",
-                    f"Click target args were missing. Reframed step to a direct DuckDuckGo search for '{query}'.",
-                )
-            return (
-                "Identify a visible clickable target and include both role and name before clicking.",
-                "Click target args were missing. Required role/name was not grounded.",
-            )
-
-        if "missing required args for search: text" in text:
-            query = self._infer_query(task, user_intent)
-            if query:
-                return (
-                    f"Search DuckDuckGo for '{query}' using a single search action.",
-                    f"Search query text was missing. Reframed step with explicit query '{query}'.",
-                )
-
-            derived_query = self._clean_inferred_query(task)
-            if derived_query:
-                return (
-                    f"Search DuckDuckGo for '{derived_query}' using a single search action.",
-                    "Search action was missing text; derived query from current task text.",
-                )
-
-            return (
-                "Search DuckDuckGo using an explicit query copied from the user request.",
-                "Search action was missing text and no reliable query could be inferred without fabricating one.",
-            )
-
-        if "captcha" in text or "unusual traffic" in text or "sorry" in text:
-            query = self._infer_query(task, user_intent)
-            if query:
-                return (
-                    f"Navigate to https://duckduckgo.com and search for '{query}'.",
-                    "Encountered anti-bot challenge. Switching to DuckDuckGo for recovery.",
-                )
-            return (
-                "Navigate to https://duckduckgo.com and continue the search there.",
-                "Encountered anti-bot challenge. Switching search engine.",
-            )
-
-        if "missing or invalid url for navigate" in text:
-            return (
-                task,
-                "Navigate URL was invalid or not grounded in the current step. Retrying with stricter URL extraction.",
-            )
-
-        if "requires non-empty 'text'" in text or "requires a text argument" in text or "search text" in text:
-            query = self._infer_query(task, user_intent)
-            if query:
-                return (
-                    f"Enter '{query}' in the search box and submit the search.",
-                    f"Search text was missing. Inferred query '{query}' from task/user intent.",
-                )
-            return (
-                "Enter the intended query into the search box and submit the search.",
-                "Search text was missing and could not be inferred confidently.",
-            )
-
-        if "click action requires" in text or "could not find element to click" in text or "missing click target" in text:
-            if "search" in task.lower() or "search" in intent:
-                return (
-                    "Use a direct search action on DuckDuckGo with the intended query.",
-                    "Click target was missing; selected explicit search textbox target.",
-                )
-            return (
-                f"Locate and click the exact UI control required for this step: {task}",
-                "Click target was missing; rewrote task to require explicit target resolution.",
-            )
-
-        if "navigation" in text and "failed" in text:
-            return (
-                task,
-                "Navigation failed due to transient page/network issue. Retrying same step.",
-            )
-
-        return (
-            task,
-            "Step failed without a precise error pattern. Retrying the same step with current context.",
-        )
-
-    def _infer_query(self, task: str, user_intent: str) -> str:
-        for source in [task, user_intent]:
-            if not source:
-                continue
-            single = re.search(r"'([^']+)'", source)
-            if single and single.group(1).strip():
-                return self._clean_inferred_query(single.group(1))
-            double = re.search(r'"([^"]+)"', source)
-            if double and double.group(1).strip():
-                return self._clean_inferred_query(double.group(1))
-
-            patterns = [
-                r"search(?:\s+(?:google|duckduckgo|bing))?(?:\s+for)?\s+([a-z0-9][a-z0-9\s\-_]{1,120})",
-                r"look\s+up\s+([a-z0-9][a-z0-9\s\-_]{1,120})",
-                r"(?:find|locate)\s+(?:information|info|details)\s+(?:about|on)\s+([a-z0-9][a-z0-9\s\-_]{1,120})",
-                r"(?:information|info|details)\s+(?:about|on)\s+([a-z0-9][a-z0-9\s\-_]{1,120})",
-                r"director\s+of\s+([a-z0-9][a-z0-9\s\-_]{1,120})",
-            ]
-            lowered = source.lower()
-            for pattern in patterns:
-                inferred = re.search(pattern, lowered)
-                if inferred and inferred.group(1).strip():
-                    candidate = inferred.group(1).strip()
-                    if pattern.startswith("director"):
-                        candidate = f"director of {candidate}"
-                    cleaned = self._clean_inferred_query(candidate)
-                    if cleaned:
-                        return cleaned
-        return ""
-
-    def _clean_inferred_query(self, text: str) -> str:
-        candidate = (text or "").strip(" .,:;!?")
-        if not candidate:
-            return ""
-
-        stop_markers = [
-            " and present",
-            " from the search results",
-            " from search results",
-            " and summarize",
-            " then ",
-            " using ",
-        ]
-        lowered = candidate.lower()
-        for marker in stop_markers:
-            idx = lowered.find(marker)
-            if idx > 0:
-                candidate = candidate[:idx].strip(" .,:;!?")
-                lowered = candidate.lower()
-
-        candidate = re.sub(r"^(google|duckduckgo|bing)\s+for\s+", "", candidate, flags=re.IGNORECASE)
-        candidate = re.sub(r"^(for)\s+", "", candidate, flags=re.IGNORECASE)
-        return candidate.strip(" .,:;!?")
+        if needs_human:
+            out["handoff_interaction"] = True
+            # Reset step_attempts so that human-in-the-loop pauses do not trigger
+            # the orchestrator safety stop immediately after the user completes
+            # the required action.
+            out["step_attempts"] = 0
+        return out
 
     def _find_latest_log(self, reasoning_log: list, prefix: str) -> str:
         for entry in reversed(reasoning_log or []):

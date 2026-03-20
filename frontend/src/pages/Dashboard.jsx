@@ -276,9 +276,11 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const activeChatIdRef = useRef(activeChatId);
 
-  //Store llive frames
+  //Store live frames
   const [liveFrame, setLiveFrame] = useState(null);
   const socketRef = useRef(null);
+  const [isHITL, setIsHITL] = useState(false);
+  const browserImgRef = useRef(null);
 
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const isAgentRunningRef = useRef(false);
@@ -384,7 +386,17 @@ export default function Dashboard() {
     );
   };
 
-  const startAgentSession = (chatId, prompt) => {
+  const buildAgentCredentialsPayload = () => ({
+    fullName: fullName || "",
+    address: address || "",
+    phoneNumber: phoneNumber || "",
+    email: email || "",
+    userCredentialsList: Array.isArray(userCredentialsList) ? userCredentialsList : [],
+    userPaymentMethods: Array.isArray(paymentMethods) ? paymentMethods : [],
+    userExperienceEntries: Array.isArray(experienceEntries) ? experienceEntries : [],
+  });
+
+  const startAgentSession = (chatId, prompt, userCredentials) => {
     const sessionId = crypto.randomUUID();
     setAgentSessionsByChat((prev) => ({
       ...prev,
@@ -396,6 +408,7 @@ export default function Dashboard() {
           logs: [],
           chatMessages: [],
           status: "running",
+          userCredentials,
         },
       ],
     }));
@@ -436,6 +449,75 @@ export default function Dashboard() {
           : session
       ),
     }));
+  };
+
+  const sendBrowserInput = (payload) => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "INPUT", ...payload }));
+    }
+  };
+
+  const handleBrowserClick = (e) => {
+    const img = browserImgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const scaleX = 1280 / rect.width;
+    const scaleY = 720 / rect.height;
+    const x = Math.round((e.clientX - rect.left) * scaleX);
+    const y = Math.round((e.clientY - rect.top) * scaleY);
+    sendBrowserInput({ inputType: "mouse", action: "mousePressed", x, y, button: "left", clickCount: 1 });
+    sendBrowserInput({ inputType: "mouse", action: "mouseReleased", x, y, button: "left", clickCount: 1 });
+  };
+
+  const handleBrowserKeyDown = (e) => {
+    e.preventDefault();
+    const isPrintable = e.key.length === 1;
+    sendBrowserInput({
+      inputType: "key",
+      action: isPrintable ? "keyDown" : "rawKeyDown",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+      modifiers:
+        (e.altKey ? 1 : 0) |
+        (e.ctrlKey ? 2 : 0) |
+        (e.metaKey ? 4 : 0) |
+        (e.shiftKey ? 8 : 0),
+    });
+    if (isPrintable) {
+      sendBrowserInput({
+        inputType: "key",
+        action: "char",
+        key: e.key,
+        code: e.code,
+        keyCode: e.key.charCodeAt(0),
+        text: e.key,
+        unmodifiedText: e.key,
+      });
+    }
+  };
+
+  const handleBrowserKeyUp = (e) => {
+    e.preventDefault();
+    sendBrowserInput({
+      inputType: "key",
+      action: "keyUp",
+      key: e.key,
+      code: e.code,
+      keyCode: e.keyCode,
+    });
+  };
+
+  const handleBrowserScroll = (e) => {
+    const img = browserImgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const scaleX = 1280 / rect.width;
+    const scaleY = 720 / rect.height;
+    const x = Math.round((e.clientX - rect.left) * scaleX);
+    const y = Math.round((e.clientY - rect.top) * scaleY);
+    sendBrowserInput({ inputType: "scroll", x, y, deltaX: e.deltaX, deltaY: e.deltaY });
   };
 
   const sendThroughChatSocket = (text) => {
@@ -505,31 +587,56 @@ export default function Dashboard() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    // 🛑 STOP: Close any existing ghost connections first
-    if (socketRef.current) {
-      console.log("Closing existing socket...");
-      socketRef.current.close();
-    }
-
     const currentInput = input;
     setInput("");
     const selectedChatId = activeChatIdRef.current;
 
-    // 1. While agent is running, route future chats to current run session
+    // 1. While agent is running, send reply through the stream WebSocket (HITL)
     if (isAgentRunning) {
       const runningSessionId = currentRunSessionIdRef.current;
       if (runningSessionId) {
         appendSessionChatMessage(selectedChatId, runningSessionId, currentInput, true);
       }
-      sendThroughChatSocket(currentInput);
+      const streamSocket = socketRef.current;
+      if (streamSocket && streamSocket.readyState === WebSocket.OPEN) {
+        streamSocket.send(JSON.stringify({ content: currentInput }));
+      } else {
+        sendThroughChatSocket(currentInput);
+      }
       return;
     }
 
+    // Agent is NOT running: close any existing ghost stream connection first
+    if (socketRef.current) {
+      console.log("Closing existing socket...");
+      socketRef.current.close();
+    }
+
+    // Build fresh credentials at send time so the run always uses latest values.
+    const userCredentials = buildAgentCredentialsPayload();
+
     // 2. Agent is not running: start a new run session
-    const sessionId = startAgentSession(selectedChatId, currentInput);
+    const sessionId = startAgentSession(selectedChatId, currentInput, userCredentials);
 
     // 3. Start a read-only live video run
     if (socketRef.current) socketRef.current.close();
+
+    try {
+      const token = localStorage.getItem("token") || "";
+      await fetch("/api/users/store-credentials", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          credentials: userCredentials,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to store credentials for session:", err);
+    }
 
     const token = localStorage.getItem('token');
     const response = await fetch('/api/users/', {
@@ -557,11 +664,24 @@ export default function Dashboard() {
         appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
+        if (msg.content && msg.content.includes("[NODE]: __INTERRUPT__")) {
+          setIsHITL(true);
+        }
+        if (msg.content && msg.source === "STDOUT" && msg.content.includes("[NODE]: ORCHESTRATOR")) {
+          setIsHITL(false);
+        }
+      } else if (msg.type === "CLARIFICATION") {
+        setIsHITL(true);
+        appendSessionChatMessage(selectedChatId, sessionId, msg.message, false);
+      } else if (msg.type === "RESPONSE") {
+        setIsHITL(false);
+        appendSessionChatMessage(selectedChatId, sessionId, msg.content, false);
       }
     };
 
     socketRef.current.onclose = () => {
-      setLiveFrame(null); // Clear video when finished
+      setLiveFrame(null);
+      setIsHITL(false);
       appendAgentLogLine(selectedChatId, sessionId, "STATUS: Agent finished task.");
       markSessionFinished(selectedChatId, sessionId);
       setIsAgentRunning(false);
@@ -929,7 +1049,7 @@ export default function Dashboard() {
     handleBackToExperience();
   };
 
-  const handleSaveGeneralUserData = () => {
+  const handleSaveGeneralUserData = async () => {
     localStorage.setItem("fullName", fullName); // persistence
     localStorage.setItem("address", address); // persistence
     localStorage.setItem("phoneNumber", phoneNumber); // persistence
@@ -1044,11 +1164,29 @@ export default function Dashboard() {
             )}
 
             {session.status === "running" && liveFrame && session.id === currentRunSessionId && (
-          <div className="live-browser-container">
-            <div className="browser-header">Live Agent View</div>
-            <img src={liveFrame} alt="Browser Stream" className="browser-frame" />
-          </div>
-        )}
+              <div className="live-browser-container">
+                <div className="browser-header">
+                  {isHITL ? "Live Browser — You can interact" : "Live Agent View"}
+                </div>
+                {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+                <div
+                  className={`browser-frame-wrapper${isHITL ? " browser-interactive" : ""}`}
+                  tabIndex={isHITL ? 0 : -1}
+                  onClick={isHITL ? handleBrowserClick : undefined}
+                  onKeyDown={isHITL ? handleBrowserKeyDown : undefined}
+                  onKeyUp={isHITL ? handleBrowserKeyUp : undefined}
+                  onWheel={isHITL ? handleBrowserScroll : undefined}
+                >
+                  <img
+                    ref={browserImgRef}
+                    src={liveFrame}
+                    alt="Browser Stream"
+                    className="browser-frame"
+                    draggable={false}
+                  />
+                </div>
+              </div>
+            )}
 
             {session.chatMessages.length > 0 && (
               <div className="chat-socket-lane">
@@ -1081,7 +1219,7 @@ export default function Dashboard() {
       {showSettings && (
         <div className="modal-overlay" >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close settings">✖</button>
+            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
             <h2 className="modal-title">Settings</h2>
 
             <label className="modal-label">Agent Prompt</label>
@@ -1109,7 +1247,7 @@ export default function Dashboard() {
       {showUserCredentials && (
         <div className="modal-overlay">
           <div className="modal-content user-credentials-modal">
-            <button className="modal-close" onClick={() => setShowUserCredentials(false)} aria-label="Close user credentials">✖</button>
+            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close user credentials">✖</button>
             <h2 className="modal-title">User Credentials</h2>
             <hr className="modal-title-divider"/>
 

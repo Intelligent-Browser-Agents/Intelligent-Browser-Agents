@@ -24,12 +24,13 @@ class ActionArgs(BaseModel):
     direction: Optional[Literal["up", "down"]] = None
     key: Optional[str] = None
     seconds: Optional[float] = None
+    max_chars: Optional[int] = 15000
 
 
 class Action(BaseModel):
     """Validated action specification from LLM translator."""
 
-    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait"]
+    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait", "extract_content"]
     args: ActionArgs
 
 
@@ -87,4 +88,8 @@ class ExecutionOutput(BaseModel):
     execution_time_ms: int = Field(
         ...,
         description="Time taken to execute the action in milliseconds"
+    )
+    extracted_text: Optional[str] = Field(
+        default=None,
+        description="When action is extract_content, the main text extracted from the page"
     )

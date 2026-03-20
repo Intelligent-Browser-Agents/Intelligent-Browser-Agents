@@ -1,6 +1,7 @@
 """
 Execution Agent
 Translates high-level plan steps into specific browser actions.
+Uses LangChain tool calls when possible; falls back to structured output.
 """
 
 import re
@@ -8,42 +9,56 @@ from typing import Any
 from urllib.parse import urlparse
 
 from execution import Action, dispatch_action, ActionArgs
-from langchain_core.messages import SystemMessage, HumanMessage
+from execution.handlers import handle_extract_content
+from execution.langchain_tools import get_browser_tools
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from schema import ExecutionResult
 from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt
+from dom_extraction import dom_extractor
 
 
 class Executor:
     """
     LLM-powered Executor that translates plan steps into browser actions.
-    Uses the execution prompt from the prompts directory.
+    Uses LangChain tools (bind_tools) when possible; falls back to structured output.
     """
     
-    # sets up agent's llm and prompt to be used
     def __init__(self, runtime):
-        self.llm = Models.executor(ExecutionResult)
-        # Load the execution prompt from the prompts directory
+        self.llm_structured = Models.executor(ExecutionResult)
+        self.llm_chat = Models.executor_chat()
         self.system_prompt = get_execution_prompt()
         self.runtime = runtime
 
+    _EXTRACT_PATTERNS = re.compile(
+        r"\bextract\b|\bsummariz|\bretrieve\b|\bcollect\b|\bgather\b|\bpresent\b"
+        r"|\bdisplay\b.{0,30}\b(?:information|schedule|data|content|details|results)",
+        re.IGNORECASE,
+    )
 
     async def __call__(self, state: ProjectState) -> dict:
-        
-        # get page instance for executor to use
         page = self.runtime.get("page")
-        if page is None: 
+        if page is None:
             raise RuntimeError("[ERROR]: Executor called without a Playwright page!")
         
-        # initialize status values
         current_task = state.get("current_task", "No task specified")
         current_url = state.get("current_url", "unknown")
         user_intent = self._get_user_intent(state)
-        dom_snapshot = self._get_simulated_dom(current_url, current_task)
+
+        # --- Deterministic short-circuit: extraction/presentation steps ---
+        if self._EXTRACT_PATTERNS.search(current_task):
+            result = await handle_extract_content(page, max_chars=15000)
+            print(f"[executor - {result.action} result]: ", result)
+            return await self._finish_from_result(state, page, current_url, result)
+
+        # --- Normal LLM-driven path ---
+
+        dom_snapshot = await self._get_real_dom_snapshot(page)
         plan_step_url = self._extract_first_url(current_task) or "none"
-        
-        # Build the context following the prompt's expected inputs
+        credentials_block = self._build_credentials_context(state, current_task, current_url)
+        recent_actions_block = self._build_recent_actions(state)
+
         context = f"""
         MAIN_GOAL: {user_intent}
 
@@ -55,88 +70,147 @@ class Executor:
 
         DOM_SNAPSHOT:
         {dom_snapshot}
+        {credentials_block}
+        {recent_actions_block}
 
-        ALLOWED_TOOLS: navigate, click, type, search, scroll, press_key, wait
-        SEARCH_ENGINE_PREFERENCE: duckduckgo.com first, then bing.com; use google.com only when explicitly required.
-
-        Translate this plan step into a specific browser action.
+        Use exactly one of the available tools to perform this plan step. Prefer duckduckgo.com or bing.com over google.com unless explicitly required.
         """
 
         messages = [
             SystemMessage(content=self.system_prompt),
-            HumanMessage(content=context)
+            HumanMessage(content=context),
         ]
 
+        # Prefer LangChain tool-calling path
+        tools = get_browser_tools(page)
+        llm_with_tools = self.llm_chat.bind_tools(tools)
+        tool_map = {t.name: t for t in tools}
+
         try:
-            action: ExecutionResult = self.llm.invoke(messages)
+            response = await llm_with_tools.ainvoke(messages)
         except Exception as e:
-            execution_log = self._build_execution_log(
-                action="none",
-                args={},
-                status="failure",
-                message=f"Executor output validation failed: {str(e)}",
+            return self._return_failure(
+                state, current_url,
+                action="none", args={},
+                message=f"Executor LLM failed: {str(e)}",
                 error_type="unknown",
             )
-            return {
-                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-                "reasoning_log": [execution_log],
-                "current_url": current_url,
-            }
-        
-        validated_action = self._validate_and_normalize_action(
-            action=action,
-            current_task=current_task,
-            dom_snapshot=dom_snapshot,
-            user_intent=user_intent,
-        )
-        if validated_action.status == "failure":
-            execution_log = self._build_execution_log(
-                action=validated_action.action,
-                args=self._action_args_to_dict(validated_action.args),
-                status=validated_action.status,
-                message=validated_action.message,
-                error_type=validated_action.error_type,
+
+        if isinstance(response, AIMessage) and getattr(response, "tool_calls", None):
+            tc = response.tool_calls[0]
+            name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+            args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {}) or {}
+            if not name or name not in tool_map:
+                return self._return_failure(
+                    state, current_url,
+                    action=name or "unknown", args=args,
+                    message="Model returned invalid or unknown tool call.",
+                    error_type="unknown",
+                )
+            try:
+                result = await tool_map[name].ainvoke(args)
+            except Exception as e:
+                return self._return_failure(
+                    state, current_url,
+                    action=name, args=args,
+                    message=str(e),
+                    error_type="unknown",
+                )
+            # result is ExecutionOutput from handlers
+            return await self._finish_from_result(state, page, current_url, result)
+        else:
+            # Fallback: structured output (no tool_calls)
+            try:
+                action: ExecutionResult = self.llm_structured.invoke(messages)
+            except Exception as e:
+                return self._return_failure(
+                    state, current_url,
+                    action="none", args={},
+                    message=f"Executor output validation failed: {str(e)}",
+                    error_type="unknown",
+                )
+            validated = self._validate_and_normalize_action(
+                action=action,
+                current_task=current_task,
+                dom_snapshot=dom_snapshot,
+                user_intent=user_intent,
             )
-            return {
-                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-                "reasoning_log": [execution_log],
-                "current_url": current_url,
-            }
+            if validated.status == "failure":
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "reasoning_log": [self._build_execution_log(
+                        action=validated.action,
+                        args=self._action_args_to_dict(validated.args),
+                        status=validated.status,
+                        message=validated.message,
+                        error_type=validated.error_type,
+                    )],
+                    "current_url": current_url,
+                }
+            tool_action = Action(
+                action=validated.action,
+                args=ActionArgs(
+                    url=validated.args.url,
+                    role=validated.args.role,
+                    name=validated.args.name,
+                    text=validated.args.text,
+                    direction=validated.args.direction,
+                    key=validated.args.key,
+                    seconds=validated.args.seconds,
+                    max_chars=getattr(validated.args, "max_chars", None) or 15000,
+                ),
+            )
+            result = await dispatch_action(page, tool_action)
+            print(f"[executor - {result.action} result]: ", result)
+            return await self._finish_from_result(state, page, current_url, result)
 
-        tool_action = Action(
-            action=validated_action.action,
-            args=ActionArgs(
-                url=validated_action.args.url,
-                role=validated_action.args.role,
-                name=validated_action.args.name,
-                text=validated_action.args.text,
-                direction=validated_action.args.direction,
-                key=validated_action.args.key,
-                seconds=validated_action.args.seconds,
-            ),
-        )
-        result = await dispatch_action(page, tool_action)
-        print(f"[executor - {result.action} result]: ", result)
+    def _return_failure(self, state, current_url, action, args, message, error_type="unknown"):
+        return {
+            "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+            "reasoning_log": [self._build_execution_log(
+                action=action, args=args if isinstance(args, dict) else {},
+                status="failure", message=message, error_type=error_type,
+            )],
+            "current_url": current_url,
+        }
 
+    async def _finish_from_result(self, state, page, current_url, result):
         result_status = result.status
         result_error_type = result.error_type
         result_message = result.message
 
+        # Handle links that open in a new tab/window: switch to the new page
+        if result_status == "success":
+            try:
+                pages = page.context.pages
+                if len(pages) > 1 and pages[-1] != page:
+                    new_page = pages[-1]
+                    await new_page.wait_for_load_state("domcontentloaded", timeout=8000)
+                    self.runtime["page"] = new_page
+                    page = new_page
+                    result_message += " (switched to new tab)"
+            except Exception:
+                pass
+
         if result_status == "success" and self._is_anti_bot_page(page.url):
             result_status = "failure"
             result_error_type = "navigation_blocked"
-            result_message = (
-                "Blocked by CAPTCHA or anti-bot challenge on the current search engine."
-            )
-
+            result_message = "Blocked by CAPTCHA or anti-bot challenge on the current search engine."
         new_url = current_url
         if result_status == "success":
-            if result.action == "navigate":
-                new_url = result.args.get("url") or page.url
-            else:
-                new_url = page.url
+            new_url = result.args.get("url") or page.url if result.action == "navigate" else page.url
         else:
             new_url = page.url
+        after_state = ""
+        try:
+            after_state = await self._get_real_dom_snapshot(page)
+        except Exception:
+            after_state = f"[URL after action: {new_url}]"
+
+        # For extract_content, show the extracted text to the verifier
+        extracted = getattr(result, "extracted_text", None)
+        if extracted and result.action == "extract_content":
+            after_state = f"EXTRACTED_TEXT:\n{extracted.strip()[:4000]}\n\nDOM_SNAPSHOT:\n{after_state}"
 
         execution_log = self._build_execution_log(
             action=result.action,
@@ -144,13 +218,25 @@ class Executor:
             status=result_status,
             message=result_message,
             error_type=result_error_type,
+            after_state=after_state,
         )
-
-        return {
+        out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "reasoning_log": [execution_log],
             "current_url": new_url,
         }
+        extracted = getattr(result, "extracted_text", None)
+        if extracted and isinstance(extracted, str) and extracted.strip():
+            out["extracted_content"] = [extracted.strip()]
+        # Also keep a lightweight DOM/text snapshot in dom_cache for later navigation tools
+        try:
+            dom_text = await dom_extractor.get_page_text(page, max_chars=8000)
+            if dom_text and dom_text.strip():
+                snapshot = f"URL: {new_url}\n\n{dom_text.strip()}"
+                out["dom_cache"] = [snapshot]
+        except Exception:
+            pass
+        return out
 
 
     def _get_user_intent(self, state: ProjectState) -> str:
@@ -240,15 +326,9 @@ class Executor:
                 final_url = "https://duckduckgo.com"
             args.url = final_url
 
+        # Click: allow attempt even if snapshot format doesn't match (handler will fail if element missing)
         if action.action == "click":
-            if not self._is_click_target_in_dom(args.role, args.name, dom_snapshot):
-                return ExecutionResult(
-                    action=action.action,
-                    args=args,
-                    status="failure",
-                    error_type="element_not_found",
-                    message=f"Click target not found in DOM_SNAPSHOT: role={args.role}, name={args.name}",
-                )
+            pass
 
         if action.action in {"type", "search"} and args.text:
             args.text = args.text.strip()
@@ -279,6 +359,7 @@ class Executor:
             "scroll": ["direction"],
             "press_key": ["key"],
             "wait": ["seconds"],
+            "extract_content": [],
         }
         missing = []
         for field in required.get(action_name, []):
@@ -370,6 +451,155 @@ class Executor:
         text = f"{current_task}\n{user_intent}".lower()
         return "google.com" in text or re.search(r"\bgoogle\b", text) is not None
 
+    @staticmethod
+    def _build_recent_actions(state: ProjectState) -> str:
+        """Summarise recent executor actions so the LLM doesn't repeat itself."""
+        logs = state.get("reasoning_log") or []
+        executor_logs = [
+            log for log in logs
+            if isinstance(log, str) and log.startswith("[Executor]")
+        ]
+        if not executor_logs:
+            return ""
+        recent = executor_logs[-6:]
+        summaries = []
+        for i, log in enumerate(recent, 1):
+            action_line = ""
+            args_line = ""
+            status_line = ""
+            for line in log.split("\n"):
+                stripped = line.strip()
+                if stripped.startswith("[Executor] Action:"):
+                    action_line = stripped.replace("[Executor] ", "")
+                elif stripped.startswith("[Executor] Args:"):
+                    args_line = stripped.replace("[Executor] ", "")
+                elif stripped.startswith("[Executor] Status:"):
+                    status_line = stripped.replace("[Executor] ", "")
+            if action_line:
+                summaries.append(f"  {i}. {action_line} | {args_line} | {status_line}")
+        if not summaries:
+            return ""
+        return (
+            "\n\nPREVIOUS_ACTIONS (already executed — do NOT repeat a successful action; do the NEXT step in the login sequence):\n"
+            + "\n".join(summaries)
+        )
+
+    _LOGIN_KEYWORDS = re.compile(
+        r"\blog\s*in\b|\bsign\s*in\b|\bcredential|\busername\b|\bpassword\b"
+        r"|\bauthenticat|\bsaved credentials\b",
+        re.IGNORECASE,
+    )
+    _FORM_FILL_KEYWORDS = re.compile(
+        r"\bfill\b|\benter\b|\bsubmit\b|\bapply\b|\bregister\b|\bsign\s*up\b"
+        r"|\bpersonal\s+info|\bprofile\b|\bpayment\b|\bcheckout\b",
+        re.IGNORECASE,
+    )
+
+    def _build_credentials_context(self, state: ProjectState, current_task: str, current_url: str) -> str:
+        """Inject relevant credentials when the step involves login or form-filling."""
+        creds = state.get("user_credentials") or {}
+        if not creds:
+            print("[executor] No user_credentials in state", flush=True)
+            return ""
+
+        is_login_step = bool(self._LOGIN_KEYWORDS.search(current_task))
+        is_form_step = bool(self._FORM_FILL_KEYWORDS.search(current_task))
+
+        if not is_login_step and not is_form_step:
+            return ""
+
+        print(f"[executor] Credential injection: login={is_login_step} form={is_form_step}", flush=True)
+        parts = []
+
+        if is_login_step:
+            match = self._find_matching_service(creds, current_task, current_url)
+            if match:
+                print(f"[executor] Matched service: {match.get('serviceName', '?')}", flush=True)
+                username = match.get('username', '')
+                password = match.get('password', '')
+                parts.append(
+                    f"SERVICE_CREDENTIALS (use these EXACT values — do NOT make up values):\n"
+                    f"  Username/Email: {username}\n"
+                    f"  Password: {password}\n\n"
+                    f"FIELD MATCHING RULES:\n"
+                    f"  - Look at DOM_SNAPSHOT for visible input fields (textbox, input, password field, etc.).\n"
+                    f"  - Match each field to the correct credential by its label/name/placeholder "
+                    f"(e.g. 'Email', 'Username', 'NID' → type the Username value; 'Password' → type the Password value).\n"
+                    f"  - Fill ONE field per turn: `type` the matching value into the currently focused or next unfilled field.\n"
+                    f"  - After all visible fields are filled (check PREVIOUS_ACTIONS), click the submit/sign-in/next button.\n"
+                    f"  - If only ONE input field is visible (e.g. Microsoft login), fill it first, then click Next; "
+                    f"the system will re-invoke you for the next field on the new page."
+                )
+            else:
+                print(f"[executor] No matching service found for task='{current_task[:60]}' url='{current_url[:60]}'", flush=True)
+
+        if is_form_step:
+            personal = []
+            for key in ("fullName", "email", "phoneNumber", "address"):
+                val = creds.get(key, "").strip()
+                if val:
+                    personal.append(f"  {key}: {val}")
+            if personal:
+                parts.append("PERSONAL_INFO (use to fill form fields):\n" + "\n".join(personal))
+
+            payments = creds.get("userPaymentMethods") or []
+            if payments:
+                p = payments[0]
+                payment_lines = [f"  {k}: {v}" for k, v in p.items() if k != "id" and v]
+                if payment_lines:
+                    parts.append("PAYMENT_INFO:\n" + "\n".join(payment_lines))
+
+            experience = creds.get("userExperienceEntries") or []
+            if experience:
+                exp_lines = []
+                for entry in experience[:3]:
+                    exp_lines.append(
+                        f"  - {entry.get('title', '')} at {entry.get('organization', '')} "
+                        f"({entry.get('startDate', '')} – {entry.get('endDate', '') or 'present'})"
+                    )
+                if exp_lines:
+                    parts.append("EXPERIENCE/EDUCATION:\n" + "\n".join(exp_lines))
+
+        if not parts:
+            return ""
+        return "\n\nUSER_CREDENTIALS (available for auto-fill — use `type` to enter these values):\n" + "\n".join(parts)
+
+    @staticmethod
+    def _find_matching_service(creds: dict, task: str, url: str) -> dict | None:
+        """Find the best-matching saved service credential for the current task/URL."""
+        services = creds.get("userCredentialsList") or []
+        if not services:
+            return None
+
+        task_lower = task.lower()
+        url_lower = url.lower()
+
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            name = (service.get("serviceName") or "").lower()
+            svc_url = (service.get("serviceUrl") or "").lower()
+
+            # Direct name match in the task or current URL
+            if name and (name in task_lower or name in url_lower):
+                return service
+            # Saved service URL matches the current page
+            if svc_url and svc_url in url_lower:
+                return service
+            # Check if the service URL's domain appears in the current URL
+            if svc_url:
+                from urllib.parse import urlparse as _urlparse
+                svc_domain = _urlparse(svc_url).netloc.lower().replace("www.", "")
+                cur_domain = _urlparse(url).netloc.lower().replace("www.", "")
+                if svc_domain and svc_domain in cur_domain:
+                    return service
+
+        # If only one service is saved and the task mentions login, use it
+        if len(services) == 1:
+            return services[0]
+
+        return None
+
     def _is_anti_bot_page(self, url: str) -> bool:
         text = (url or "").lower()
         patterns = [
@@ -384,10 +614,14 @@ class Executor:
     def _is_click_target_in_dom(self, role: str | None, name: str | None, dom_snapshot: str) -> bool:
         if not role or not name:
             return False
-        escaped_role = re.escape(role.strip())
-        escaped_name = re.escape(name.strip())
-        pattern = rf'\[role="{escaped_role}"\]\s*"{escaped_name}"'
-        return re.search(pattern, dom_snapshot, flags=re.IGNORECASE) is not None
+        r, n = role.strip(), name.strip()
+        escaped_role = re.escape(r)
+        escaped_name = re.escape(n)
+        exact = re.search(rf'\[role="{escaped_role}"\]\s*"{escaped_name}"', dom_snapshot, flags=re.IGNORECASE)
+        if exact:
+            return True
+        partial = re.search(rf'\[role="{escaped_role}"\][^\n]*{re.escape(n)}', dom_snapshot, flags=re.IGNORECASE)
+        return partial is not None
 
     def _action_args_to_dict(self, args: Any) -> dict:
         if hasattr(args, "model_dump"):
@@ -401,6 +635,7 @@ class Executor:
         status: str,
         message: str,
         error_type: str | None = None,
+        after_state: str | None = None,
     ) -> str:
         args_str = []
         for key in ["url", "role", "name", "text", "direction", "key", "seconds"]:
@@ -416,40 +651,82 @@ class Executor:
         )
         if error_type and error_type != "none":
             log += f"\n[Executor] Error Type: {error_type}"
+        if after_state and after_state.strip():
+            snippet = after_state.strip()[:3000]
+            if len(after_state.strip()) > 3000:
+                snippet += "\n... (truncated)"
+            log += f"\n[Executor] AFTER_STATE (page content for verification):\n{snippet}"
         return log
     
 
 
-    #####! ===== GET RID OF THIS FUNCTION - REPLACE WITH REAL DOM ===== #####
-    # hardcoded example DOM
-    def _get_simulated_dom(self, url: str, task: str) -> str:
+    async def _get_real_dom_snapshot(self, page) -> str:
+        """Get a role/name snapshot including iframes from Playwright accessibility tree."""
+        all_lines: list[str] = []
 
-        """Generate simulated DOM snapshot for testing."""
-        
-        if "ucf" in url.lower() or "login" in task.lower():
-            return """
-            [role="navigation"] "Main Navigation"
-            [role="link"] "Home"
-            [role="link"] "myUCF Login"
-            [role="link"] "Academics"
-            [role="link"] "Student Services"
+        # Main frame
+        try:
+            snapshot = await page.accessibility.snapshot(interesting_only=True)
+            if snapshot:
+                all_lines.extend(self._format_accessibility_tree(snapshot, max_lines=300))
+        except Exception as e:
+            all_lines.append(f"[DOM snapshot failed: {e}]")
 
-            [role="main"]
-            [role="heading"] "Welcome to UCF"
-            [role="textbox"] "username" placeholder="Enter your NID"
-            [role="textbox"] "password" placeholder="Enter your password"
-            [role="button"] "Sign In"
-            [role="link"] "Forgot Password?"
-            """
-        else:
-            return f"""
-            [role="navigation"] "Site Navigation"
-            [role="link"] "Home"
-            [role="link"] "About"
-            [role="link"] "Contact"
+        # Child frames / iframes (PeopleSoft, etc.)
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            try:
+                frame_snap = await frame.evaluate(
+                    """() => {
+                        const walk = (el) => {
+                            if (!el) return [];
+                            const items = [];
+                            const role = el.getAttribute && (el.getAttribute('role') || el.tagName.toLowerCase());
+                            const name = el.getAttribute && (
+                                el.getAttribute('aria-label') ||
+                                el.getAttribute('title') ||
+                                (el.innerText || '').trim().slice(0, 120)
+                            );
+                            if (name && role) items.push({role, name});
+                            for (const child of (el.children || []))
+                                items.push(...walk(child));
+                            return items;
+                        };
+                        return walk(document.body);
+                    }"""
+                )
+                if frame_snap:
+                    all_lines.append(f'[iframe: {frame.url[:80]}]')
+                    for item in frame_snap[:200]:
+                        r = item.get("role", "")
+                        n = (item.get("name", "") or "").strip()
+                        if n:
+                            line = f'[role="{r}"] "{n}"'
+                            if len(line) > 200:
+                                line = line[:197] + "..."
+                            all_lines.append(line)
+            except Exception:
+                continue
 
-            [role="main"]
-            [role="heading"] "Page Content"
-            [role="button"] "Submit"
-            [role="textbox"] "Search"
-            """
+        if not all_lines:
+            return "[No interactive elements in snapshot]"
+        return "\n".join(all_lines[:500])
+
+    def _format_accessibility_tree(self, node: dict | None, prefix: str = "", max_lines: int = 500) -> list[str]:
+        """Flatten accessibility tree to lines like [role=\"button\"] \"Submit\" for verifier and LLM."""
+        if node is None or max_lines <= 0:
+            return []
+        lines = []
+        role = node.get("role") or "generic"
+        name = (node.get("name") or "").strip()
+        if name and role not in ("generic", "text", "StaticText"):
+            line = f'[role="{role}"] "{name}"'
+            if len(line) > 200:
+                line = line[:197] + "..."
+            lines.append(line)
+        for child in node.get("children") or []:
+            lines.extend(self._format_accessibility_tree(child, prefix, max_lines - len(lines)))
+            if len(lines) >= max_lines:
+                break
+        return lines

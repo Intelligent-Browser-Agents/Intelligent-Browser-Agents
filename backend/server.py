@@ -28,15 +28,18 @@ from email.mime.multipart import MIMEMultipart
 
 # Random Password Generation
 import secrets
-
 from fastapi.middleware.cors import CORSMiddleware
 
 # start agent endpoint
 import sys
 import subprocess
-
+import threading
 
 import asyncio
+import json
+
+# credential storage 
+CREDENTIALS_BY_SESSION = {}
 
 # Windows requires ProactorEventLoop for asyncio subprocess support.
 if sys.platform == "win32":
@@ -108,10 +111,7 @@ async def lifespan(app: FastAPI):
         conn.close()
         print('Database connection closed.')
 
-    
-
 app = FastAPI(lifespan=lifespan)
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -135,7 +135,6 @@ def user_exists_id(userId: int) -> bool:
     cur.execute(query, (str(userId),))
     results = cur.fetchone()
     return results is not None
-
 
 def send_forgot_password(to_email: str, new_password: str) -> None:
     from_email = os.getenv('EMAIL_ACCOUNT')
@@ -161,7 +160,6 @@ def send_forgot_password(to_email: str, new_password: str) -> None:
         print(f"Password reset email sent to {to_email}")
     except Exception as e:
         print(f"Failed to send email: {e}")
-
 
 """
 User CRUD Endpoints
@@ -206,7 +204,6 @@ async def get_user(request: Request):
         error = f'No Users Found in Database'
         return {'error': error}
     
-
 @app.post('/api/users/insert/') # Insert New User 
 async def insert_user(request: Request):
     #incoming: username, firstname, lastname, email, password
@@ -474,7 +471,6 @@ Placeholder for Agent API Endpoints
 
 
 """ ===== EDWIN TEST ENDPOINTS ===== """
-
 # # todo: handle user input and start app.py on the user's hardware
 @app.post('/api/start_agent')
 async def start_agent(requests: Request): 
@@ -489,6 +485,7 @@ async def start_agent(requests: Request):
     #! start the agent on the SERVER
     # start main with subprocess
     current_env = os.environ.copy()
+    current_env["PYTHONIOENCODING"] = "utf-8"
     python_path = sys.executable
 
     result = subprocess.run(
@@ -499,6 +496,20 @@ async def start_agent(requests: Request):
     )
 
     return {"STDOUT": result.stdout, "STDERR": result.stderr}
+
+# store credetials from this session
+@app.post('/api/users/store-credentials')
+async def store_credentials(request: Request): 
+    body = await request.json()
+    session_id = body.get("session_id")
+    credentials = body.get("credentials", {})
+
+    if not session_id: 
+        return {"ok": False, "error": "session_id is required."}
+
+    CREDENTIALS_BY_SESSION[session_id] = credentials
+    return {"ok": True, "error": ""}
+
 
 async def wait_for_port(port: int, timeout: float = 10.0):
     start_time = asyncio.get_event_loop().time()
@@ -513,6 +524,35 @@ async def wait_for_port(port: int, timeout: float = 10.0):
             await asyncio.sleep(0.5)
     return False
 
+HITL_PREFIX = "@@HITL@@"
+
+import json as _json
+
+# Shared map: user_id → asyncio.Queue  for HITL replies.
+# Any endpoint (REST, /ws/chat, or /ws/stream) can push a reply here.
+HITL_REPLY_QUEUES: dict[str, asyncio.Queue] = {}
+
+
+@app.post("/api/hitl_reply/{user_id}")
+async def hitl_reply(user_id: str, request: Request):
+    """REST endpoint the frontend can call to answer a clarification request."""
+    body = await request.json()
+    user_input = body.get("content", body.get("user_input", ""))
+    queue = HITL_REPLY_QUEUES.get(user_id)
+    if queue is None:
+        return {"status": "error", "message": "No agent is waiting for input with that user_id."}
+    await queue.put({"content": user_input})
+    return {"status": "ok"}
+
+async def _switch_to_new_page(new_page, start_screencast_fn):
+    """Wait for a popup/new-tab page to load, then switch screencast to it."""
+    try:
+        await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
+        await start_screencast_fn(new_page)
+    except Exception as exc:
+        print(f"[screencast] Failed to switch to new tab: {exc}")
+
+
 @app.websocket("/ws/stream/{user_id}")
 async def stream_endpoint(websocket: WebSocket, user_id: str):
     await websocket.accept()
@@ -520,69 +560,302 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
 
     query_params = websocket.query_params
     prompt = query_params.get("prompt", "Default Prompt")
+    session_id = query_params.get("session_id")
+    credentials = CREDENTIALS_BY_SESSION.pop(session_id, {}) if session_id else {}
+    credentials_json = json.dumps(credentials)
+    print(f"[STREAM] session_id={session_id} credentials={credentials}")
+
     print("Prompt Received in WebSocket Endpoint: ")
 
     port = await PORT_POOL.get()
     print(f"DEBUG 2: Got Port {port}")
 
     current_env = os.environ.copy()
+    current_env["PYTHONUNBUFFERED"] = "1"
+    current_env["PYTHONIOENCODING"] = "utf-8"
     python_path = sys.executable
-    
-    # 1. Launch Agent with full pipe access
-    process = await asyncio.create_subprocess_exec(
-        python_path, "src/app.py", "--port", str(port), "--prompt", prompt,
-        env=current_env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
+    loop = asyncio.get_running_loop()
+
+    # 1. Launch Agent with stdin pipe for HITL replies
+    def start_process():
+        return subprocess.Popen(
+            [python_path, "src/app.py", "--port", str(port), "--prompt", prompt, "--credentials_json", credentials_json],
+            env=current_env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+    process = await loop.run_in_executor(None, start_process)
     print("DEBUG 3: Agent Subprocess Started")
 
-    is_ready = await wait_for_port(port)
-    print(f"DEBUG 4: Browser Ready: {is_ready}")
+    # 2. Feed stdout/stderr into asyncio queue via threads
+    log_queue = asyncio.Queue()
 
-    # 2. Monitor Logs in the background
-    async def log_reader(pipe, log_type):
-        while True:
-            line = await pipe.readline()
-            if not line: break
-            content = line.decode().strip()
+    def pipe_reader(pipe, log_type):
+        try:
+            for line in iter(pipe.readline, b""):
+                line_str = line.decode("utf-8", errors="replace").strip()
+                if line_str:
+                    loop.call_soon_threadsafe(log_queue.put_nowait, (log_type, line_str))
+        except Exception:
+            pass
+        loop.call_soon_threadsafe(log_queue.put_nowait, (f"{log_type}_DONE", None))
+
+    threading.Thread(target=pipe_reader, args=(process.stdout, "STDOUT"), daemon=True).start()
+    threading.Thread(target=pipe_reader, args=(process.stderr, "STDERR"), daemon=True).start()
+
+    # Register a shared reply queue so any endpoint can push replies
+    reply_queue = asyncio.Queue()
+    HITL_REPLY_QUEUES[user_id] = reply_queue
+
+    # Mutable ref so the listener can dispatch CDP input events once the
+    # session is established (set after browser connects).
+    cdp_session_ref = {"client": None}
+
+    async def _dispatch_cdp_input(msg: dict):
+        """Forward a browser input event from the frontend to the CDP session."""
+        client = cdp_session_ref.get("client")
+        if client is None:
+            return
+        try:
+            input_type = msg.get("inputType")  # "mouse" or "key"
+            if input_type == "mouse":
+                await client.send("Input.dispatchMouseEvent", {
+                    "type": msg.get("action", "mousePressed"),
+                    "x": msg.get("x", 0),
+                    "y": msg.get("y", 0),
+                    "button": msg.get("button", "left"),
+                    "clickCount": msg.get("clickCount", 1),
+                })
+            elif input_type == "key":
+                action = msg.get("action", "keyDown")
+                key = msg.get("key", "")
+                code = msg.get("code", "")
+                key_code = msg.get("keyCode", 0)
+                modifiers = msg.get("modifiers", 0)
+
+                params = {
+                    "type": action,
+                    "key": key,
+                    "code": code,
+                    "windowsVirtualKeyCode": key_code,
+                    "nativeVirtualKeyCode": key_code,
+                    "modifiers": modifiers,
+                }
+                if action == "char":
+                    params["text"] = msg.get("text", key)
+                    params["unmodifiedText"] = msg.get("unmodifiedText", key)
+                elif action in ("keyDown", "rawKeyDown"):
+                    params["text"] = msg.get("text", "")
+
+                await client.send("Input.dispatchKeyEvent", params)
+            elif input_type == "scroll":
+                await client.send("Input.dispatchMouseEvent", {
+                    "type": "mouseWheel",
+                    "x": msg.get("x", 0),
+                    "y": msg.get("y", 0),
+                    "deltaX": msg.get("deltaX", 0),
+                    "deltaY": msg.get("deltaY", 0),
+                })
+        except Exception as e:
+            print(f"[INPUT] CDP dispatch error: {e}")
+
+    # ── Listener: reads messages the frontend sends back through this WebSocket ──
+    async def ws_reply_listener():
+        try:
+            while True:
+                try:
+                    msg = await websocket.receive_json()
+                except Exception:
+                    raw = await websocket.receive_text()
+                    msg = {"content": raw}
+
+                if msg.get("type") == "INPUT":
+                    await _dispatch_cdp_input(msg)
+                    continue
+
+                print(f"[HITL] Received reply via WebSocket: {str(msg)[:200]}")
+                await reply_queue.put(msg)
+        except Exception:
+            pass
+
+    reply_listener_task = asyncio.create_task(ws_reply_listener())
+
+    # ── HITL-aware log consumer ──
+    async def log_consumer():
+        done_stdout, done_stderr = False, False
+        while not (done_stdout and done_stderr):
+            try:
+                log_type, content = await asyncio.wait_for(log_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                continue
+            if content is None:
+                if log_type == "STDOUT_DONE":
+                    done_stdout = True
+                elif log_type == "STDERR_DONE":
+                    done_stderr = True
+                continue
+
+            # Check for HITL messages from the subprocess
+            if log_type == "STDOUT" and content.startswith(HITL_PREFIX):
+                raw_json = content[len(HITL_PREFIX):]
+                try:
+                    hitl_payload = _json.loads(raw_json)
+                except _json.JSONDecodeError:
+                    hitl_payload = {"type": "finish", "message": raw_json}
+
+                hitl_type = hitl_payload.get("type", "finish")
+                hitl_message = hitl_payload.get("message", "")
+
+                try:
+                    if hitl_type == "finish":
+                        print(f"[HITL] Sending final response to frontend")
+                        await websocket.send_json({
+                            "type": "RESPONSE",
+                            "content": hitl_message,
+                        })
+                        await websocket.send_json({
+                            "type": "LOG",
+                            "source": "AGENT",
+                            "content": hitl_message,
+                        })
+                    else:
+                        print(f"[HITL] Sending clarification request to frontend")
+                        await websocket.send_json({
+                            "type": "CLARIFICATION",
+                            "message": hitl_message,
+                            "requested_fields": hitl_payload.get("requested_fields", []),
+                        })
+                        await websocket.send_json({
+                            "type": "LOG",
+                            "source": "AGENT",
+                            "content": f"[NEEDS INPUT] {hitl_message}",
+                        })
+
+                        print(f"[HITL] Waiting for user reply (user_id={user_id})…")
+                        try:
+                            ws_msg = await asyncio.wait_for(reply_queue.get(), timeout=300)
+                            user_input = ws_msg.get("content", ws_msg.get("user_input", ""))
+                            print(f"[HITL] Got reply: {str(user_input)[:200]}")
+                        except asyncio.TimeoutError:
+                            user_input = ""
+                            print("[HITL] Timed out waiting for reply")
+
+                        reply_line = _json.dumps({"user_input": user_input}) + "\n"
+                        try:
+                            process.stdin.write(reply_line.encode("utf-8"))
+                            process.stdin.flush()
+                            print(f"[HITL] Wrote reply to subprocess stdin")
+                        except Exception as exc:
+                            print(f"[HITL] Failed to write to stdin: {exc}")
+                            break
+                except Exception:
+                    break
+                continue
+
+            # Regular log line
             print(f"[{log_type}] {content}")
-            await websocket.send_json({"type": "LOG", "source": log_type, "content": content})
+            try:
+                await websocket.send_json({"type": "LOG", "source": log_type, "content": content})
+            except Exception:
+                break
 
-    # Start log monitoring tasks
-    stdout_task = asyncio.create_task(log_reader(process.stdout, "STDOUT"))
-    stderr_task = asyncio.create_task(log_reader(process.stderr, "STDERR"))
+    log_task = asyncio.create_task(log_consumer())
 
     try:
         # 3. Wait for Browser
         await websocket.send_json({"type": "STATUS", "content": "Warming up browser..."})
         if await wait_for_port(port):
-            async with async_playwright() as p:
-                browser = await p.chromium.connect_over_cdp(f"http://localhost:{port}")
-                page = browser.contexts[0].pages[0]
-                client = await page.context.new_cdp_session(page)
+            try:
+                async with async_playwright() as p:
+                    browser = await p.chromium.connect_over_cdp(f"http://localhost:{port}")
+                    context = browser.contexts[0]
+                    page = context.pages[0]
+                    client = await context.new_cdp_session(page)
+                    cdp_session_ref["client"] = client
 
-                # 4. Stream Setup
-                async def on_frame(payload):
-                    try:
-                        await websocket.send_json({"type": "FRAME", "data": payload['data']})
-                        await client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
-                    except: pass
+                    async def on_frame(payload):
+                        cur_client = cdp_session_ref.get("client")
+                        try:
+                            await websocket.send_json({"type": "FRAME", "data": payload['data']})
+                            await cur_client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
+                        except Exception:
+                            pass
 
-                client.on("Page.screencastFrame", on_frame)
-                await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
-                
-                # Keep alive until process ends
-                await process.wait()
+                    async def start_screencast_on(target_page):
+                        """Switch screencast + CDP input to a new page."""
+                        old_client = cdp_session_ref.get("client")
+                        if old_client:
+                            try:
+                                await old_client.send("Page.stopScreencast")
+                            except Exception:
+                                pass
+                        new_client = await context.new_cdp_session(target_page)
+                        cdp_session_ref["client"] = new_client
+                        new_client.on("Page.screencastFrame", on_frame)
+                        await new_client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
+
+                    client.on("Page.screencastFrame", on_frame)
+                    await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
+
+                    context.on("page", lambda new_page: asyncio.ensure_future(
+                        _switch_to_new_page(new_page, start_screencast_on)
+                    ))
+
+                    await loop.run_in_executor(None, process.wait)
+            except NotImplementedError:
+                await websocket.send_json({
+                    "type": "STATUS",
+                    "content": "Video streaming not available on this platform; continuing with logs only.",
+                })
+
+                print(NotImplementedError)
+            
+                await loop.run_in_executor(None, process.wait)
+            except Exception as exc:
+                print(f"[STREAM] Browser/screencast error: {exc}")
+                try:
+                    await websocket.send_json({
+                        "type": "STATUS",
+                        "content": "Browser video disconnected; agent still running.",
+                    })
+                except Exception:
+                    pass
+                await loop.run_in_executor(None, process.wait)
         else:
             await websocket.send_json({"type": "STATUS", "content": "Browser failed to open."})
 
     finally:
         # 5. Cleanup
-        stdout_task.cancel()
-        stderr_task.cancel()
+        HITL_REPLY_QUEUES.pop(user_id, None)
+
+        reply_listener_task.cancel()
+        try:
+            await reply_listener_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
+            await asyncio.wait_for(log_task, timeout=3.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            log_task.cancel()
+            try:
+                await log_task
+            except asyncio.CancelledError:
+                pass
+
+        try:
+            await websocket.send_json({"type": "STATUS", "content": "Agent finished task."})
+        except Exception:
+            pass
+
         if process.returncode is None:
             process.terminate()
+            if sys.platform == "win32":
+                await asyncio.to_thread(process.wait)
+            else:
+                await process.wait()
         await PORT_POOL.put(port)
 
 from typing import List
@@ -611,15 +884,23 @@ async def websocket_endpoint(websocket: WebSocket, client_id: int):
     token = query_params.get("token", "Default Prompt")
     try:
         while True:
-            # Wait for message from a client
             data = await websocket.receive_text()
             print(f"Received message from client #{client_id}: {data}")
-            # Broadcast it to everyone else
+
+            # Forward to any waiting HITL agent for this user
+            queue = HITL_REPLY_QUEUES.get(str(client_id))
+            if queue is not None:
+                try:
+                    payload = _json.loads(data)
+                except (ValueError, TypeError):
+                    payload = {"content": data}
+                await queue.put(payload)
+                print(f"[HITL] Forwarded chat message to agent for client {client_id}")
+
             await manager.broadcast(f"Client #{client_id} says: {data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         await manager.broadcast(f"Client #{client_id} left the chat")
-
 
 # todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)
 @app.get('/send_logs')

@@ -1,4 +1,4 @@
-from typing import Annotated, List, TypedDict, Optional, Literal
+from typing import Annotated, Dict, List, TypedDict, Optional, Literal
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel
 from playwright.async_api import Page
@@ -14,6 +14,33 @@ def append_plan(old_plans: List[List[str]], new_plan: List[str]) -> List[List[st
     # Append the new plan version to the history
     return old_plans + [new_plan]
 
+
+def append_extracted(old: List[str], new: List[str]) -> List[str]:
+    """Append newly extracted content chunks (for state reducer)."""
+    if new is None:
+        return old or []
+    return (old or []) + (new if isinstance(new, list) else [new] if new else [])
+
+
+def append_dom_cache(old: List[str], new: List[str]) -> List[str]:
+    """Append DOM/text snapshots, keeping only the most recent few entries."""
+    if new is None:
+        return old or []
+    items = new if isinstance(new, list) else [new]
+    combined = (old or []) + items
+    # keep last 5 snapshots
+    return combined[-5:]
+
+
+def append_reasoning(old: List[str], new: List[str]) -> List[str]:
+    """Append reasoning entries, keeping the most recent to prevent unbounded growth."""
+    if new is None:
+        return old or []
+    items = new if isinstance(new, list) else [new] if new else []
+    combined = (old or []) + items
+    return combined[-20:]
+
+
 class ProjectState(TypedDict):
     # Standard conversation history
     messages: Annotated[list, add_messages]
@@ -21,6 +48,7 @@ class ProjectState(TypedDict):
     # Browser-specific context
     current_url: str
     screenshot: Optional[str]  # Base64 encoded
+    dom_cache: Annotated[List[str], append_dom_cache]  # Recent DOM/text snapshots for navigation
 
     # Plan tracking
     plan_history: Annotated[List[List[str]], append_plan]  # History of all plan versions
@@ -34,13 +62,14 @@ class ProjectState(TypedDict):
     # Coordination fields
     plan_status: Literal["MAINTAIN", "UPDATE", "CREATE", "NEEDS_CLARIFICATION"]
     current_task: str  # The specific task for executor
-    reasoning_log: List[str]
+    reasoning_log: Annotated[List[str], append_reasoning]
+    extracted_content: Annotated[List[str], append_extracted]  # Gathered text from pages (for present step)
     is_complete: bool
     handoff_interaction: bool
     needs_fallback: bool
     last_step_complete: bool
     mission_failed: bool
     abort_reason: Optional[str]
-    
-    # store the page being passed around
-    # page: Optional[Page]
+
+    # User-provided credentials (service logins, personal info, payment, experience)
+    user_credentials: Optional[Dict]
