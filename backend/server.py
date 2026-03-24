@@ -347,20 +347,21 @@ async def login_user(request: Request):
     error  = ''
     token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
     body = await request.json()
-
-    username = body['username'] if 'username' in body else ''
-    password = body['password'] if 'password' in body else ''
-
-    if username == '' or password == '':
-        error = 'Username or Password is Missing'
-        return {'error' : error}
-    elif token != '' and token != 'undefined':
+    
+    if token != '' and token != 'undefined':
         try:
             secret_key = os.getenv('TOKEN_SECRET')
             decoded = jwt.decode(token, secret_key, algorithms='HS256')
             return {'token': token, 'error': error}
         except jwt.InvalidTokenError as e:
             return{'error': str(e)}
+
+    username = body['username']
+    password = body['password']
+
+    if username == '' or password == '':
+        error = 'Username or Password is Missing'
+        return {'error' : error}
 
     #print(password)
     
