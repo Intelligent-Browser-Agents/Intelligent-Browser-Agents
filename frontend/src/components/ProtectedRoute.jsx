@@ -49,7 +49,6 @@ const ProtectedRoute = () => {
             });
 
             const data = await response.json();
-            console.log("check_login: response data =", data);
             if (data.error === '') {
                 setIsAuthenticated(true);
             } else {

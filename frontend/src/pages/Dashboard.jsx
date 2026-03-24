@@ -741,7 +741,6 @@ export default function Dashboard() {
     });
 
     const data = await response.json();
-    console.log(data);
     if (data.error === '') {
       setFirstname(data.firstname);
     } else {
