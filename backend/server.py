@@ -348,8 +348,8 @@ async def login_user(request: Request):
     token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
     body = await request.json()
 
-    username = body['username']
-    password = body['password']
+    username = body['username'] if 'username' in body else ''
+    password = body['password'] if 'password' in body else ''
 
     if username == '' or password == '':
         error = 'Username or Password is Missing'
