@@ -4,6 +4,7 @@ Translates high-level plan steps into specific browser actions.
 Uses LangChain tool calls when possible; falls back to structured output.
 """
 
+import json
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ from urllib.parse import urlparse
 from execution import Action, dispatch_action, ActionArgs
 from execution.handlers import handle_extract_content
 from execution.langchain_tools import get_browser_tools
+from execution.models import ExecutionOutput
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from schema import ExecutionResult
 from state import ProjectState
@@ -116,7 +118,7 @@ class Executor:
                     message=str(e),
                     error_type="unknown",
                 )
-            # result is ExecutionOutput from handlers
+            result = self._coerce_tool_result_to_output(name, result)
             return await self._finish_from_result(state, page, current_url, result)
         else:
             # Fallback: structured output (no tool_calls)
@@ -173,6 +175,52 @@ class Executor:
             )],
             "current_url": current_url,
         }
+
+    @staticmethod
+    def _coerce_tool_result_to_output(tool_name: str, result: Any) -> ExecutionOutput:
+        """
+        Handler-based tools return ExecutionOutput; dom_search / list_links return lists
+        of snippets or link dicts. Normalize so _finish_from_result always sees ExecutionOutput.
+        """
+        if isinstance(result, ExecutionOutput):
+            return result
+        if isinstance(result, dict):
+            try:
+                return ExecutionOutput.model_validate(result)
+            except Exception:
+                pass
+        if isinstance(result, list):
+            text = json.dumps(result, ensure_ascii=False, indent=2)
+            if len(text) > 14000:
+                text = text[:14000] + "\n... [truncated]"
+            return ExecutionOutput(
+                action=tool_name,
+                args={},
+                status="success",
+                error_type="none",
+                message=f"Tool {tool_name} returned {len(result)} item(s).",
+                execution_time_ms=0,
+                extracted_text=text,
+            )
+        if isinstance(result, str):
+            return ExecutionOutput(
+                action=tool_name,
+                args={},
+                status="success",
+                error_type="none",
+                message=f"Tool {tool_name} completed.",
+                execution_time_ms=0,
+                extracted_text=result[:15000],
+            )
+        return ExecutionOutput(
+            action=tool_name,
+            args={},
+            status="success",
+            error_type="none",
+            message=f"Tool {tool_name} returned {type(result).__name__}",
+            execution_time_ms=0,
+            extracted_text=repr(result)[:15000],
+        )
 
     async def _finish_from_result(self, state, page, current_url, result):
         result_status = result.status
