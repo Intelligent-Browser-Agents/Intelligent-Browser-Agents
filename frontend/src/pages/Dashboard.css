@@ -438,6 +438,27 @@
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
+/* Markdown inside agent chat bubbles */
+.chat-system p { margin: 0.4em 0; }
+.chat-system p:first-child { margin-top: 0; }
+.chat-system p:last-child { margin-bottom: 0; }
+.chat-system ul, .chat-system ol { margin: 0.3em 0; padding-left: 1.4em; }
+.chat-system li { margin: 0.15em 0; }
+.chat-system strong { color: #2c4f5f; }
+.chat-system h1, .chat-system h2, .chat-system h3 {
+  margin: 0.5em 0 0.2em;
+  font-size: 1em;
+  font-weight: 700;
+  color: #2c4f5f;
+}
+.chat-system hr { border: none; border-top: 1px solid #d8e2e8; margin: 0.6em 0; }
+.chat-system code {
+  background: #edf2f6;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
 /* SETTINGS MODAL */
 .modal-overlay {
   position: fixed;

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
 import "./Dashboard.css";
 
 // === COMPONENTS ===
@@ -1149,7 +1150,7 @@ export default function Dashboard() {
 
         {mainLaneMessages.map((msg, index) => (
           <div key={msg.id || index} className={msg.isUser ? "chat-user" : "chat-system"}>
-            {msg.text}
+            {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
           </div>
         ))}
 
@@ -1207,7 +1208,7 @@ export default function Dashboard() {
               <div className="chat-socket-lane">
                 {session.chatMessages.map((msg, index) => (
                   <div key={msg.id || index} className={msg.isUser ? "chat-user" : "chat-system"}>
-                    {msg.text}
+                    {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
                   </div>
                 ))}
               </div>
