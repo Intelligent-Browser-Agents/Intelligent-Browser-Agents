@@ -16,8 +16,23 @@ from main import build_workflow
 import argparse
 import asyncio
 import json
+import os
 import sys
 import traceback
+
+
+def _launch_headless() -> bool:
+    """
+    Headed Chromium requires a display (Windows/macOS desktop, Linux + X11 / xvfb).
+    On headless Linux servers there is no $DISPLAY — use headless unless overridden.
+    """
+    if os.environ.get("PLAYWRIGHT_HEADED", "").lower() in ("1", "true", "yes"):
+        return False
+    if os.environ.get("PLAYWRIGHT_HEADLESS", "").lower() in ("1", "true", "yes"):
+        return True
+    if sys.platform == "linux" and not os.environ.get("DISPLAY"):
+        return True
+    return False
 
 # Reconfigure stdout/stderr to UTF-8 so Unicode from web pages doesn't crash on Windows cp1252.
 # write_through=True preserves unbuffered behaviour required by subprocess pipes.
@@ -115,10 +130,12 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
     print(f"Starting URL: {graph_input['current_url']}", flush=True)
     print("=" * 60, flush=True)
 
+    headless = _launch_headless()
     async with async_playwright() as p:
-        print(f"Launching browser on port {video_port}...", flush=True)
+        print(f"Launching browser on port {video_port} (headless={headless})...", flush=True)
         browser = await p.chromium.launch(
-            headless=False, args=[f"--remote-debugging-port={video_port}"]
+            headless=headless,
+            args=[f"--remote-debugging-port={video_port}"],
         )
         print(f"Browser launched on port {video_port}. Waiting for frontend connection...", flush=True)
         context = await browser.new_context()
