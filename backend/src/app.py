@@ -52,6 +52,10 @@ def send_hitl(payload: dict):
     """Send a structured HITL message to the server over stdout."""
     print(f"{HITL_PREFIX}{json.dumps(payload, ensure_ascii=False)}", flush=True)
 
+def _is_stop_command(text: str) -> bool:
+    value = (text or "").strip().lower()
+    return value in {"stop", "cancel", "quit", "exit", "abort"}
+
 
 async def read_stdin_line() -> str:
     """Read one line from stdin without blocking the event loop."""
@@ -210,6 +214,14 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
                 user_reply = payload.get("user_input", raw_line)
             except json.JSONDecodeError:
                 user_reply = raw_line
+
+            if _is_stop_command(str(user_reply)):
+                send_hitl({
+                    "type": "finish",
+                    "message": "Run stopped by user request.",
+                })
+                print("[HITL] User requested stop; ending simulation.", flush=True)
+                break
 
             # Resume the graph — the interrupt() call inside the
             # interaction node returns this value, which becomes the
