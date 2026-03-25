@@ -175,6 +175,7 @@ class Executor:
         }
 
     async def _finish_from_result(self, state, page, current_url, result):
+        print(result)
         result_status = result.status
         result_error_type = result.error_type
         result_message = result.message
