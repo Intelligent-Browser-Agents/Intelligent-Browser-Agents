@@ -76,9 +76,10 @@ class Verifier:
         last_execution = reasoning_log[-1] if reasoning_log else "No execution log."
         user_intent = self._get_user_intent(state)
 
+        last_exec_lower = (last_execution or "").lower()
+
         # Deterministic guardrail: do not allow failed executor actions to be
         # marked as successful just because page content looks plausible.
-        last_exec_lower = (last_execution or "").lower()
         if "[executor] status: failure" in last_exec_lower:
             verification_log = (
                 "[Verifier] Verdict: failure\n"
@@ -96,6 +97,39 @@ class Verifier:
                     "is_complete": False,
                     "last_step_complete": False,
                     "step_attempts": int(state.get("step_attempts", 0)) + 1,
+                    "reasoning_log": [verification_log],
+                },
+            )
+
+        # Safety net: high-confidence phrases that unambiguously indicate a
+        # human-required screen.  These are specific enough to avoid false
+        # positives from generic page text while catching MFA/CAPTCHA screens
+        # the LLM might occasionally miss.
+        _HUMAN_REQUIRED_PHRASES = (
+            "approve sign-in request",
+            "approve sign in request",
+            "open your authenticator",
+            "verify your identity",
+            "blocked by captcha",
+            "anti-bot challenge",
+        )
+        if any(phrase in last_exec_lower for phrase in _HUMAN_REQUIRED_PHRASES):
+            verification_log = (
+                "[Verifier] Verdict: failure\n"
+                "[Verifier] Step Complete: False\n"
+                "[Verifier] Goal Complete: False\n"
+                "[Verifier] Message: Human action required (MFA/CAPTCHA detected in page content).\n"
+                "[Verifier] Handoff: fallback"
+            )
+            return self._apply_stall_cap(
+                state,
+                current_step,
+                {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "needs_fallback": True,
+                    "is_complete": False,
+                    "last_step_complete": False,
+                    "step_attempts": 0,
                     "reasoning_log": [verification_log],
                 },
             )

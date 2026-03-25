@@ -355,25 +355,28 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
             execution_time_ms=_elapsed(),
         )
 
-# maybe pass in the focused input field??
+def _looks_like_password(text: str) -> bool:
+    """Heuristic: passwords typically mix cases, digits, and symbols."""
+    has_upper = any(c.isupper() for c in text)
+    has_lower = any(c.islower() for c in text)
+    has_digit = any(c.isdigit() for c in text)
+    has_symbol = any(not c.isalnum() and not c.isspace() for c in text)
+    return has_upper and has_lower and has_digit and has_symbol and " " not in text
+
+
 async def handle_type(page: Page, text: str) -> ExecutionOutput:
     """
-    Type text into focused input field.
+    Type text into the appropriate input field.
 
-    Args:
-        page: Playwright page instance
-        text: Text to type
-
-    Returns:
-        ExecutionOutput with result
+    Strategy:
+      1. If an input/textarea is currently focused (LLM just clicked it), use that.
+      2. If text looks like credentials, find the matching login field.
+      3. Otherwise find any visible general text input.
     """
     start = asyncio.get_event_loop().time()
 
     try:
-        # Prefer filling a visible input field instead of relying on current focus.
-        # Also try across frames, since many UCF/PeopleSoft login UIs render form
-        # fields inside iframes.
-        is_emailish = "@" in (text or "")
+        is_credential = "@" in (text or "") or _looks_like_password(text or "")
 
         password_selectors = ["input[type='password']", "input[name*='password' i]"]
         username_selectors = [
@@ -386,6 +389,15 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             "input[id*='username' i]",
             "input[autocomplete*='username' i]",
             "input[autocomplete*='email' i]",
+        ]
+        general_selectors = [
+            "input[type='search']",
+            "input[type='text']",
+            "input[role='combobox']",
+            "input[role='searchbox']",
+            "input:not([type='hidden']):not([type='checkbox']):not([type='radio']):not([type='submit']):not([type='button'])",
+            "textarea",
+            "[contenteditable='true']",
         ]
 
         frames = [page.main_frame] + list(page.frames)
@@ -400,17 +412,59 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                     continue
             return None
 
-        preferred_selectors = username_selectors if is_emailish else password_selectors
-        other_selectors = password_selectors if is_emailish else username_selectors
-
         target = None
-        for fr in frames:
-            target = await _find_visible_in_frame(fr, preferred_selectors)
-            if target is not None:
-                break
-            target = await _find_visible_in_frame(fr, other_selectors)
-            if target is not None:
-                break
+
+        # 1. Respect current focus — if the LLM just clicked an input, type there.
+        try:
+            focused_tag = await page.evaluate(
+                "() => { const el = document.activeElement; "
+                "return el ? el.tagName.toLowerCase() : ''; }"
+            )
+            if focused_tag in ("input", "textarea"):
+                focused_type = await page.evaluate(
+                    "() => (document.activeElement.type || '').toLowerCase()"
+                )
+                typeable = focused_type not in (
+                    "hidden", "checkbox", "radio", "submit", "button", "file", "image",
+                )
+                if typeable:
+                    target = page.locator(":focus").first
+                    if await target.count() == 0:
+                        target = None
+            elif focused_tag and await page.evaluate(
+                "() => document.activeElement.isContentEditable"
+            ):
+                target = page.locator(":focus").first
+                if await target.count() == 0:
+                    target = None
+        except Exception:
+            target = None
+
+        # 2. If nothing focused, use context-appropriate selectors.
+        if target is None:
+            if is_credential:
+                preferred = username_selectors if "@" in (text or "") else password_selectors
+                other = password_selectors if "@" in (text or "") else username_selectors
+                for fr in frames:
+                    target = await _find_visible_in_frame(fr, preferred)
+                    if target is not None:
+                        break
+                    target = await _find_visible_in_frame(fr, other)
+                    if target is not None:
+                        break
+            else:
+                for fr in frames:
+                    target = await _find_visible_in_frame(fr, general_selectors)
+                    if target is not None:
+                        break
+
+        # 3. Last resort: try whichever selector group we haven't tried yet.
+        if target is None:
+            fallback = general_selectors if is_credential else (username_selectors + password_selectors)
+            for fr in frames:
+                target = await _find_visible_in_frame(fr, fallback)
+                if target is not None:
+                    break
 
         if target is not None:
             try:
@@ -429,14 +483,12 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                 await target.click(timeout=5000)
                 await target.fill(text, timeout=5000)
         else:
-            # Truthful failure: don't type blindly into whatever currently has focus.
-            # This prevents illusory/incorrect form filling when login fields haven't rendered yet.
             return ExecutionOutput(
                 action="type",
                 args={"text": text},
                 status="failure",
                 error_type="element_not_found",
-                message="No visible login email/username or password field found to type into.",
+                message="No visible text input field found to type into.",
                 execution_time_ms=int((asyncio.get_event_loop().time() - start) * 1000),
             )
 

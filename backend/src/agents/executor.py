@@ -348,7 +348,7 @@ class Executor:
             new_url = page.url
         after_state = ""
         try:
-            after_state = await self._get_real_dom_snapshot(page)
+            after_state = await self._get_real_dom_snapshot(page, max_chars=4000)
         except Exception:
             after_state = f"[URL after action: {new_url}]"
 
@@ -827,58 +827,81 @@ class Executor:
     
 
 
-    async def _get_real_dom_snapshot(self, page) -> str:
-        """Get a role/name snapshot including iframes from Playwright accessibility tree."""
+    async def _get_real_dom_snapshot(self, page, max_chars: int = 8000) -> str:
+        """Get a role/name snapshot including iframes from Playwright accessibility tree.
+
+        Args:
+            max_chars: Hard character budget. The snapshot is truncated once this
+                       limit is reached so that downstream LLM context stays
+                       manageable (portal pages can easily exceed 30k chars).
+        """
         all_lines: list[str] = []
+        char_count = 0
 
         # Main frame
         try:
             snapshot = await page.accessibility.snapshot(interesting_only=True)
             if snapshot:
-                all_lines.extend(self._format_accessibility_tree(snapshot, max_lines=300))
+                for line in self._format_accessibility_tree(snapshot, max_lines=300):
+                    all_lines.append(line)
+                    char_count += len(line) + 1
+                    if char_count >= max_chars:
+                        break
         except Exception as e:
             all_lines.append(f"[DOM snapshot failed: {e}]")
 
         # Child frames / iframes (PeopleSoft, etc.)
-        for frame in page.frames:
-            if frame == page.main_frame:
-                continue
-            try:
-                frame_snap = await frame.evaluate(
-                    """() => {
-                        const walk = (el) => {
-                            if (!el) return [];
-                            const items = [];
-                            const role = el.getAttribute && (el.getAttribute('role') || el.tagName.toLowerCase());
-                            const name = el.getAttribute && (
-                                el.getAttribute('aria-label') ||
-                                el.getAttribute('title') ||
-                                (el.innerText || '').trim().slice(0, 120)
-                            );
-                            if (name && role) items.push({role, name});
-                            for (const child of (el.children || []))
-                                items.push(...walk(child));
-                            return items;
-                        };
-                        return walk(document.body);
-                    }"""
-                )
-                if frame_snap:
-                    all_lines.append(f'[iframe: {frame.url[:80]}]')
-                    for item in frame_snap[:200]:
-                        r = item.get("role", "")
-                        n = (item.get("name", "") or "").strip()
-                        if n:
-                            line = f'[role="{r}"] "{n}"'
-                            if len(line) > 200:
-                                line = line[:197] + "..."
-                            all_lines.append(line)
-            except Exception:
-                continue
+        if char_count < max_chars:
+            for frame in page.frames:
+                if frame == page.main_frame:
+                    continue
+                if char_count >= max_chars:
+                    break
+                try:
+                    frame_snap = await frame.evaluate(
+                        """() => {
+                            const walk = (el) => {
+                                if (!el) return [];
+                                const items = [];
+                                const role = el.getAttribute && (el.getAttribute('role') || el.tagName.toLowerCase());
+                                const name = el.getAttribute && (
+                                    el.getAttribute('aria-label') ||
+                                    el.getAttribute('title') ||
+                                    (el.innerText || '').trim().slice(0, 120)
+                                );
+                                if (name && role) items.push({role, name});
+                                for (const child of (el.children || []))
+                                    items.push(...walk(child));
+                                return items;
+                            };
+                            return walk(document.body);
+                        }"""
+                    )
+                    if frame_snap:
+                        header = f'[iframe: {frame.url[:80]}]'
+                        all_lines.append(header)
+                        char_count += len(header) + 1
+                        for item in frame_snap[:200]:
+                            if char_count >= max_chars:
+                                break
+                            r = item.get("role", "")
+                            n = (item.get("name", "") or "").strip()
+                            if n:
+                                line = f'[role="{r}"] "{n}"'
+                                if len(line) > 200:
+                                    line = line[:197] + "..."
+                                all_lines.append(line)
+                                char_count += len(line) + 1
+                except Exception:
+                    continue
 
         if not all_lines:
             return "[No interactive elements in snapshot]"
-        return "\n".join(all_lines[:500])
+
+        result = "\n".join(all_lines)
+        if len(result) > max_chars:
+            result = result[:max_chars] + "\n... [DOM truncated]"
+        return result
 
     def _format_accessibility_tree(self, node: dict | None, prefix: str = "", max_lines: int = 500) -> list[str]:
         """Flatten accessibility tree to lines like [role=\"button\"] \"Submit\" for verifier and LLM."""
