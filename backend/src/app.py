@@ -32,8 +32,6 @@ Verifier.reset_simulation()
 
 HITL_PREFIX = "@@HITL@@"
 
-# if sys.platform == 'win32':
-#     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 def send_hitl(payload: dict):
     """Send a structured HITL message to the server over stdout."""
@@ -120,7 +118,7 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
     async with async_playwright() as p:
         print(f"Launching browser on port {video_port}...", flush=True)
         browser = await p.chromium.launch(
-            headless=True, args=[f"--remote-debugging-port={video_port}"]
+            headless=False, args=[f"--remote-debugging-port={video_port}"]
         )
         print(f"Browser launched on port {video_port}. Waiting for frontend connection...", flush=True)
         context = await browser.new_context()

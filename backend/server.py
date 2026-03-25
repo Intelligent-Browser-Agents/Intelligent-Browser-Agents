@@ -347,23 +347,23 @@ async def login_user(request: Request):
     error  = ''
     token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
     body = await request.json()
-    
+
     if token != '' and token != 'undefined':
         try:
             secret_key = os.getenv('TOKEN_SECRET')
             decoded = jwt.decode(token, secret_key, algorithms='HS256')
             return {'token': token, 'error': error}
         except jwt.InvalidTokenError as e:
-            return{'error': str(e)}
-
+            return {'error': str(e)}
+        
     username = body['username']
     password = body['password']
+
+    #print(password)
 
     if username == '' or password == '':
         error = 'Username or Password is Missing'
         return {'error' : error}
-
-    #print(password)
     
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
     hashed_password = hashed_password.decode('utf-8')
@@ -531,11 +531,25 @@ import json as _json
 # Shared map: user_id → asyncio.Queue  for HITL replies.
 # Any endpoint (REST, /ws/chat, or /ws/stream) can push a reply here.
 HITL_REPLY_QUEUES: dict[str, asyncio.Queue] = {}
+# True only while we have sent CLARIFICATION and are waiting for stdin reply (user only).
+HITL_ACCEPTING: dict[str, bool] = {}
+
+USER_HITL_REPLY_TYPE = "user_hitl_reply"
+
+
+def _drain_async_queue(q: asyncio.Queue) -> None:
+    while True:
+        try:
+            q.get_nowait()
+        except asyncio.QueueEmpty:
+            break
 
 
 @app.post("/api/hitl_reply/{user_id}")
 async def hitl_reply(user_id: str, request: Request):
     """REST endpoint the frontend can call to answer a clarification request."""
+    if not HITL_ACCEPTING.get(user_id):
+        return {"status": "error", "message": "No active clarification for this user_id."}
     body = await request.json()
     user_input = body.get("content", body.get("user_input", ""))
     queue = HITL_REPLY_QUEUES.get(user_id)
@@ -608,6 +622,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     # Register a shared reply queue so any endpoint can push replies
     reply_queue = asyncio.Queue()
     HITL_REPLY_QUEUES[user_id] = reply_queue
+    HITL_ACCEPTING[user_id] = False
 
     # Mutable ref so the listener can dispatch CDP input events once the
     # session is established (set after browser connects).
@@ -666,17 +681,31 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
         try:
             while True:
                 try:
-                    msg = await websocket.receive_json()
+                    text_data = await websocket.receive_text()
+                except WebSocketDisconnect:
+                    break
                 except Exception:
-                    raw = await websocket.receive_text()
-                    msg = {"content": raw}
+                    continue
+                try:
+                    msg = _json.loads(text_data)
+                except _json.JSONDecodeError:
+                    # Non-JSON payloads are not HITL (avoids misfires / partial frames).
+                    continue
 
                 if msg.get("type") == "INPUT":
                     await _dispatch_cdp_input(msg)
                     continue
 
-                print(f"[HITL] Received reply via WebSocket: {str(msg)[:200]}")
-                await reply_queue.put(msg)
+                # Only explicit user HITL replies while a clarification is active.
+                if (
+                    msg.get("type") == USER_HITL_REPLY_TYPE
+                    and HITL_ACCEPTING.get(user_id)
+                ):
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        print(f"[HITL] Received user_hitl_reply via WebSocket: {content[:200]!r}")
+                        await reply_queue.put({"content": content})
+                # Other message types are ignored for HITL (no queue).
         except Exception:
             pass
 
@@ -722,34 +751,41 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                         })
                     else:
                         print(f"[HITL] Sending clarification request to frontend")
-                        await websocket.send_json({
-                            "type": "CLARIFICATION",
-                            "message": hitl_message,
-                            "requested_fields": hitl_payload.get("requested_fields", []),
-                        })
-                        await websocket.send_json({
-                            "type": "LOG",
-                            "source": "AGENT",
-                            "content": f"[NEEDS INPUT] {hitl_message}",
-                        })
-
-                        print(f"[HITL] Waiting for user reply (user_id={user_id})…")
+                        _drain_async_queue(reply_queue)
+                        HITL_ACCEPTING[user_id] = True
                         try:
-                            ws_msg = await asyncio.wait_for(reply_queue.get(), timeout=300)
-                            user_input = ws_msg.get("content", ws_msg.get("user_input", ""))
-                            print(f"[HITL] Got reply: {str(user_input)[:200]}")
-                        except asyncio.TimeoutError:
-                            user_input = ""
-                            print("[HITL] Timed out waiting for reply")
+                            await websocket.send_json({
+                                "type": "CLARIFICATION",
+                                "message": hitl_message,
+                                "requested_fields": hitl_payload.get("requested_fields", []),
+                            })
+                            await websocket.send_json({
+                                "type": "LOG",
+                                "source": "AGENT",
+                                "content": f"[NEEDS INPUT] {hitl_message}",
+                            })
 
-                        reply_line = _json.dumps({"user_input": user_input}) + "\n"
-                        try:
-                            process.stdin.write(reply_line.encode("utf-8"))
-                            process.stdin.flush()
-                            print(f"[HITL] Wrote reply to subprocess stdin")
-                        except Exception as exc:
-                            print(f"[HITL] Failed to write to stdin: {exc}")
-                            break
+                            print(f"[HITL] Waiting for user reply (user_id={user_id})…")
+                            try:
+                                ws_msg = await asyncio.wait_for(reply_queue.get(), timeout=300)
+                                user_input = ws_msg.get("content", ws_msg.get("user_input", ""))
+                                if not isinstance(user_input, str):
+                                    user_input = str(user_input) if user_input is not None else ""
+                                print(f"[HITL] Got reply: {str(user_input)[:200]}")
+                            except asyncio.TimeoutError:
+                                user_input = ""
+                                print("[HITL] Timed out waiting for reply")
+
+                            reply_line = _json.dumps({"user_input": user_input}) + "\n"
+                            try:
+                                process.stdin.write(reply_line.encode("utf-8"))
+                                process.stdin.flush()
+                                print(f"[HITL] Wrote reply to subprocess stdin")
+                            except Exception as exc:
+                                print(f"[HITL] Failed to write to stdin: {exc}")
+                                break
+                        finally:
+                            HITL_ACCEPTING[user_id] = False
                 except Exception:
                     break
                 continue
@@ -809,9 +845,6 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                     "type": "STATUS",
                     "content": "Video streaming not available on this platform; continuing with logs only.",
                 })
-
-                print(NotImplementedError)
-            
                 await loop.run_in_executor(None, process.wait)
             except Exception as exc:
                 print(f"[STREAM] Browser/screencast error: {exc}")
@@ -829,6 +862,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     finally:
         # 5. Cleanup
         HITL_REPLY_QUEUES.pop(user_id, None)
+        HITL_ACCEPTING.pop(user_id, None)
 
         reply_listener_task.cancel()
         try:
@@ -847,6 +881,11 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
 
         try:
             await websocket.send_json({"type": "STATUS", "content": "Agent finished task."})
+        except Exception:
+            pass
+        # Client cleanup (live view, isAgentRunning) runs on socket onclose; must close the socket.
+        try:
+            await websocket.close()
         except Exception:
             pass
 

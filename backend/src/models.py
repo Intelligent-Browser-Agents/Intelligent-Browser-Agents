@@ -26,20 +26,19 @@ class ModelConfig:
 
 # Available model presets
 MODELS = {
-    # Google models
-    #"gemini-flash": ModelConfig(
-    #    name="gemini-3.1-flash-lite-preview",
-    #    provider="google",
-    #    api_key_env="GOOGLE_API_KEY"
-    #),
-    #"gemini-pro": ModelConfig(
-    #    name="gemini-2.5-pro",
-    #    provider="google",
-    #    api_key_env="GOOGLE_API_KEY"
-    #),
-    
-    
-    # OpenAI models (uncomment when needed)
+    # Google models (optional; set AGENT_MODELS to these keys to use)
+    "gemini-flash": ModelConfig(
+        name="gemini-3.1-flash-lite-preview",
+        provider="google",
+        api_key_env="GOOGLE_API_KEY"
+    ),
+    "gemini-pro": ModelConfig(
+        name="gemini-2.5-pro",
+        provider="google",
+        api_key_env="GOOGLE_API_KEY"
+    ),
+
+    # OpenAI models
     "gpt-4o": ModelConfig(
         name="gpt-4o",
         provider="openai",
@@ -66,12 +65,12 @@ MODELS = {
 
 # Assign specific models to each agent based on their needs
 AGENT_MODELS = {
-    "planner": "gpt-4o", # Smart reasoning for plan creation (1 call)
-    "decision": "gpt-4o-mini", # Routing decisions (N calls) - could use cheaper
-    "executor": "gpt-4o-mini", # Translating tasks to actions
-    "verifier": "gpt-4o-mini", # Checking results - could use cheaper
-    "fallback": "gpt-4o-mini", # Creative recovery strategies
-    "interaction": "gpt-4o-mini", # User-facing polish
+    "planner": "gpt-4o",  # Smart reasoning for plan creation (1 call)
+    "decision": "gpt-4o-mini",  # Routing decisions (N calls)
+    "executor": "gpt-4o-mini",  # Translating tasks to actions
+    "verifier": "gpt-4o-mini",  # Checking results
+    "fallback": "gpt-4o-mini",  # Recovery strategies
+    "interaction": "gpt-4o-mini",  # User-facing polish
 }
 
 # Temperature presets for different agent behaviors

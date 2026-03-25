@@ -599,7 +599,9 @@ export default function Dashboard() {
       }
       const streamSocket = socketRef.current;
       if (streamSocket && streamSocket.readyState === WebSocket.OPEN) {
-        streamSocket.send(JSON.stringify({ content: currentInput }));
+        streamSocket.send(
+          JSON.stringify({ type: "user_hitl_reply", content: currentInput })
+        );
       } else {
         sendThroughChatSocket(currentInput);
       }
@@ -674,6 +676,9 @@ export default function Dashboard() {
         setLiveFrame(`data:image/jpeg;base64,${msg.data}`);
       } else if (msg.type === "STATUS") {
         appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
+        if (msg.content === "Agent finished task." && socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.close();
+        }
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
         if (msg.content && msg.content.includes("[NODE]: __INTERRUPT__")) {
@@ -694,11 +699,10 @@ export default function Dashboard() {
     socketRef.current.onclose = () => {
       setLiveFrame(null);
       setIsHITL(false);
-      appendAgentLogLine(selectedChatId, sessionId, "STATUS: Agent finished task.");
       markSessionFinished(selectedChatId, sessionId);
       setIsAgentRunning(false);
       setCurrentRunSessionId(null);
-      console.log("Agent finished task.");
+      console.log("Agent stream closed.");
     };
   };
 
