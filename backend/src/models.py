@@ -37,19 +37,16 @@ MODELS = {
         provider="google",
         api_key_env="GOOGLE_API_KEY"
     ),
-    
-    
-    # OpenAI models (uncomment when needed)
-    # "gpt-4o": ModelConfig(
-    #     name="gpt-4o",
-    #     provider="openai",
-    #     api_key_env="OPENAI_API_KEY"
-    # ),
-    # "gpt-4o-mini": ModelConfig(
-    #     name="gpt-4o-mini",
-    #     provider="openai",
-    #     api_key_env="OPENAI_API_KEY"
-    # ),
+    "gpt-4o": ModelConfig(
+         name="gpt-4o",
+         provider="openai",
+         api_key_env="OPENAI_API_KEY"
+    ),
+    "gpt-4o-mini": ModelConfig(
+         name="gpt-4o-mini",
+         provider="openai",
+         api_key_env="OPENAI_API_KEY"
+    ),
     
     # Anthropic models (uncomment when needed)
     # "claude-sonnet": ModelConfig(
@@ -66,12 +63,12 @@ MODELS = {
 
 # Assign specific models to each agent based on their needs
 AGENT_MODELS = {
-    "planner": "gemini-flash", # Smart reasoning for plan creation (1 call)
-    "decision": "gemini-flash", # Routing decisions (N calls) - could use cheaper
-    "executor": "gemini-flash", # Translating tasks to actions
-    "verifier": "gemini-flash", # Checking results - could use cheaper
-    "fallback": "gemini-flash", # Creative recovery strategies
-    "interaction": "gemini-flash", # User-facing polish
+    "planner": "gpt-4o", # Smart reasoning for plan creation (1 call)
+    "decision": "gpt-4o-mini", # Routing decisions (N calls) - could use cheaper
+    "executor": "gpt-4o-mini", # Translating tasks to actions
+    "verifier": "gpt-4o-mini", # Checking results - could use cheaper
+    "fallback": "gpt-4o", # Creative recovery strategies
+    "interaction": "gpt-4o-mini", # User-facing polish
 }
 
 # Temperature presets for different agent behaviors

@@ -60,6 +60,19 @@ class Verifier:
             "confirm sign in",
             "sign-in request",
             "sign in request",
+            "verify you are human",
+            "verify you're human",
+            "are you a robot",
+            "not a robot",
+            "unusual traffic",
+            "automated queries",
+            "bot detection",
+            "security check",
+            "human verification",
+            "complete the security check",
+            "navigation_blocked",
+            "blocked by captcha or anti-bot",
+            "page appears blocked or empty",
         )
         if any(indicator in last_text_lower for indicator in human_block_indicators):
             verification_log = (

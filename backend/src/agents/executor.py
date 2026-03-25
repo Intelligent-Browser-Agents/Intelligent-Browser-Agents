@@ -6,6 +6,7 @@ Uses LangChain tool calls when possible; falls back to structured output.
 
 import re
 from typing import Any
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from execution import Action, dispatch_action, ActionArgs
@@ -116,8 +117,8 @@ class Executor:
                     message=str(e),
                     error_type="unknown",
                 )
-            # result is ExecutionOutput from handlers
-            return await self._finish_from_result(state, page, current_url, result)
+            normalized_result = self._normalize_tool_result(result, tool_name=name, tool_args=args)
+            return await self._finish_from_result(state, page, current_url, normalized_result)
         else:
             # Fallback: structured output (no tool_calls)
             try:
@@ -174,6 +175,46 @@ class Executor:
             "current_url": current_url,
         }
 
+    def _normalize_tool_result(self, result: Any, tool_name: str, tool_args: dict | None = None):
+        """
+        Normalize LangChain tool outputs to the ExecutionOutput-like shape expected by _finish_from_result.
+        Some utility tools (e.g., dom_search, list_links) return plain lists/dicts.
+        """
+        if hasattr(result, "status") and hasattr(result, "action"):
+            return result
+
+        if isinstance(result, list):
+            count = len(result)
+            preview_lines = [str(item) for item in result[:10]]
+            preview = "\n".join(preview_lines) if preview_lines else "[No items]"
+            return SimpleNamespace(
+                action=tool_name,
+                args=tool_args or {},
+                status="success",
+                error_type="none",
+                message=f"{tool_name} returned {count} item(s).",
+                extracted_text=f"{tool_name} results:\n{preview}",
+            )
+
+        if isinstance(result, dict):
+            return SimpleNamespace(
+                action=tool_name,
+                args=tool_args or {},
+                status="success",
+                error_type="none",
+                message=f"{tool_name} returned structured data.",
+                extracted_text=str(result),
+            )
+
+        return SimpleNamespace(
+            action=tool_name,
+            args=tool_args or {},
+            status="success",
+            error_type="none",
+            message=f"{tool_name} returned {type(result).__name__}.",
+            extracted_text=str(result) if result is not None else "",
+        )
+
     async def _finish_from_result(self, state, page, current_url, result):
         result_status = result.status
         result_error_type = result.error_type
@@ -192,20 +233,35 @@ class Executor:
             except Exception:
                 pass
 
-        if result_status == "success" and self._is_anti_bot_page(page.url):
-            result_status = "failure"
-            result_error_type = "navigation_blocked"
-            result_message = "Blocked by CAPTCHA or anti-bot challenge on the current search engine."
         new_url = current_url
-        if result_status == "success":
-            new_url = result.args.get("url") or page.url if result.action == "navigate" else page.url
-        else:
-            new_url = page.url
         after_state = ""
         try:
             after_state = await self._get_real_dom_snapshot(page)
         except Exception:
-            after_state = f"[URL after action: {new_url}]"
+            after_state = f"[URL after action: {page.url}]"
+
+        if result_status == "success" and self._is_anti_bot_page(page.url, after_state):
+            result_status = "failure"
+            result_error_type = "navigation_blocked"
+            result_message = "Blocked by CAPTCHA or anti-bot challenge."
+
+        if (
+            result_status == "success"
+            and result.action in ("search", "navigate")
+            and after_state
+            and after_state.count('[role=') < 5
+        ):
+            result_status = "failure"
+            result_error_type = "navigation_blocked"
+            result_message = (
+                f"Page appears blocked or empty after {result.action} "
+                f"(only {after_state.count('[role=')} interactive elements detected)."
+            )
+
+        if result_status == "success":
+            new_url = result.args.get("url") or page.url if result.action == "navigate" else page.url
+        else:
+            new_url = page.url
 
         # For extract_content, show the extracted text to the verifier
         extracted = getattr(result, "extracted_text", None)
@@ -600,16 +656,41 @@ class Executor:
 
         return None
 
-    def _is_anti_bot_page(self, url: str) -> bool:
-        text = (url or "").lower()
-        patterns = [
+    def _is_anti_bot_page(self, url: str, dom_snapshot: str = "") -> bool:
+        url_lower = (url or "").lower()
+        url_patterns = [
             "google.com/sorry",
             "/sorry/index",
-            "captcha",
             "unusual+traffic",
-            "challenge",
+            "captcha",
+            "challenge-platform",
+            "challenges.cloudflare.com",
+            "geo.captcha-delivery",
+            "arkoselabs.com",
+            "perfdrive.com",
+            "hcaptcha.com",
         ]
-        return any(pattern in text for pattern in patterns)
+        if any(p in url_lower for p in url_patterns):
+            return True
+
+        dom_lower = (dom_snapshot or "").lower()
+        content_signals = [
+            "captcha",
+            "verify you are human",
+            "verify you're human",
+            "are you a robot",
+            "not a robot",
+            "unusual traffic",
+            "automated queries",
+            "bot detection",
+            "security check",
+            "please verify",
+            "challenge-container",
+            "human verification",
+            "complete the security check",
+            "blocked your ip",
+        ]
+        return any(s in dom_lower for s in content_signals)
 
     def _is_click_target_in_dom(self, role: str | None, name: str | None, dom_snapshot: str) -> bool:
         if not role or not name:
