@@ -4,13 +4,13 @@ Translates high-level plan steps into specific browser actions.
 Uses LangChain tool calls when possible; falls back to structured output.
 """
 
+import asyncio
 import json
 import re
 from typing import Any
 from urllib.parse import urlparse
 
 from execution import Action, dispatch_action, ActionArgs
-from execution.handlers import handle_extract_content
 from execution.langchain_tools import get_browser_tools
 from execution.models import ExecutionOutput
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -34,12 +34,6 @@ class Executor:
         self.system_prompt_tools = get_execution_tools_prompt()
         self.runtime = runtime
 
-    _EXTRACT_PATTERNS = re.compile(
-        r"\bextract\b|\bsummariz|\bretrieve\b|\bcollect\b|\bgather\b|\bpresent\b"
-        r"|\bdisplay\b.{0,30}\b(?:information|schedule|data|content|details|results)",
-        re.IGNORECASE,
-    )
-
     async def __call__(self, state: ProjectState) -> dict:
         page = self.runtime.get("page")
         if page is None:
@@ -49,19 +43,12 @@ class Executor:
         current_url = state.get("current_url", "unknown")
         user_intent = self._get_user_intent(state)
 
-        # --- Deterministic short-circuit: extraction/presentation steps ---
-        if self._EXTRACT_PATTERNS.search(current_task):
-            result = await handle_extract_content(page, max_chars=15000)
-            print(f"[executor - {result.action} result]: ", result)
-            return await self._finish_from_result(state, page, current_url, result)
-
-        # --- Normal LLM-driven path ---
-
         dom_snapshot = await self._get_real_dom_snapshot(page)
         plan_step_url = self._extract_first_url(current_task) or "none"
         credentials_block = self._build_credentials_context(state, current_task, current_url)
         recent_actions_block = self._build_recent_actions(state)
 
+        mission_status = state.get("mission_status") or ""
         context = f"""
         MAIN_GOAL: {user_intent}
 
@@ -75,6 +62,9 @@ class Executor:
         {dom_snapshot}
         {credentials_block}
         {recent_actions_block}
+
+        MISSION_STATUS:
+        {mission_status}
 
         Use exactly one of the available tools to perform this plan step. Prefer duckduckgo.com or bing.com over google.com unless explicitly required.
         """
@@ -93,9 +83,23 @@ class Executor:
         llm_with_tools = self.llm_chat.bind_tools(tools)
         tool_map = {t.name: t for t in tools}
 
+        ctx_chars = sum(len(m.content) for m in tool_messages)
+        print(f"[executor] Calling LLM for tool selection... (context ~{ctx_chars} chars)", flush=True)
         try:
-            response = await llm_with_tools.ainvoke(tool_messages)
+            response = await asyncio.wait_for(
+                llm_with_tools.ainvoke(tool_messages),
+                timeout=45,
+            )
+        except asyncio.TimeoutError:
+            print("[executor] LLM call timed out after 45s", flush=True)
+            return self._return_failure(
+                state, current_url,
+                action="none", args={},
+                message="Executor LLM timed out (45s). Context may be too large or API unresponsive.",
+                error_type="unknown",
+            )
         except Exception as e:
+            print(f"[executor] LLM call failed: {e}", flush=True)
             return self._return_failure(
                 state, current_url,
                 action="none", args={},
@@ -115,6 +119,24 @@ class Executor:
                     error_type="unknown",
                 )
             args = self._normalize_tool_args(name, args, current_task)
+
+            # Deterministic credential enforcement for login-form typing.
+            # The LLM may hallucinate placeholder credentials (e.g. NID@ucf.edu /
+            # Password123). For `type` during a login step, we overwrite the
+            # tool arg with the *actual* saved credentials for the best-matching
+            # service, based on whether the tool arg looks "email-like"
+            # (contains '@') or "password-like" (does not).
+            if name == "type" and isinstance(args, dict) and isinstance(args.get("text"), str):
+                if self._should_enforce_saved_credentials_for_typing(current_task):
+                    creds = state.get("user_credentials") or {}
+                    match = self._find_matching_service(creds, current_task, current_url)
+                    if match:
+                        expected_username = (match.get("username") or match.get("email") or "").strip()
+                        expected_password = (match.get("password") or "").strip()
+                        if expected_username and expected_password:
+                            looks_emailish = "@" in args.get("text", "")
+                            args["text"] = expected_username if looks_emailish else expected_password
+
             if name in {"navigate", "click", "type", "search", "scroll", "press_key", "wait"} and not args:
                 return self._return_failure(
                     state, current_url,
@@ -206,12 +228,25 @@ class Executor:
             text = json.dumps(result, ensure_ascii=False, indent=2)
             if len(text) > 14000:
                 text = text[:14000] + "\n... [truncated]"
+            # Include a brief preview of discovered items so the next LLM call
+            # can see *what* was found and click one instead of re-discovering.
+            preview_parts = []
+            for item in result[:5]:
+                if isinstance(item, dict):
+                    r = item.get("role", "")
+                    n = item.get("name", "")
+                    if r and n:
+                        preview_parts.append(f"  - click(role={r}, name={n})")
+            preview = "\n".join(preview_parts) if preview_parts else ""
+            msg = f"Tool {tool_name} returned {len(result)} item(s)."
+            if preview:
+                msg += f" Clickable targets:\n{preview}"
             return ExecutionOutput(
                 action=tool_name,
                 args={},
                 status="success",
                 error_type="none",
-                message=f"Tool {tool_name} returned {len(result)} item(s).",
+                message=msg,
                 execution_time_ms=0,
                 extracted_text=text,
             )
@@ -253,6 +288,8 @@ class Executor:
         elif tool_name == "click":
             role = (normalized.get("role") or "").strip().lower()
             name = (normalized.get("name") or "").strip()
+            if role in ("a", "anchor", "hyperlink"):
+                role = "link"
             normalized["role"] = role
             normalized["name"] = name
 
@@ -575,6 +612,7 @@ class Executor:
             action_line = ""
             args_line = ""
             status_line = ""
+            message_line = ""
             for line in log.split("\n"):
                 stripped = line.strip()
                 if stripped.startswith("[Executor] Action:"):
@@ -583,12 +621,17 @@ class Executor:
                     args_line = stripped.replace("[Executor] ", "")
                 elif stripped.startswith("[Executor] Status:"):
                     status_line = stripped.replace("[Executor] ", "")
+                elif stripped.startswith("[Executor] Message:"):
+                    message_line = stripped.replace("[Executor] ", "")
             if action_line:
-                summaries.append(f"  {i}. {action_line} | {args_line} | {status_line}")
+                entry = f"  {i}. {action_line} | {args_line} | {status_line}"
+                if message_line:
+                    entry += f"\n     Result: {message_line[:500]}"
+                summaries.append(entry)
         if not summaries:
             return ""
         return (
-            "\n\nPREVIOUS_ACTIONS (already executed — do NOT repeat a successful action; do the NEXT step in the login sequence):\n"
+            "\n\nPREVIOUS_ACTIONS (already executed — do NOT repeat; if discovery found items, CLICK one):\n"
             + "\n".join(summaries)
         )
 
@@ -597,6 +640,22 @@ class Executor:
         r"|\bauthenticat|\bsaved credentials\b",
         re.IGNORECASE,
     )
+
+    @staticmethod
+    def _should_enforce_saved_credentials_for_typing(current_task: str) -> bool:
+        """
+        Only rewrite `type` args when the plan step is clearly about login/credentials.
+        URL-matched services alone are not enough — otherwise navigation on my.ucf.edu
+        overwrites arbitrary typing with the saved password.
+        """
+        t = (current_task or "").lower()
+        nav_like = any(p in t for p in (
+            "navigate", "go to", "open the", "visit",
+        ))
+        if nav_like and not Executor._LOGIN_KEYWORDS.search(current_task or ""):
+            return False
+        return bool(Executor._LOGIN_KEYWORDS.search(current_task or ""))
+
     _FORM_FILL_KEYWORDS = re.compile(
         r"\bfill\b|\benter\b|\bsubmit\b|\bapply\b|\bregister\b|\bsign\s*up\b"
         r"|\bpersonal\s+info|\bprofile\b|\bpayment\b|\bcheckout\b",

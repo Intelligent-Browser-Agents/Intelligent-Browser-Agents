@@ -90,13 +90,15 @@ class InteractionAgent:
             if dom_cache:
                 extracted_content = dom_cache[-2:]  # most recent page snapshots
 
-        # Detect if fallback requested human browser interaction
-        needs_human_action = any(
-            "[Fallback] Update Type: request_human_action" in (log or "")
-            for log in reasoning_log
-        )
+        # Use status_signals to detect if human action is needed (current,
+        # not historical).  A non-empty blocking_issue means the fallback
+        # just requested human intervention for this specific cycle.
+        signals = state.get("status_signals") or {}
+        needs_human_action = bool(signals.get("blocking_issue"))
 
-        if needs_human_action:
+        if is_complete:
+            system_status = "goal_completed"
+        elif needs_human_action:
             system_status = "needs_human_action"
         else:
             system_status = "goal_completed"
@@ -107,6 +109,7 @@ class InteractionAgent:
         ])
         extracted_block = "\n\n---\n\n".join(extracted_content) if extracted_content else "(No content extracted from pages.)"
 
+        mission_status = state.get("mission_status") or ""
         context = f"""
             MAIN_GOAL: {user_intent}
 
@@ -121,6 +124,9 @@ class InteractionAgent:
             {actions_summary}
 
             SYSTEM_STATUS: {system_status}
+
+            MISSION_STATUS:
+            {mission_status}
 
             Generate a user-facing response based on this information. If EXTRACTED_CONTENT is present, summarize or use it to answer the user's goal.
             """

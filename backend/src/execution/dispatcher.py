@@ -16,6 +16,7 @@ from .handlers import (
     handle_press_key,
     handle_wait,
     handle_extract_content,
+    handle_go_back,
 )
 
 
@@ -48,6 +49,7 @@ async def dispatch_action(page: Page, action: Action) -> ExecutionOutput:
         "press_key": lambda: handle_press_key(page, action.args.key),
         "wait": lambda: handle_wait(page, action.args.seconds),
         "extract_content": lambda: handle_extract_content(page, max_chars=action.args.max_chars or 15000),
+        "go_back": lambda: handle_go_back(page),
     }
 
     # Get handler for the action

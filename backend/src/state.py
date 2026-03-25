@@ -56,6 +56,8 @@ class ProjectState(TypedDict):
     current_step_index: int  # Which step we're on (0-based)
     number_of_transactions: int  # Number of transactions completed
     step_attempts: int  # Attempts made on the current step
+    stall_cycles: int  # Consecutive verify cycles without step completion (forces fallback when capped)
+    stall_tracked_step: int  # Plan step index the stall counter is tied to
     max_step_attempts: int  # Max retries before aborting
     max_transactions: int  # Max graph transactions before aborting
     
@@ -73,3 +75,7 @@ class ProjectState(TypedDict):
 
     # User-provided credentials (service logins, personal info, payment, experience)
     user_credentials: Optional[Dict]
+
+    # Mission status — living document accessible to all agents
+    mission_status: Optional[str]          # Rendered markdown status page
+    status_signals: Optional[Dict]         # Accumulated structured signals (HITL events, milestones, login phase, etc.)

@@ -28,7 +28,7 @@ class IntElementsData(BaseModel):
     num_of_elements: int 
     interactive_elements: list
 
-class FuncFailed(BaseException):
+class FuncFailed(BaseModel):
     tool_name: str
     status: str
     error: Any
@@ -55,6 +55,11 @@ def infer_role_from_tag(tag: str, attrs: dict) -> str:
         return 'button'
     elif tag == 'a':
         return 'link'
+    # Many portal frameworks use clickable div/span containers with onclick
+    elif tag in ('div', 'span'):
+        if 'onclick' in attrs or 'ng-click' in attrs or 'data-action' in attrs:
+            return 'button'
+        return 'generic'
     elif tag == 'input':
         input_type = attrs.get('type', 'text')
         if input_type in ['text', 'email', 'password', 'tel', 'url']:
@@ -176,7 +181,32 @@ async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
             if not title or not title.strip():
                 title = "page"
 
-            dom_tree = await page.content()
+            # NOTE: PeopleSoft/UCF-like portals often render key navigation/login
+            # elements inside iframes. `page.content()` only covers the main
+            # frame, which causes `list_links` to return 0 items even when
+            # the elements are visible (via accessibility snapshots).
+            #
+            # We concatenate HTML from all frames so downstream BeautifulSoup
+            # extraction can "see" iframe content too.
+            dom_parts: list[str] = []
+            max_total_chars = 600_000  # prevent runaway DOM extraction
+            per_frame_cap = 120_000      # avoid starving later iframes
+            total_chars = 0
+            for frame in page.frames:
+                try:
+                    frame_html = await frame.content()
+                except Exception:
+                    continue
+                if not frame_html:
+                    continue
+                if len(frame_html) > per_frame_cap:
+                    frame_html = frame_html[:per_frame_cap]
+                dom_parts.append(f"<!-- FRAME_URL: {getattr(frame, 'url', '')} -->\n{frame_html}")
+                total_chars += len(frame_html)
+                if total_chars >= max_total_chars:
+                    break
+
+            dom_tree = "\n".join(dom_parts) if dom_parts else await page.content()
         except PlaywrightError as e:
             data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
             return data.model_dump_json(indent = 4)
@@ -371,6 +401,50 @@ def list_dom_links_from_interactive_json(interactive_json: str, filter_text: str
         out.append({"role": el.get("role"), "name": name, "url": el.get("url"), "title": el.get("title")})
         if len(out) >= max_results:
             break
+    return out
+
+
+def list_dom_click_targets_from_interactive_json(
+    interactive_json: str,
+    filter_text: str | None = None,
+    max_results: int = 50,
+    roles: tuple[str, ...] = ("link", "button", "tab"),
+) -> list[dict]:
+    """
+    List interactive elements that are suitable click targets.
+
+    Unlike list_dom_links_from_interactive_json(), this does NOT restrict results
+    to role == "link". Many portal sign-in elements (e.g. "myUCF") are buttons.
+    """
+    try:
+        data = json.loads(interactive_json)
+    except Exception:
+        return []
+
+    elements = data.get("interactive_elements") or []
+    out: list[dict] = []
+    f = (filter_text or "").lower()
+
+    for el in elements:
+        role = (el.get("role") or "").strip().lower()
+        if role and role not in roles:
+            continue
+        name = (el.get("name") or "").strip()
+        if not name:
+            continue
+        if f and f not in name.lower():
+            continue
+        out.append(
+            {
+                "role": role,
+                "name": name,
+                "url": el.get("url"),
+                "title": el.get("title"),
+            }
+        )
+        if len(out) >= max_results:
+            break
+
     return out
 
 

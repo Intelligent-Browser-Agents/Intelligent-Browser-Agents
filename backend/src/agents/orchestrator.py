@@ -139,6 +139,62 @@ class Orchestrator:
         user_intent = self._get_user_intent(state)
         recent_log = (state.get("reasoning_log") or [])[-3:]
 
+        # Post-HITL handling via status_signals.
+        # When the user just completed a HITL (e.g. MFA) and the login_phase
+        # signal confirms completion, advance past the current step.
+        if not step_complete:
+            signals = state.get("status_signals") or {}
+            hitl_events = signals.get("hitl_events") or []
+            login_phase = signals.get("login_phase", "not_started")
+
+            just_returned_from_hitl = bool(hitl_events) and (
+                hitl_events[-1].get("transaction", -1)
+                >= state.get("number_of_transactions", 0) - 2
+            )
+            if just_returned_from_hitl and login_phase == "completed":
+                next_step = min(safe_step + 1, total_steps - 1)
+                next_task = current_plan[next_step]
+                if safe_step >= total_steps - 1:
+                    return {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "current_step_index": safe_step,
+                        "plan_status": "MAINTAIN",
+                        "current_task": current_plan[safe_step],
+                        "reasoning_log": ["[Decision] HITL completed login/MFA; marking plan complete."],
+                        "is_complete": True,
+                        "handoff_interaction": True,
+                        "needs_fallback": False,
+                        "mission_failed": False,
+                    }
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": next_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": next_task,
+                    "reasoning_log": [f"[Decision] HITL completed login/MFA; advancing to step {next_step + 1}/{total_steps}."],
+                    "is_complete": False,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                    "last_step_complete": False,
+                }
+
+        mission_status = state.get("mission_status") or ""
+
+        # Extract the verifier's verdict and message so the decision-maker
+        # can reason over evidence, not just the step_complete boolean.
+        verifier_verdict = ""
+        verifier_message = ""
+        for entry in reversed(recent_log):
+            entry_str = str(entry)
+            if "[Verifier] Verdict:" in entry_str:
+                for line in entry_str.split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("[Verifier] Verdict:"):
+                        verifier_verdict = stripped.split(":", 1)[1].strip()
+                    elif stripped.startswith("[Verifier] Message:"):
+                        verifier_message = stripped.split(":", 1)[1].strip()
+                break
+
         context = f"""
 USER GOAL: {user_intent}
 
@@ -149,8 +205,14 @@ CURRENT STEP INDEX: {safe_step + 1} (1-based)
 LAST STEP COMPLETE: {step_complete}
 CURRENT TASK: {current_task}
 
+VERIFIER VERDICT: {verifier_verdict or "(unknown)"}
+VERIFIER MESSAGE: {verifier_message or "(none)"}
+
 RECENT CONTEXT (execution/verification):
 {chr(10).join(recent_log) if recent_log else "  (none yet)"}
+
+MISSION_STATUS:
+{mission_status}
 
 Based on the rules, output exactly one action: advance, retry, or plan_complete.
 """
@@ -161,6 +223,8 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
         ]
 
         # Unambiguous cases: skip LLM to avoid wrong "retry" and prevent loops
+        goal_already_complete = state.get("is_complete", False)
+
         if step_complete and safe_step >= total_steps - 1:
             original_step = current_plan[safe_step]
             completed_fallback_prereq = (
@@ -182,17 +246,38 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                     "mission_failed": False,
                     "last_step_complete": False,
                 }
-            reasoning = "[Decision] Final step verified complete; marking plan complete."
+            # Only mark plan complete if the verifier also confirmed
+            # goal_complete. If step_complete=True but goal_complete=False
+            # (e.g. found a link but didn't extract the data), retry so
+            # the executor can finish the actual goal.
+            if goal_already_complete:
+                reasoning = "[Decision] Final step verified complete; marking plan complete."
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": safe_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": original_step,
+                    "reasoning_log": [reasoning],
+                    "is_complete": True,
+                    "handoff_interaction": True,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                }
+            # step_complete but goal NOT complete — more work needed
+            reasoning = (
+                f"[Decision] Step {safe_step + 1}/{total_steps} marked complete "
+                f"but the overall goal is not yet achieved; retrying to finish."
+            )
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": safe_step,
                 "plan_status": "MAINTAIN",
                 "current_task": original_step,
                 "reasoning_log": [reasoning],
-                "is_complete": True,
-                "handoff_interaction": True,
+                "is_complete": False,
                 "needs_fallback": False,
                 "mission_failed": False,
+                "last_step_complete": False,
             }
         if step_complete and safe_step < total_steps - 1:
             original_step = current_plan[safe_step]
@@ -328,26 +413,6 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             "mission_failed": False,
         }
 
-    def _is_presentation_only_step(self, task: str) -> bool:
-        """True if the step is only about presenting/summarizing for the user (no browser action)."""
-        if not (task or "").strip():
-            return False
-        t = task.lower().strip()
-        presentation_markers = (
-            "present the",
-            "present the gathered",
-            "summarize",
-            "summarise",
-            "tell the user",
-            "tell the user about",
-            "report back",
-            "report to the user",
-            "give the user",
-            "provide the user",
-            "share the",
-        )
-        return any(m in t for m in presentation_markers)
-
     def _get_user_intent(self, state: ProjectState) -> str:
         user_message = state["messages"][0] if state["messages"] else None
         if isinstance(user_message, dict):
@@ -422,21 +487,11 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
         )
 
     def _get_simulated_page_context(self, url: str, step: int, intent: str) -> str:
-        if "ucf" in url.lower() or "login" in intent.lower():
-            stages = [
-                "UCF homepage loaded. Search and navigation elements are visible.",
-                "User has interacted with the page and relevant controls are available.",
-                "Progress has been made toward the requested task.",
-                "Near completion with final interactions pending.",
-                "Task completed successfully.",
-            ]
-        else:
-            stages = [
-                f"Page loaded at {url}. Navigation and content elements visible.",
-                "Interacted with page. Elements responding to actions.",
-                "Progress made. Page state updated.",
-                "Near completion. Final actions pending.",
-                "Task completed successfully.",
-            ]
-
+        stages = [
+            f"Page loaded at {url}. Navigation and content elements visible.",
+            "Interacted with page. Elements responding to actions.",
+            "Progress made. Page state updated.",
+            "Near completion. Final actions pending.",
+            "Task completed successfully.",
+        ]
         return stages[min(step, len(stages) - 1)]

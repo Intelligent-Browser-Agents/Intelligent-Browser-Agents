@@ -26,6 +26,12 @@ class Fallback:
         reasoning_log = state.get("reasoning_log", [])
         user_intent = self._get_user_intent(state)
         current_url = state.get("current_url", "")
+        dom_cache = state.get("dom_cache") or []
+        last_dom_snapshot = dom_cache[-1] if dom_cache else ""
+        # Keep the context bounded; dom_cache entries can be large.
+        last_dom_snapshot = (last_dom_snapshot or "").strip()[:12000]
+        previous_dom_snapshot = dom_cache[-2] if len(dom_cache) >= 2 else ""
+        previous_dom_snapshot = (previous_dom_snapshot or "").strip()[:8000]
 
         last_verification = self._find_latest_log(reasoning_log, "[Verifier]") or "Verification failed."
         last_execution = (
@@ -34,6 +40,7 @@ class Fallback:
             or "No execution log."
         )
 
+        mission_status = state.get("mission_status") or ""
         context = f"""
 MAIN_GOAL: {user_intent}
 
@@ -46,6 +53,16 @@ EXECUTION_OUTPUT:
 {last_execution[:500]}
 
 CURRENT_URL: {current_url}
+
+AFTER_STATE (from dom_cache; use as DOM evidence):
+LAST_DOM_SNAPSHOT:
+{last_dom_snapshot or "[dom_cache missing]"}
+
+PREVIOUS_DOM_SNAPSHOT (optional):
+{previous_dom_snapshot or "[not available]"}
+
+MISSION_STATUS:
+{mission_status}
 
 Diagnose the failure and propose a recovery. Use update_type: revise_step with proposed_step for a single revised instruction; use insert_step_before with insert_step to add a prerequisite; use request_context if user input is needed; use abort only if the goal cannot be continued.
 """
@@ -76,7 +93,9 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 or (strategy.insert_step or "").strip()
                 or current_task
             )
+
             needs_human = strategy.update_type == "request_human_action"
+
             fallback_log = (
                 f"[Fallback] Update Type: {strategy.update_type}\n"
                 f"[Fallback] Diagnosis: {strategy.diagnosis}\n"

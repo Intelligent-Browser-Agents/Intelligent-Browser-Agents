@@ -39,13 +39,13 @@ MODELS = {
     ),
 
     # OpenAI models
-    "gpt-4o": ModelConfig(
-        name="gpt-4o",
+    "gpt-5.4": ModelConfig(
+        name="gpt-5.4",
         provider="openai",
         api_key_env="OPENAI_API_KEY"
     ),
-    "gpt-4o-mini": ModelConfig(
-        name="gpt-4o-mini",
+    "gpt-5.4-mini": ModelConfig(
+        name="gpt-5.4-mini",
         provider="openai",
         api_key_env="OPENAI_API_KEY"
     ),
@@ -65,12 +65,12 @@ MODELS = {
 
 # Assign specific models to each agent based on their needs
 AGENT_MODELS = {
-    "planner": "gpt-4o",  # Smart reasoning for plan creation (1 call)
-    "decision": "gpt-4o-mini",  # Routing decisions (N calls)
-    "executor": "gpt-4o-mini",  # Translating tasks to actions
-    "verifier": "gpt-4o-mini",  # Checking results
-    "fallback": "gpt-4o-mini",  # Recovery strategies
-    "interaction": "gpt-4o-mini",  # User-facing polish
+    "planner": "gpt-5.4",  # Smart reasoning for plan creation (1 call)
+    "decision": "gpt-5.4",  # Routing decisions (N calls)
+    "executor": "gpt-5.4",  # Translating tasks to actions
+    "verifier": "gpt-5.4",  # Checking results
+    "fallback": "gpt-5.4",  # Recovery strategies
+    "interaction": "gpt-5.4",  # User-facing polish
 }
 
 # Temperature presets for different agent behaviors
@@ -124,10 +124,15 @@ def get_llm(
     
     LLMClass = _get_llm_class(config.provider)
     
+    extra_kwargs = {}
+    if config.provider == "openai":
+        extra_kwargs["request_timeout"] = 60
+
     llm = LLMClass(
         model=config.name,
         temperature=temperature,
         api_key=api_key,
+        **extra_kwargs,
     )
     
     if schema:

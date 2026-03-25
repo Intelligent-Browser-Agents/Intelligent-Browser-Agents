@@ -21,6 +21,7 @@ from .handlers import (
     handle_press_key,
     handle_wait,
     handle_extract_content,
+    handle_go_back,
 )
 from dom_extraction import dom_extractor
 
@@ -85,6 +86,11 @@ class ListLinksInput(BaseModel):
     max_results: int = Field(default=30, ge=1, le=100, description="Maximum number of links to return")
 
 
+class GoBackInput(BaseModel):
+    """Input for go_back tool (no arguments needed)."""
+    pass
+
+
 # -----------------------------------------------------------------------------
 # Tool factory: build tools bound to a Playwright page
 # -----------------------------------------------------------------------------
@@ -134,9 +140,15 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
         """
         dom_json, *_ = await dom_extractor.main(page)
         interactive_json = dom_extractor.retrieve_interactive_elements(dom_json)
-        return dom_extractor.list_dom_links_from_interactive_json(
-            interactive_json, filter_text=filter_text, max_results=max_results
+        return dom_extractor.list_dom_click_targets_from_interactive_json(
+            interactive_json,
+            filter_text=filter_text,
+            max_results=max_results,
+            roles=("link", "button", "tab"),
         )
+
+    async def go_back():
+        return await handle_go_back(page)
 
     return [
         StructuredTool.from_function(
@@ -198,5 +210,11 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
             name="list_links",
             description="List link-like elements (role='link', name) on the current page, optionally filtered by visible text. Use to choose a link to click based on its name/title.",
             args_schema=ListLinksInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=go_back,
+            name="go_back",
+            description="Go back to the previous page (browser back button). Use when you navigated to the wrong page and need to return to try a different path.",
+            args_schema=GoBackInput,
         ),
     ]

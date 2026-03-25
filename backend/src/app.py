@@ -119,12 +119,16 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
         "needs_fallback": False,
         "last_step_complete": False,
         "step_attempts": 0,
+        "stall_cycles": 0,
+        "stall_tracked_step": -1,
         "max_step_attempts": 6,
         "max_transactions": 80,
         "mission_failed": False,
         "abort_reason": None,
         "screenshot": None,
         "user_credentials": credentials or {},
+        "mission_status": "",
+        "status_signals": {},
     }
 
     print("=" * 60, flush=True)
@@ -144,6 +148,11 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
         print(f"Browser launched on port {video_port}. Waiting for frontend connection...", flush=True)
         context = await browser.new_context()
         page = await context.new_page()
+
+        # Auto-dismiss JavaScript dialogs (alert/confirm/prompt/beforeunload).
+        # An unhandled dialog blocks Playwright's event loop, which freezes
+        # all async I/O including LLM API calls.
+        page.on("dialog", lambda dialog: asyncio.ensure_future(dialog.accept()))
 
         runtime = {"page": page}
         checkpointer = MemorySaver()
