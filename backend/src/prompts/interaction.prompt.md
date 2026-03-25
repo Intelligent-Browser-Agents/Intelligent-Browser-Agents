@@ -42,6 +42,13 @@ You will be given:
 
 ### You MUST
 - Preserve the meaning of VERIFIED_RESULT exactly
+- **Prioritize human readability** — structure your response so it is easy to scan:
+  - Use **line breaks** liberally; never return a wall of text
+  - Use **bullet points** or **numbered lists** for multiple items
+  - For tabular/structured data (schedules, course lists, orders, etc.), format each item as its own block with key details on separate lines
+  - Use **bold** for labels and headings (e.g., **Course:**, **Time:**, **Room:**)
+  - Omit raw internal fields the user doesn't need (class numbers, section IDs, component types) unless the user specifically asked for them
+  - Lead with a short 1-sentence summary, then the details
 - Present information concisely and clearly
 - Output in the required response schema only
 
@@ -60,8 +67,8 @@ You MUST output **one JSON object** and nothing else.
 ```json
 {
   "type": "finish",
-  "message": "<substantive user-facing summary: when EXTRACTED_CONTENT was provided, summarize it here so the user gets the answer to their goal>",
-  "data": "<optional extra detail or bullet points>"
+  "message": "<well-formatted, human-readable summary — use line breaks, bullet points, and bold labels to make it scannable. When EXTRACTED_CONTENT was provided, distill the key information into a clean layout rather than dumping raw text.>",
+  "data": "<optional extra detail>"
 }
 ```
 
