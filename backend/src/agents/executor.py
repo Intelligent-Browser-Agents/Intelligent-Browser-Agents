@@ -114,14 +114,6 @@ class Executor:
                     message="Model returned invalid or unknown tool call.",
                     error_type="unknown",
                 )
-            name, args, alignment_error = self._align_tool_with_task(name, args, current_task)
-            if alignment_error:
-                return self._return_failure(
-                    state, current_url,
-                    action=name, args=args if isinstance(args, dict) else {},
-                    message=alignment_error,
-                    error_type="ambiguous_step",
-                )
             args = self._normalize_tool_args(name, args, current_task)
             if name in {"navigate", "click", "type", "search", "scroll", "press_key", "wait"} and not args:
                 return self._return_failure(
@@ -715,27 +707,6 @@ class Executor:
             return services[0]
 
         return None
-
-    def _align_tool_with_task(self, tool_name: str, args: Any, current_task: str) -> tuple[str, dict, str | None]:
-        """
-        Enforce basic task/action consistency so navigation steps do not drift into
-        unrelated actions (scroll/list_links/dom_search) and loop.
-        """
-        task = (current_task or "").strip().lower()
-        args_dict = args if isinstance(args, dict) else {}
-        is_navigation_step = bool(re.search(r"\b(navigate|go to|open)\b", task))
-
-        if is_navigation_step and tool_name != "navigate":
-            explicit_url = self._clean_url(self._extract_first_url(current_task))
-            if explicit_url:
-                return "navigate", {"url": explicit_url}, None
-            return (
-                tool_name,
-                args_dict,
-                f"Current task is navigation-oriented ('{current_task}'); choose navigate(url) instead of {tool_name}.",
-            )
-
-        return tool_name, args_dict, None
 
     def _is_anti_bot_page(self, url: str) -> bool:
         text = (url or "").lower()

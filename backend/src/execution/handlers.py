@@ -23,7 +23,12 @@ async def handle_navigate(page: Page, url: str) -> ExecutionOutput:
     start = asyncio.get_event_loop().time()
 
     try:
-        await page.goto(url, timeout=10000)
+        await page.goto(url, timeout=15000, wait_until="domcontentloaded")
+        # Give dynamic login portals a short stabilization window before verifier snapshot.
+        try:
+            await page.wait_for_load_state("networkidle", timeout=3000)
+        except Exception:
+            pass
         elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
 
         return ExecutionOutput(
