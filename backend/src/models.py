@@ -27,29 +27,29 @@ class ModelConfig:
 # Available model presets
 MODELS = {
     # Google models
-    "gemini-flash": ModelConfig(
-        name="gemini-3.1-flash-lite-preview",
-        provider="google",
-        api_key_env="GOOGLE_API_KEY"
-    ),
-    "gemini-pro": ModelConfig(
-        name="gemini-2.5-pro",
-        provider="google",
-        api_key_env="GOOGLE_API_KEY"
-    ),
+    #"gemini-flash": ModelConfig(
+    #    name="gemini-3.1-flash-lite-preview",
+    #    provider="google",
+    #    api_key_env="GOOGLE_API_KEY"
+    #),
+    #"gemini-pro": ModelConfig(
+    #    name="gemini-2.5-pro",
+    #    provider="google",
+    #    api_key_env="GOOGLE_API_KEY"
+    #),
     
     
     # OpenAI models (uncomment when needed)
-    # "gpt-4o": ModelConfig(
-    #     name="gpt-4o",
-    #     provider="openai",
-    #     api_key_env="OPENAI_API_KEY"
-    # ),
-    # "gpt-4o-mini": ModelConfig(
-    #     name="gpt-4o-mini",
-    #     provider="openai",
-    #     api_key_env="OPENAI_API_KEY"
-    # ),
+    "gpt-4o": ModelConfig(
+        name="gpt-4o",
+        provider="openai",
+        api_key_env="OPENAI_API_KEY"
+    ),
+    "gpt-4o-mini": ModelConfig(
+        name="gpt-4o-mini",
+        provider="openai",
+        api_key_env="OPENAI_API_KEY"
+    ),
     
     # Anthropic models (uncomment when needed)
     # "claude-sonnet": ModelConfig(
