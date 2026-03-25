@@ -25,6 +25,7 @@ DOM_output/
 
 back/*
 backend/__pycache__
+backend/credentials/user_db_config.yaml
 
 # screenshots
 *.png

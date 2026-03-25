@@ -55,33 +55,26 @@ class Verifier:
             }
 
         # Fast deterministic detection for "human required" screens.
-        # We use the latest Execution Agent log (including AFTER_STATE text),
-        # so we can reliably pause for user interaction on MFA/2FA/CAPTCHA flows
-        # without relying on the verifier LLM to infer it every time.
+        # IMPORTANT: keep this strict to avoid false positives from generic
+        # keywords that may appear inside extracted page text (e.g. cookie or
+        # legal text mentioning "captcha").
         last_text_lower = (last_execution or "").lower()
-        human_block_indicators = (
-            "captcha",
-            "verification code",
-            "security code",
-            "two-step verification",
-            "2fa",
-            "mfa",
-            "authenticator",
-            "approve sign-in request",
-            "approve sign in request",
-            "open your authenticator",
-            "enter the number",
-            "push notification",
-            "didn't receive a sign-in request",
-            "did not receive a sign-in request",
-            "verify it's you",
-            "verify it's you",
-            "confirm sign-in",
-            "confirm sign in",
-            "sign-in request",
-            "sign in request",
+
+        is_blocked_by_captcha = (
+            "blocked by captcha" in last_text_lower
+            or "anti-bot challenge" in last_text_lower
+            or "error type: navigation_blocked" in last_text_lower
+            or "error type: navigation_blocked" in last_text_lower
         )
-        if any(indicator in last_text_lower for indicator in human_block_indicators):
+
+        # For MFA/2FA flows, require both an MFA keyword AND "required"/"verification"
+        # to reduce false flags in extracted content.
+        is_blocked_by_mfa = (
+            ("mfa" in last_text_lower or "2fa" in last_text_lower or "two-step verification" in last_text_lower)
+            and ("required" in last_text_lower or "verification" in last_text_lower)
+        )
+
+        if is_blocked_by_captcha or is_blocked_by_mfa:
             verification_log = (
                 "[Verifier] Verdict: failure\n"
                 "[Verifier] Step Complete: False\n"
