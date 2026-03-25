@@ -675,8 +675,17 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                     await _dispatch_cdp_input(msg)
                     continue
 
-                print(f"[HITL] Received reply via WebSocket: {str(msg)[:200]}")
-                await reply_queue.put(msg)
+                # Only forward messages that actually contain a user reply.
+                # Frontend can send many non-HITL control messages over this socket.
+                has_reply = any(
+                    isinstance(msg.get(k), str) and msg.get(k).strip()
+                    for k in ("content", "user_input", "text", "message")
+                )
+                if has_reply:
+                    print(f"[HITL] Received reply via WebSocket: {str(msg)[:200]}")
+                    await reply_queue.put(msg)
+                else:
+                    print(f"[HITL] Ignoring non-reply WebSocket message: {str(msg)[:200]}")
         except Exception:
             pass
 
@@ -735,9 +744,21 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
 
                         print(f"[HITL] Waiting for user reply (user_id={user_id})…")
                         try:
-                            ws_msg = await asyncio.wait_for(reply_queue.get(), timeout=300)
-                            user_input = ws_msg.get("content", ws_msg.get("user_input", ""))
-                            print(f"[HITL] Got reply: {str(user_input)[:200]}")
+                            user_input = ""
+                            # Keep waiting until a non-empty human reply arrives.
+                            while not user_input.strip():
+                                ws_msg = await asyncio.wait_for(reply_queue.get(), timeout=300)
+                                user_input = (
+                                    ws_msg.get("content")
+                                    or ws_msg.get("user_input")
+                                    or ws_msg.get("text")
+                                    or ws_msg.get("message")
+                                    or ""
+                                )
+                                if user_input.strip():
+                                    print(f"[HITL] Got reply: {str(user_input)[:200]}")
+                                else:
+                                    print(f"[HITL] Ignored empty/non-reply payload: {str(ws_msg)[:200]}")
                         except asyncio.TimeoutError:
                             user_input = ""
                             print("[HITL] Timed out waiting for reply")
