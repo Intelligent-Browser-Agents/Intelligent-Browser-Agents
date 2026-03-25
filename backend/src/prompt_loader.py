@@ -85,6 +85,11 @@ def get_execution_prompt() -> str:
     return load_prompt("execution")
 
 
+def get_execution_tools_prompt() -> str:
+    """Load the execution agent prompt for tool-call mode."""
+    return load_prompt("execution_tools")
+
+
 def get_verification_prompt() -> str:
     """Load the verification agent prompt."""
     return load_prompt("verification")

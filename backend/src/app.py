@@ -192,16 +192,10 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
             send_hitl(interrupt_value)
 
             if hitl_type == "finish":
-                # Deliver the final response and resume to let the
-                # graph apply the node's return value and reach END.
-                stream_input = Command(resume=True)
-                # Run one more iteration so the node's return is applied
-                try:
-                    async for event in app.astream(stream_input, config):
-                        for node_name, state_update in event.items():
-                            print_event(node_name, state_update)
-                except Exception:
-                    pass
+                # Deliver the final response and end the simulation.
+                # Resuming the graph here has been observed to occasionally hang;
+                # since the user-facing output is already sent, we can safely stop.
+                print("[HITL] Final response sent; ending simulation.", flush=True)
                 break
 
             # ── Clarification needed — wait for user input ──

@@ -34,6 +34,26 @@ class Verifier:
         last_execution = reasoning_log[-1] if reasoning_log else "No execution log."
         user_intent = self._get_user_intent(state)
 
+        # Deterministic guardrail: do not allow failed executor actions to be
+        # marked as successful just because page content looks plausible.
+        last_exec_lower = (last_execution or "").lower()
+        if "[executor] status: failure" in last_exec_lower:
+            verification_log = (
+                "[Verifier] Verdict: failure\n"
+                "[Verifier] Step Complete: False\n"
+                "[Verifier] Goal Complete: False\n"
+                "[Verifier] Message: Executor reported a failed action; retry/fallback required.\n"
+                "[Verifier] Handoff: fallback"
+            )
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "needs_fallback": True,
+                "is_complete": False,
+                "last_step_complete": False,
+                "step_attempts": int(state.get("step_attempts", 0)) + 1,
+                "reasoning_log": [verification_log],
+            }
+
         # Fast deterministic detection for "human required" screens.
         # We use the latest Execution Agent log (including AFTER_STATE text),
         # so we can reliably pause for user interaction on MFA/2FA/CAPTCHA flows

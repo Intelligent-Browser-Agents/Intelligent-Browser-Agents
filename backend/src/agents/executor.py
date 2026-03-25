@@ -17,7 +17,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from schema import ExecutionResult
 from state import ProjectState
 from models import Models
-from prompt_loader import get_execution_prompt
+from prompt_loader import get_execution_prompt, get_execution_tools_prompt
 from dom_extraction import dom_extractor
 
 
@@ -30,7 +30,8 @@ class Executor:
     def __init__(self, runtime):
         self.llm_structured = Models.executor(ExecutionResult)
         self.llm_chat = Models.executor_chat()
-        self.system_prompt = get_execution_prompt()
+        self.system_prompt_json = get_execution_prompt()
+        self.system_prompt_tools = get_execution_tools_prompt()
         self.runtime = runtime
 
     _EXTRACT_PATTERNS = re.compile(
@@ -78,8 +79,12 @@ class Executor:
         Use exactly one of the available tools to perform this plan step. Prefer duckduckgo.com or bing.com over google.com unless explicitly required.
         """
 
-        messages = [
-            SystemMessage(content=self.system_prompt),
+        tool_messages = [
+            SystemMessage(content=self.system_prompt_tools),
+            HumanMessage(content=context),
+        ]
+        json_messages = [
+            SystemMessage(content=self.system_prompt_json),
             HumanMessage(content=context),
         ]
 
@@ -89,7 +94,7 @@ class Executor:
         tool_map = {t.name: t for t in tools}
 
         try:
-            response = await llm_with_tools.ainvoke(messages)
+            response = await llm_with_tools.ainvoke(tool_messages)
         except Exception as e:
             return self._return_failure(
                 state, current_url,
@@ -109,6 +114,14 @@ class Executor:
                     message="Model returned invalid or unknown tool call.",
                     error_type="unknown",
                 )
+            args = self._normalize_tool_args(name, args, current_task)
+            if name in {"navigate", "click", "type", "search", "scroll", "press_key", "wait"} and not args:
+                return self._return_failure(
+                    state, current_url,
+                    action=name, args={},
+                    message=f"Tool call missing required arguments for {name}.",
+                    error_type="ambiguous_step",
+                )
             try:
                 result = await tool_map[name].ainvoke(args)
             except Exception as e:
@@ -123,7 +136,7 @@ class Executor:
         else:
             # Fallback: structured output (no tool_calls)
             try:
-                action: ExecutionResult = self.llm_structured.invoke(messages)
+                action: ExecutionResult = self.llm_structured.invoke(json_messages)
             except Exception as e:
                 return self._return_failure(
                     state, current_url,
@@ -221,6 +234,53 @@ class Executor:
             execution_time_ms=0,
             extracted_text=repr(result)[:15000],
         )
+
+    def _normalize_tool_args(self, tool_name: str, args: Any, current_task: str) -> dict:
+        raw = args if isinstance(args, dict) else {}
+        normalized = dict(raw)
+
+        for key in ("url", "role", "name", "text", "direction", "key"):
+            if key in normalized and isinstance(normalized[key], str):
+                normalized[key] = self._clean_tool_string(normalized[key])
+
+        if tool_name == "navigate":
+            normalized["url"] = self._clean_url(normalized.get("url"))
+        elif tool_name in ("search", "type"):
+            text = normalized.get("text", "")
+            if not text and tool_name == "search":
+                text = self._infer_query_from_step(current_task)
+            normalized["text"] = text
+        elif tool_name == "click":
+            role = (normalized.get("role") or "").strip().lower()
+            name = (normalized.get("name") or "").strip()
+            normalized["role"] = role
+            normalized["name"] = name
+
+        required_missing = []
+        required = {
+            "navigate": ["url"],
+            "click": ["role", "name"],
+            "type": ["text"],
+            "search": ["text"],
+            "scroll": ["direction"],
+            "press_key": ["key"],
+            "wait": ["seconds"],
+        }
+        for field in required.get(tool_name, []):
+            value = normalized.get(field)
+            if value is None or (isinstance(value, str) and not value.strip()):
+                required_missing.append(field)
+        if required_missing:
+            return {}
+        return normalized
+
+    @staticmethod
+    def _clean_tool_string(value: str) -> str:
+        cleaned = (value or "").strip()
+        # Common malformed trailing tokens from tool-call JSON rendering.
+        cleaned = re.sub(r"[}\],\s]+$", "", cleaned)
+        cleaned = cleaned.strip("\"'` ")
+        return cleaned
 
     async def _finish_from_result(self, state, page, current_url, result):
         result_status = result.status
