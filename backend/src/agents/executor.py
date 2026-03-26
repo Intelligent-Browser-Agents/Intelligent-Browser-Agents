@@ -290,6 +290,12 @@ class Executor:
             name = (normalized.get("name") or "").strip()
             if role in ("a", "anchor", "hyperlink"):
                 role = "link"
+            # Outlook compose trap: clicking a generic "To" button can open
+            # the global "To Do" app instead of the draft recipient field.
+            # For compose-recipient steps, force a field-like target.
+            if self._is_email_compose_recipient_task(current_task):
+                if name.lower() == "to" and role in ("button", "link", "tab"):
+                    role = "textbox"
             normalized["role"] = role
             normalized["name"] = name
 
@@ -310,6 +316,14 @@ class Executor:
         if required_missing:
             return {}
         return normalized
+
+    @staticmethod
+    def _is_email_compose_recipient_task(current_task: str) -> bool:
+        text = (current_task or "").lower()
+        return (
+            any(token in text for token in ("compose", "draft", "new mail", "recipient", "to field"))
+            and any(token in text for token in ("email", "mail", "outlook", "inesculent@gmail.com", "@"))
+        )
 
     @staticmethod
     def _clean_tool_string(value: str) -> str:

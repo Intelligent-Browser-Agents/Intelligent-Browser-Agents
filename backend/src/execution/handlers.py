@@ -69,6 +69,7 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
     }
     role_normalized = _ROLE_ALIASES.get(raw_role, raw_role)
     name_trimmed = (name or "").strip()
+    short_name = len(name_trimmed) <= 3 if name_trimmed else False
 
     def _elapsed():
         return int((asyncio.get_event_loop().time() - start) * 1000)
@@ -166,27 +167,29 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
                             continue
 
             # Substring / regex accessible name (labels differ slightly from training text).
-            for fr in frames:
-                for rt in ("link", "button", "tab"):
-                    for nt in name_tries:
-                        if len(nt) < 2:
-                            continue
-                        try:
-                            pat = re.compile(r".*" + re.escape(nt) + r".*", re.I | re.DOTALL)
-                            locator = fr.get_by_role(rt, name=pat).first
-                            if await _try_locator_click(locator):
-                                await _settle_after_navigation()
-                                return ExecutionOutput(
-                                    action="click",
-                                    args={"role": role_normalized, "name": name_trimmed},
-                                    status="success",
-                                    error_type="none",
-                                    message=f"Clicked {rt} (name~'{nt}') for '{name_trimmed}'",
-                                    execution_time_ms=_elapsed(),
-                                )
-                        except Exception as e:
-                            last_error = str(e)
-                            continue
+            # Skip for very short labels (e.g. "To") to avoid misclicks such as "To Do".
+            if not short_name:
+                for fr in frames:
+                    for rt in ("link", "button", "tab"):
+                        for nt in name_tries:
+                            if len(nt) < 2:
+                                continue
+                            try:
+                                pat = re.compile(r".*" + re.escape(nt) + r".*", re.I | re.DOTALL)
+                                locator = fr.get_by_role(rt, name=pat).first
+                                if await _try_locator_click(locator):
+                                    await _settle_after_navigation()
+                                    return ExecutionOutput(
+                                        action="click",
+                                        args={"role": role_normalized, "name": name_trimmed},
+                                        status="success",
+                                        error_type="none",
+                                        message=f"Clicked {rt} (name~'{nt}') for '{name_trimmed}'",
+                                        execution_time_ms=_elapsed(),
+                                    )
+                            except Exception as e:
+                                last_error = str(e)
+                                continue
 
             # get_by_text fallback when role was wrong or name is visible text only.
             for fr in frames:
@@ -206,31 +209,9 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
                     except Exception as e:
                         last_error = str(e)
                         continue
-                    try:
-                        loc = fr.get_by_text(nt, exact=False).first
-                        if await _try_locator_click(loc):
-                            await _settle_after_navigation()
-                            return ExecutionOutput(
-                                action="click",
-                                args={"role": role_normalized, "name": name_trimmed},
-                                status="success",
-                                error_type="none",
-                                message=f"Clicked element matching text '{nt}'",
-                                execution_time_ms=_elapsed(),
-                            )
-                    except Exception as e:
-                        last_error = str(e)
-                        continue
-
-            # Last resort: anchors/buttons whose visible text matches (dashboard tiles).
-            for fr in frames:
-                for nt in name_tries:
-                    if len(nt) < 2:
-                        continue
-                    try:
-                        pat = re.compile(re.escape(nt), re.I)
-                        for tag in ("a", "button"):
-                            loc = fr.locator(tag).filter(has_text=pat).first
+                    if not short_name:
+                        try:
+                            loc = fr.get_by_text(nt, exact=False).first
                             if await _try_locator_click(loc):
                                 await _settle_after_navigation()
                                 return ExecutionOutput(
@@ -238,12 +219,36 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
                                     args={"role": role_normalized, "name": name_trimmed},
                                     status="success",
                                     error_type="none",
-                                    message=f"Clicked {tag} matching text '{nt}'",
+                                    message=f"Clicked element matching text '{nt}'",
                                     execution_time_ms=_elapsed(),
                                 )
-                    except Exception as e:
-                        last_error = str(e)
-                        continue
+                        except Exception as e:
+                            last_error = str(e)
+                            continue
+
+            # Last resort: anchors/buttons whose visible text matches (dashboard tiles).
+            if not short_name:
+                for fr in frames:
+                    for nt in name_tries:
+                        if len(nt) < 2:
+                            continue
+                        try:
+                            pat = re.compile(re.escape(nt), re.I)
+                            for tag in ("a", "button"):
+                                loc = fr.locator(tag).filter(has_text=pat).first
+                                if await _try_locator_click(loc):
+                                    await _settle_after_navigation()
+                                    return ExecutionOutput(
+                                        action="click",
+                                        args={"role": role_normalized, "name": name_trimmed},
+                                        status="success",
+                                        error_type="none",
+                                        message=f"Clicked {tag} matching text '{nt}'",
+                                        execution_time_ms=_elapsed(),
+                                    )
+                        except Exception as e:
+                            last_error = str(e)
+                            continue
 
             # If we got here, nothing matched anywhere (including iframes).
             return ExecutionOutput(
