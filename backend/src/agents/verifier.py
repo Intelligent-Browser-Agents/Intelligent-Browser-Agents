@@ -305,12 +305,15 @@ If this is the last step of the plan and the step is complete, set goal_complete
 
     @staticmethod
     def _looks_like_todo_misnavigation(last_exec_lower: str, current_url: str) -> bool:
+        # Only treat as misnavigation when URL-level evidence indicates a true
+        # app switch to To Do. Outlook Mail DOM often contains "To Do" labels
+        # even while still on the compose page.
         url = (current_url or "").lower()
-        return (
-            "todoid" in url
-            or "to do" in last_exec_lower
-            or "outlook to do" in last_exec_lower
-        )
+        return any(token in url for token in (
+            "/todoid",
+            "/todo",
+            "microsoft.todo",
+        ))
 
     @staticmethod
     def _is_compose_field_progress(last_exec_lower: str) -> bool:
