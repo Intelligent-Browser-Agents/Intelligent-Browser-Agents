@@ -9,6 +9,7 @@ if str(SRC_DIR) not in sys.path:
 
 from agents.orchestrator import Orchestrator
 from agents.verifier import Verifier
+from agents.executor import Executor
 
 
 def test_verifier_marks_success_and_resets_attempts():
@@ -87,3 +88,23 @@ def test_orchestrator_advances_on_success():
     assert result["current_step_index"] == 1
     assert result["current_task"] == "Enter 'academics' in the search bar."
     assert result["is_complete"] is False
+
+
+def test_executor_anti_bot_ignores_oauth_pkce_challenge_params():
+    executor = Executor.__new__(Executor)
+    microsoft_oauth_url = (
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+        "?client_id=9199bf20-a13f-4107-85dc-02114787ef48"
+        "&response_type=code"
+        "&code_challenge=RW33g1c-1VXFHzui_agDyC7evuVLuNBHYLFq8q44Y8M"
+        "&code_challenge_method=S256"
+    )
+
+    assert executor._is_anti_bot_page(microsoft_oauth_url) is False
+
+
+def test_executor_anti_bot_detects_google_sorry_page():
+    executor = Executor.__new__(Executor)
+    google_sorry_url = "https://www.google.com/sorry/index?continue=https://www.google.com/search%3Fq%3Ducf"
+
+    assert executor._is_anti_bot_page(google_sorry_url) is True

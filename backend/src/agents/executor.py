@@ -768,15 +768,43 @@ class Executor:
         return None
 
     def _is_anti_bot_page(self, url: str) -> bool:
-        text = (url or "").lower()
-        patterns = [
-            "google.com/sorry",
-            "/sorry/index",
-            "captcha",
-            "unusual+traffic",
-            "challenge",
-        ]
-        return any(pattern in text for pattern in patterns)
+        """
+        Detect genuine anti-bot/CAPTCHA pages from URL signals.
+
+        Keep this strict: broad substring matching (for example "challenge")
+        can incorrectly classify OAuth URLs that include parameters like
+        "code_challenge".
+        """
+        parsed = urlparse((url or "").strip())
+        host = (parsed.netloc or "").lower()
+        path = (parsed.path or "").lower()
+        query = (parsed.query or "").lower()
+
+        # Google anti-bot interstitials.
+        if ("google." in host and path.startswith("/sorry")) or "/sorry/index" in path:
+            return True
+
+        # Known challenge/captcha hosts.
+        if any(token in host for token in ("challenges.cloudflare.com", "captcha", "recaptcha")):
+            return True
+
+        # Challenge/captcha paths.
+        if any(token in path for token in ("/captcha", "/recaptcha", "/hcaptcha")):
+            return True
+        if re.search(r"(^|/)challenge(s)?(/|$)", path):
+            return True
+
+        # Query parameters indicating a challenge. Exclude OAuth PKCE params
+        # (code_challenge, code_challenge_method), which are not anti-bot.
+        sanitized_query = re.sub(r"(^|&)code_challenge(?:_method)?=[^&]*", "", query)
+        if "unusual+traffic" in sanitized_query or "unusual%20traffic" in sanitized_query:
+            return True
+        if re.search(r"(^|[&])(captcha|recaptcha|hcaptcha|g-recaptcha-response|h-captcha-response)=", sanitized_query):
+            return True
+        if re.search(r"(^|[&])challenge=", sanitized_query):
+            return True
+
+        return False
 
     def _is_click_target_in_dom(self, role: str | None, name: str | None, dom_snapshot: str) -> bool:
         if not role or not name:
