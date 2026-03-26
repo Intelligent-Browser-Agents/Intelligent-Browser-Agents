@@ -3,6 +3,8 @@ Fallback Agent
 Uses an LLM to diagnose failures and propose a revised step or recovery.
 """
 
+import re
+
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from state import ProjectState
@@ -23,6 +25,7 @@ class Fallback:
 
     def __call__(self, state: ProjectState) -> dict:
         current_task = state.get("current_task", "Unknown task")
+        objective_task = self._base_task(current_task)
         reasoning_log = state.get("reasoning_log", [])
         user_intent = self._get_user_intent(state)
         current_url = state.get("current_url", "")
@@ -80,7 +83,7 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             strategy = None
 
         if strategy is None:
-            revised_task = current_task
+            revised_task = objective_task
             fallback_log = (
                 "[Fallback] LLM failed; retrying same step.\n"
                 f"[Fallback] Error: {err}\n"
@@ -88,10 +91,16 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             )
             needs_human = False
         else:
-            revised_task = (
+            proposed = (
                 (strategy.proposed_step or "").strip()
                 or (strategy.insert_step or "").strip()
-                or current_task
+                or objective_task
+            )
+
+            revised_task = self._compose_recovery_task(
+                objective_task=objective_task,
+                proposed_task=proposed,
+                update_type=strategy.update_type,
             )
 
             needs_human = strategy.update_type == "request_human_action"
@@ -117,6 +126,75 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             # the required action.
             out["step_attempts"] = 0
         return out
+
+    @staticmethod
+    def _base_task(task: str) -> str:
+        text = (task or "").strip()
+        marker = " [Recovery Hint:"
+        idx = text.find(marker)
+        if idx >= 0:
+            return text[:idx].strip()
+        return text or "Unknown task"
+
+    @staticmethod
+    def _compose_recovery_task(objective_task: str, proposed_task: str, update_type: str) -> str:
+        obj = (objective_task or "Unknown task").strip()
+        hint = (proposed_task or "").strip()
+        if not hint or hint.lower() == obj.lower():
+            return obj
+        if update_type == "insert_step_before":
+            return f"{hint} [Then continue objective: {obj}]"
+        if update_type == "revise_step":
+            # Adaptive escape hatch: when reality requires a prerequisite
+            # navigation/repositioning action, place that action first while
+            # preserving the objective as an explicit continuation.
+            if Fallback._looks_like_prerequisite_realign(hint, obj):
+                return f"{hint} [Then continue objective: {obj}]"
+            return f"{obj} [Recovery Hint: {hint}]"
+        if update_type in {"request_context", "request_human_action"}:
+            return f"{obj} [Recovery Hint: {hint}]"
+        return obj
+
+    @staticmethod
+    def _looks_like_prerequisite_realign(hint: str, objective: str) -> bool:
+        h = (hint or "").lower()
+        o = (objective or "").lower()
+        if not h:
+            return False
+        # Signals that the next best action is to re-enter the right surface
+        # before continuing with the original objective.
+        realign_tokens = (
+            "navigate",
+            "go to",
+            "open",
+            "return",
+            "go back",
+            "switch",
+            "focus",
+            "from",
+            "instead of",
+            "wrong page",
+            "mail interface",
+            "compose window",
+        )
+        has_realign_intent = any(tok in h for tok in realign_tokens)
+        if not has_realign_intent:
+            return False
+
+        # If the hint shares little overlap with objective terms, treat it as
+        # a prerequisite repositioning step rather than a pure wording tweak.
+        objective_terms = {
+            tok for tok in re.findall(r"[a-z]{4,}", o)
+            if tok not in {"using", "with", "from", "that", "this", "then", "user"}
+        }
+        hint_terms = {
+            tok for tok in re.findall(r"[a-z]{4,}", h)
+            if tok not in {"using", "with", "from", "that", "this", "then", "user"}
+        }
+        if not objective_terms or not hint_terms:
+            return True
+        overlap = len(objective_terms & hint_terms)
+        return overlap <= 1
 
     def _find_latest_log(self, reasoning_log: list, prefix: str) -> str:
         for entry in reversed(reasoning_log or []):

@@ -146,12 +146,67 @@ class Verifier:
                 },
             )
 
+        # Deterministic guardrail: during finalization-oriented steps
+        # (send/submit/review), reject dismissive navigation actions that
+        # move away from completion (Cancel/Close/Discard/Back).
+        if self._is_finalization_step(current_task) and self._is_dismissive_action(last_exec_lower):
+            verification_log = (
+                "[Verifier] Verdict: failure\n"
+                "[Verifier] Step Complete: False\n"
+                "[Verifier] Goal Complete: False\n"
+                "[Verifier] Message: The last action dismissed or backed out of the active form during a finalization step; recovery is required.\n"
+                "[Verifier] Handoff: fallback"
+            )
+            return self._apply_stall_cap(
+                state,
+                current_step,
+                {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "needs_fallback": True,
+                    "is_complete": False,
+                    "last_step_complete": False,
+                    "step_attempts": int(state.get("step_attempts", 0)) + 1,
+                    "reasoning_log": [verification_log],
+                },
+            )
+
+        # Generic field-dependent completion: if the status tracker reports
+        # that all required fields for this step are filled, complete the step.
+        fp_complete, fp_done, fp_required = self._field_progress_step_complete(state, current_task)
+        if fp_complete:
+            verification_log = (
+                "[Verifier] Verdict: success\n"
+                "[Verifier] Step Complete: True\n"
+                "[Verifier] Goal Complete: False\n"
+                f"[Verifier] Message: Field-entry step complete ({fp_done}/{fp_required} required fields captured).\n"
+                "[Verifier] Handoff: orchestration"
+            )
+            return self._apply_stall_cap(
+                state,
+                current_step,
+                {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "needs_fallback": False,
+                    "is_complete": False,
+                    "last_step_complete": True,
+                    "step_attempts": 0,
+                    "made_progress": True,
+                    "reasoning_log": [verification_log],
+                },
+            )
+
         # Deterministic compose-progress rule: email drafting is often multi-action
         # (recipient, subject, body). A single successful click/type should count as
         # progress, and recipient-confirm sequences should complete the recipient step.
         if self._is_email_compose_step(current_task):
+            task_text = (current_task or "").lower()
+            requires_content = any(tok in task_text for tok in ("subject", "message body", "body", "content"))
             target_email = self._extract_email(current_task)
-            if target_email and self._recipient_step_confirmed(target_email, last_exec_lower, recent_executor_logs):
+            if (
+                not requires_content
+                and target_email
+                and self._recipient_step_confirmed(target_email, last_exec_lower, recent_executor_logs)
+            ):
                 verification_log = (
                     "[Verifier] Verdict: success\n"
                     "[Verifier] Step Complete: True\n"
@@ -173,7 +228,98 @@ class Verifier:
                     },
                 )
 
+            if self._compose_step_fields_complete_from_status(state, current_task):
+                verification_log = (
+                    "[Verifier] Verdict: success\n"
+                    "[Verifier] Step Complete: True\n"
+                    "[Verifier] Goal Complete: False\n"
+                    "[Verifier] Message: Required compose fields for this step are already populated.\n"
+                    "[Verifier] Handoff: orchestration"
+                )
+                return self._apply_stall_cap(
+                    state,
+                    current_step,
+                    {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "needs_fallback": False,
+                        "is_complete": False,
+                        "last_step_complete": True,
+                        "step_attempts": 0,
+                        "made_progress": True,
+                        "reasoning_log": [verification_log],
+                    },
+                )
+
+            if self._compose_content_step_completed(current_task, recent_executor_logs):
+                verification_log = (
+                    "[Verifier] Verdict: success\n"
+                    "[Verifier] Step Complete: True\n"
+                    "[Verifier] Goal Complete: False\n"
+                    "[Verifier] Message: Subject and message body appear populated for this compose step.\n"
+                    "[Verifier] Handoff: orchestration"
+                )
+                return self._apply_stall_cap(
+                    state,
+                    current_step,
+                    {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "needs_fallback": False,
+                        "is_complete": False,
+                        "last_step_complete": True,
+                        "step_attempts": 0,
+                        "made_progress": True,
+                        "reasoning_log": [verification_log],
+                    },
+                )
+
+            compose_fields = self._compose_fields_from_state(state)
+            recipient_done = bool(compose_fields.get("recipient", False))
+            body_pending = not bool(compose_fields.get("body", False))
+            action_name, args_line = self._extract_executor_action_and_args(last_exec_lower)
+            if requires_content and recipient_done and body_pending and self._compose_action_targets_recipient_lane(action_name, args_line):
+                verification_log = (
+                    "[Verifier] Verdict: failure\n"
+                    "[Verifier] Step Complete: False\n"
+                    "[Verifier] Goal Complete: False\n"
+                    "[Verifier] Message: Compose content step drifted back to recipient targeting; switch to message-body field interaction.\n"
+                    "[Verifier] Handoff: fallback"
+                )
+                return self._apply_stall_cap(
+                    state,
+                    current_step,
+                    {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "needs_fallback": True,
+                        "is_complete": False,
+                        "last_step_complete": False,
+                        "step_attempts": int(state.get("step_attempts", 0)) + 1,
+                        "reasoning_log": [verification_log],
+                    },
+                )
+
+            if requires_content and recipient_done and body_pending and self._trailing_tab_focus_churn(recent_executor_logs) >= 2:
+                verification_log = (
+                    "[Verifier] Verdict: failure\n"
+                    "[Verifier] Step Complete: False\n"
+                    "[Verifier] Goal Complete: False\n"
+                    "[Verifier] Message: Compose content step is stuck in focus navigation without body entry; fallback guidance required.\n"
+                    "[Verifier] Handoff: fallback"
+                )
+                return self._apply_stall_cap(
+                    state,
+                    current_step,
+                    {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "needs_fallback": True,
+                        "is_complete": False,
+                        "last_step_complete": False,
+                        "step_attempts": int(state.get("step_attempts", 0)) + 1,
+                        "reasoning_log": [verification_log],
+                    },
+                )
+
             if self._is_compose_field_progress(last_exec_lower):
+                meaningful_progress = self._compose_action_is_meaningful(last_exec_lower)
                 verification_log = (
                     "[Verifier] Verdict: success\n"
                     "[Verifier] Step Complete: False\n"
@@ -190,7 +336,7 @@ class Verifier:
                         "is_complete": False,
                         "last_step_complete": False,
                         "step_attempts": int(state.get("step_attempts", 0)),
-                        "made_progress": True,
+                        "made_progress": meaningful_progress,
                         "reasoning_log": [verification_log],
                     },
                 )
@@ -328,18 +474,45 @@ If this is the last step of the plan and the step is complete, set goal_complete
     def _recipient_step_confirmed(cls, target_email: str, last_exec_lower: str, recent_executor_logs: list[str]) -> bool:
         if not target_email:
             return False
-        combined = "\n".join(recent_executor_logs[-8:]).lower()
-        typed_target = (
-            "[executor] action: type" in combined
-            and target_email in combined
+        recent = [(entry or "").lower() for entry in recent_executor_logs[-8:]]
+        combined_recent = "\n".join(recent)
+        type_entries = [
+            entry for entry in recent
+            if "[executor] action: type" in entry
+            and "[executor] status: success" in entry
+            and target_email in entry
+        ]
+        if not type_entries:
+            return False
+
+        typed_into_searchbox = any(
+            any(tok in entry for tok in (
+                "search my contacts",
+                "search for email",
+                "address book",
+                "directory",
+                "role=searchbox",
+            ))
+            for entry in type_entries
         )
-        confirmed_action = (
+        typed_into_direct_recipient = any(
+            any(tok in entry for tok in (
+                "label=to",
+                "name=to",
+                "label=recipient",
+                "placeholder=recipient",
+            ))
+            and "search my contacts" not in entry
+            and "search for email" not in entry
+            for entry in type_entries
+        )
+
+        confirmed_action_last = (
             "[executor] status: success" in last_exec_lower
             and (
                 (
                     "[executor] action: click" in last_exec_lower
                     and any(token in last_exec_lower for token in (
-                        "name=save",
                         "name=add",
                         "name=done",
                         "name=ok",
@@ -348,17 +521,83 @@ If this is the last step of the plan and the step is complete, set goal_complete
                     ))
                 )
                 or (
+                    "[executor] action: click" in last_exec_lower
+                    and "role=option" in last_exec_lower
+                    and (target_email in last_exec_lower or "people suggestion" in last_exec_lower)
+                )
+                or (
                     "[executor] action: press_key" in last_exec_lower
                     and "key=enter" in last_exec_lower
                 )
             )
         )
-        recipient_visible = target_email in last_exec_lower
-        return typed_target and (confirmed_action or recipient_visible)
+        confirmed_action_recent = (
+            "[executor] status: success" in combined_recent
+            and (
+                (
+                    "[executor] action: click" in combined_recent
+                    and any(token in combined_recent for token in (
+                        "name=add",
+                        "name=done",
+                        "name=ok",
+                        "name=confirm",
+                        "name=apply",
+                    ))
+                )
+                or (
+                    "[executor] action: click" in combined_recent
+                    and "role=option" in combined_recent
+                    and (target_email in combined_recent or "people suggestion" in combined_recent)
+                )
+                or (
+                    "[executor] action: press_key" in combined_recent
+                    and "key=enter" in combined_recent
+                )
+            )
+        )
+        confirmed_action = confirmed_action_last or confirmed_action_recent
+        recipient_visible = target_email in last_exec_lower or target_email in combined_recent
+
+        # Direct To/recipient-field typing is usually sufficient evidence.
+        if typed_into_direct_recipient and recipient_visible:
+            return True
+
+        # Searchbox typing alone is not enough; require explicit add/select/enter confirmation.
+        if typed_into_searchbox:
+            return confirmed_action and recipient_visible
+
+        return confirmed_action and recipient_visible
+
+    @staticmethod
+    def _compose_action_is_meaningful(last_exec_lower: str) -> bool:
+        """Identify whether the latest compose action likely made real forward progress."""
+        text = (last_exec_lower or "").lower()
+        if "[executor] status: success" not in text:
+            return False
+        if "[executor] action: type" in text:
+            return True
+        if "[executor] action: click" in text:
+            # Treat frequent no-op controls as non-progress so stall recovery can trigger.
+            low_signal = (
+                "name=save",
+                "name=to",
+                "name=cc",
+                "name=bcc",
+            )
+            if any(tok in text for tok in low_signal):
+                return False
+            return True
+        if "[executor] action: press_key" in text:
+            if "key=tab" in text:
+                return False
+            return "key=enter" in text
+        return False
 
     @staticmethod
     def _is_compose_field_progress(last_exec_lower: str) -> bool:
         if "[executor] status: success" not in last_exec_lower:
+            return False
+        if Verifier._is_dismissive_action(last_exec_lower):
             return False
         action_is_interactive = any(
             marker in last_exec_lower
@@ -366,7 +605,6 @@ If this is the last step of the plan and the step is complete, set goal_complete
                 "[executor] action: click",
                 "[executor] action: type",
                 "[executor] action: press_key",
-                "[executor] action: wait",
             )
         )
         if not action_is_interactive:
@@ -374,6 +612,203 @@ If this is the last step of the plan and the step is complete, set goal_complete
         if "error type:" in last_exec_lower and "none" not in last_exec_lower:
             return False
         return True
+
+    @classmethod
+    def _compose_content_step_completed(cls, task: str, recent_executor_logs: list[str]) -> bool:
+        """Return True when a compose-content step has both subject and body typed."""
+        task_text = (task or "").lower()
+        is_content_step = (
+            any(tok in task_text for tok in ("compose", "draft", "email", "mail", "message"))
+            and any(tok in task_text for tok in ("subject", "message body", "email message", "body", "content"))
+        )
+        if not is_content_step:
+            return False
+
+        requires_recipient = any(tok in task_text for tok in ("addressed to", "recipient", "to field", "to:"))
+
+        subject_typed = False
+        body_typed = False
+        recipient_typed = False
+        for raw_entry in recent_executor_logs[-10:]:
+            entry = (raw_entry or "").lower()
+            if "[executor] action: type" not in entry or "[executor] status: success" not in entry:
+                continue
+
+            match = re.search(r"\[executor\] args:\s*text=(.*)", entry)
+            text_value = match.group(1).strip().strip("\"'") if match else ""
+            if not text_value:
+                continue
+
+            text_word_count = len(re.findall(r"\S+", text_value))
+            target_is_subject = any(tok in entry for tok in ("label=subject", "placeholder=add a subject", "name=subject"))
+            recipient_context = any(tok in entry for tok in (
+                "label=to",
+                "name=to",
+                "label=recipient",
+                "placeholder=recipient",
+                "search for email",
+                "search my contacts",
+                "add recipients",
+            ))
+            target_is_body = any(tok in entry for tok in (
+                "label=message body",
+                "contenteditable=true",
+                "role=textbox",
+                "placeholder=message",
+            )) and not recipient_context
+            target_is_recipient = any(tok in entry for tok in (
+                "label=to",
+                "name=to",
+                "label=recipient",
+                "placeholder=recipient",
+                "search for email",
+            ))
+
+            if target_is_subject and len(text_value) >= 3:
+                subject_typed = True
+            if target_is_body and (
+                text_word_count >= 6
+                or (len(text_value) >= 40 and "@" not in text_value)
+            ):
+                body_typed = True
+            # Heuristic: long non-email content typed outside subject/recipient lanes
+            # is usually body text even when the target label is sparse.
+            if (
+                not target_is_subject
+                and not recipient_context
+                and "@" not in text_value
+                and text_word_count >= 8
+            ):
+                body_typed = True
+            if target_is_recipient and "@" in text_value:
+                recipient_typed = True
+
+        return subject_typed and body_typed and (recipient_typed or not requires_recipient)
+
+    @staticmethod
+    def _compose_fields_from_state(state: ProjectState) -> dict:
+        signals = state.get("status_signals") or {}
+        compose_fields = signals.get("compose_fields") or {}
+        return {
+            "recipient": bool(compose_fields.get("recipient", False)),
+            "subject": bool(compose_fields.get("subject", False)),
+            "body": bool(compose_fields.get("body", False)),
+        }
+
+    @staticmethod
+    def _normalize_task_signature(task: str) -> str:
+        text = (task or "").strip()
+        if not text:
+            return ""
+        text = re.sub(r"\s*\[Recovery Hint:.*$", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\s*\[Then continue objective:.*$", "", text, flags=re.IGNORECASE).strip()
+        return text.lower()
+
+    def _field_progress_step_complete(self, state: ProjectState, current_task: str) -> tuple[bool, int, int]:
+        signals = state.get("status_signals") or {}
+        progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
+        if not progress:
+            return False, 0, 0
+        task_sig = self._normalize_task_signature(current_task)
+        if not task_sig or progress.get("task_signature") != task_sig:
+            return False, 0, 0
+        required = int(progress.get("required_count") or 0)
+        completed = list(progress.get("completed_fields") or [])
+        done = len(completed)
+        if required <= 0:
+            return False, done, required
+        return done >= required, done, required
+
+    def _compose_step_fields_complete_from_status(self, state: ProjectState, task: str) -> bool:
+        if not self._is_email_compose_step(task):
+            return False
+        fields = self._compose_fields_from_state(state)
+        text = (task or "").lower()
+
+        required: list[str] = []
+        if any(tok in text for tok in ("recipient", "to field", "to:")):
+            required.append("recipient")
+        if "subject" in text:
+            required.append("subject")
+        if any(tok in text for tok in ("message body", "email body", " body", "content", "message")):
+            required.append("body")
+
+        if not required:
+            return False
+        return all(fields.get(name, False) for name in required)
+
+    @staticmethod
+    def _extract_executor_action_and_args(last_exec_lower: str) -> tuple[str, str]:
+        text = (last_exec_lower or "").lower()
+        action_match = re.search(r"^\[executor\]\s+action:\s*([^\n]+)$", text, re.IGNORECASE | re.MULTILINE)
+        args_match = re.search(r"^\[executor\]\s+args:\s*([^\n]+)$", text, re.IGNORECASE | re.MULTILINE)
+        action_name = action_match.group(1).strip().lower() if action_match else ""
+        args_line = args_match.group(1).strip().lower() if args_match else ""
+        return action_name, args_line
+
+    @staticmethod
+    def _compose_action_targets_recipient_lane(action_name: str, args_line: str) -> bool:
+        if not action_name or not args_line:
+            return False
+        recipient_tokens = (
+            "name=to",
+            "name=recipient",
+            "label=to",
+            "label=recipient",
+            "search my contacts",
+            "search for email",
+            "add recipients",
+            "address book",
+        )
+        if action_name == "click":
+            return any(tok in args_line for tok in recipient_tokens) or "role=searchbox" in args_line or "role=combobox" in args_line
+        if action_name == "type":
+            text_match = re.search(r"text=(.*)", args_line)
+            typed = text_match.group(1).strip() if text_match else ""
+            return "@" in typed
+        return False
+
+    @staticmethod
+    def _trailing_tab_focus_churn(recent_executor_logs: list[str]) -> int:
+        streak = 0
+        for raw in reversed(recent_executor_logs[-6:]):
+            entry = (raw or "").lower()
+            if "[executor] status: success" not in entry:
+                break
+            if "[executor] action: press_key" in entry and "key=tab" in entry:
+                streak += 1
+                continue
+            break
+        return streak
+
+    @staticmethod
+    def _is_finalization_step(task: str) -> bool:
+        text = (task or "").lower()
+        return any(token in text for token in (
+            "send",
+            "submit",
+            "finalize",
+            "review",
+            "confirm",
+            "complete",
+            "finish",
+        ))
+
+    @staticmethod
+    def _is_dismissive_action(last_exec_lower: str) -> bool:
+        text = (last_exec_lower or "").lower()
+        if "[executor] action: click" not in text:
+            return False
+        dismissive_tokens = (
+            "name=cancel",
+            "name=close",
+            "name=discard",
+            "name=back",
+            "name=hide",
+            "name=dismiss",
+            "name=exit",
+        )
+        return any(token in text for token in dismissive_tokens)
 
     @classmethod
     def reset_simulation(cls):

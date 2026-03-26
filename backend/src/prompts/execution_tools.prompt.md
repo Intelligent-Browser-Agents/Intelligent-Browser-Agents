@@ -17,7 +17,9 @@ You will be given:
 1. **Call exactly one tool**.
 2. **Do not output natural language. Do not output JSON.**
 3. **NEVER call `list_links` or `dom_search` twice in a row.** If PREVIOUS_ACTIONS shows you already called a discovery tool and it returned clickable targets, your NEXT action MUST be `click(role, name)` using one of those targets. Discovery is for finding things; once found, ACT on them.
-4. Prefer tools that directly match the plan step:
+4. **Stay inside the current step objective.** If context includes both a stable objective and a tactical variant, prioritize the stable objective and treat tactical text only as a hint.
+5. **Avoid distractor controls unless explicitly required by the step**: do not click controls like `Close`, `Cancel`, `Dismiss`, `Hide`, `Back`, or global `Search` when the objective is to fill/submit a form.
+6. Prefer tools that directly match the plan step:
    - **Navigation step** (words like "navigate to", "go to", "open", "visit") → `navigate(url)` with a direct URL. Do NOT use `search` for navigation — go straight to the site.
    - Search step → `search(text)`
    - Selecting/opening a result from search results → `click(role, name)`
@@ -37,10 +39,25 @@ When the step is information retrieval/extraction:
 When the step is form completion:
 - Prefer targeting specific fields explicitly (e.g., recipient, subject, body, name, email, address) rather than broad navigation clicks.
 - Fill one field per turn using `type(text)`, confirming focus/field visibility between turns.
+- For recipient entry, prefer direct editable recipient fields (textbox/combobox/contenteditable) over directory/search lookups unless the step explicitly asks to search the directory.
+- If both a `To` button/control and an editable recipient lane are visible, do not click `To`; type directly into the editable recipient lane (or focus that lane, then type).
+- When possible, prefer filling visible editable fields over clicking buttons; still click buttons when they are necessary prerequisites (for example to reveal/focus a field, move to the next auth screen, or submit after required fields are complete).
+- For content-writing steps, if recipient/address entry is already completed, avoid returning to recipient/search-contact controls and target the remaining content field.
+- If repeated focus-navigation keys are not yielding entry progress, stop repeating them and choose an explicit field-targeting action.
+- If PREVIOUS_ACTIONS already shows two consecutive `press_key(Tab)` actions on the same step, do not select `press_key(Tab)` again.
+- If a visible editable recipient target is already present (textbox/combobox/contenteditable), prefer direct recipient entry/selection over clicking generic `To` controls.
+- If PREVIOUS_ACTIONS already contains a successful `click(role=button,name=To)` on the same step, do not click that same target again unless focus was clearly lost.
+- Do not click contacts-directory style controls (`To`, `People`, `Address book`, `Add Recipients`) when an inline editable recipient lane is already visible.
+- After successfully typing an email address for recipient entry, prioritize a confirmation action (`press_key(Enter)` or click matching recipient option/chip) before any additional focus clicks.
 
 When the step is multi-action and sequential:
 - Prefer deterministic progression: open target area, focus required control, enter data, confirm/submit.
 - Avoid jumping to a final submit/send action until required prerequisite field entries are complete.
+- Do not chain focus-only actions; after a focus action, the next action should normally be a value-entry or explicit confirmation action.
+
+When the objective is only to open/start a draft:
+- Keep scope strict: do not start recipient/subject/body entry in the same step.
+- If a compose surface is already visible and no blocking error is present, treat that as sufficient progress/completion for this objective and avoid repeated `To`/focus interactions.
 
 ## Saved-credentials login guidance
 If login/form-filling information is present in the provided context (`USER_CREDENTIALS` block):

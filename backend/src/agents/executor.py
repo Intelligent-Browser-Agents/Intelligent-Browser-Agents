@@ -42,17 +42,29 @@ class Executor:
         current_task = state.get("current_task", "No task specified")
         current_url = state.get("current_url", "unknown")
         user_intent = self._get_user_intent(state)
+        current_plan = state.get("current_plan", []) or []
+        current_step = int(state.get("current_step_index", 0) or 0)
+        canonical_step = current_task
+        if current_plan:
+            safe_idx = min(max(current_step, 0), len(current_plan) - 1)
+            canonical_step = (current_plan[safe_idx] or current_task).strip() or current_task
 
-        dom_snapshot = await self._get_real_dom_snapshot(page)
+        dom_snapshot = await self._get_real_dom_snapshot(page, max_chars=self._dom_snapshot_budget(current_task))
         plan_step_url = self._extract_first_url(current_task) or "none"
         credentials_block = self._build_credentials_context(state, current_task, current_url)
         recent_actions_block = self._build_recent_actions(state)
+        adaptive_guidance_block = self._build_adaptive_guidance(state, current_task)
+        compose_checklist_block = self._build_compose_checklist(state, current_task)
+        dom_cache_block = self._build_dom_cache_context(state)
+        field_priority_block = self._build_field_priority_context(dom_snapshot, current_task)
 
         mission_status = state.get("mission_status") or ""
         context = f"""
         MAIN_GOAL: {user_intent}
 
-        PLAN_STEP: {current_task}
+        STEP_OBJECTIVE (stable): {canonical_step}
+
+        PLAN_STEP (tactical): {current_task}
 
         PLAN_STEP_URL_HINT: {plan_step_url}
 
@@ -60,8 +72,12 @@ class Executor:
 
         DOM_SNAPSHOT:
         {dom_snapshot}
+        {dom_cache_block}
+        {field_priority_block}
         {credentials_block}
         {recent_actions_block}
+        {adaptive_guidance_block}
+        {compose_checklist_block}
 
         MISSION_STATUS:
         {mission_status}
@@ -136,6 +152,34 @@ class Executor:
                         if expected_username and expected_password:
                             looks_emailish = "@" in args.get("text", "")
                             args["text"] = expected_username if looks_emailish else expected_password
+
+            if self._is_compose_finalization_action(name, args, current_task):
+                missing = self._missing_compose_fields(state)
+                if missing:
+                    return self._return_failure(
+                        state,
+                        current_url,
+                        action=name,
+                        args=args,
+                        message=(
+                            "Compose prerequisites not complete before finalization. "
+                            f"Missing fields: {', '.join(missing)}"
+                        ),
+                        error_type="ambiguous_step",
+                    )
+
+            if self._is_compose_wrong_lane_action(name, args, current_task, state):
+                return self._return_failure(
+                    state,
+                    current_url,
+                    action=name,
+                    args=args,
+                    message=(
+                        "Compose action targets recipient flow while current content objective "
+                        "still requires message body entry. Redirect to body-field interaction."
+                    ),
+                    error_type="ambiguous_step",
+                )
 
             if name in {"navigate", "click", "type", "search", "scroll", "press_key", "wait"} and not args:
                 return self._return_failure(
@@ -225,7 +269,10 @@ class Executor:
             except Exception:
                 pass
         if isinstance(result, list):
-            text = json.dumps(result, ensure_ascii=False, indent=2)
+            try:
+                text = json.dumps(result, ensure_ascii=False, indent=2, default=str)
+            except Exception:
+                text = repr(result)
             if len(text) > 14000:
                 text = text[:14000] + "\n... [truncated]"
             # Include a brief preview of discovered items so the next LLM call
@@ -290,12 +337,10 @@ class Executor:
             name = (normalized.get("name") or "").strip()
             if role in ("a", "anchor", "hyperlink"):
                 role = "link"
-            # Compose trap: clicking a generic "To" control can navigate to an
-            # unrelated module instead of focusing the draft recipient field.
-            # For compose-recipient steps, force a field-like target.
-            if self._is_email_compose_recipient_task(current_task):
-                if name.lower() == "to" and role in ("button", "link", "tab"):
-                    role = "textbox"
+            if self._is_dismissive_click_name(name) and not self._task_explicitly_allows_dismissive(current_task):
+                return {}
+            if self._is_finalization_task(current_task) and self._is_dismissive_click_name(name):
+                return {}
             normalized["role"] = role
             normalized["name"] = name
 
@@ -321,8 +366,255 @@ class Executor:
     def _is_email_compose_recipient_task(current_task: str) -> bool:
         text = (current_task or "").lower()
         return (
-            any(token in text for token in ("compose", "draft", "new mail", "recipient", "to field"))
+            any(token in text for token in (
+                "compose",
+                "draft",
+                "new mail",
+                "recipient",
+                "to field",
+                "address the email to",
+                "addressed to",
+            ))
             and any(token in text for token in ("email", "mail", "message", "@"))
+        )
+
+    @staticmethod
+    def _is_finalization_task(current_task: str) -> bool:
+        text = (current_task or "").lower()
+        return any(token in text for token in (
+            "send",
+            "submit",
+            "review",
+            "confirm",
+            "finalize",
+            "finish",
+            "complete",
+        ))
+
+    @staticmethod
+    def _is_dismissive_click_name(name: str) -> bool:
+        lowered = (name or "").strip().lower()
+        if not lowered:
+            return False
+        return any(token in lowered for token in (
+            "cancel",
+            "close",
+            "discard",
+            "back",
+            "hide",
+            "dismiss",
+            "exit",
+        ))
+
+    @staticmethod
+    def _task_explicitly_allows_dismissive(current_task: str) -> bool:
+        text = (current_task or "").lower()
+        allow_tokens = (
+            "close",
+            "cancel",
+            "dismiss",
+            "hide",
+            "discard",
+            "go back",
+            "back button",
+            "exit",
+        )
+        return any(token in text for token in allow_tokens)
+
+    @staticmethod
+    def _is_compose_task(current_task: str) -> bool:
+        text = (current_task or "").lower()
+        return any(tok in text for tok in ("email", "mail", "draft", "compose", "recipient", "subject", "message"))
+
+    def _is_compose_finalization_action(self, action_name: str | None, args: dict, current_task: str) -> bool:
+        if action_name != "click" or not isinstance(args, dict):
+            return False
+        if not self._is_compose_task(current_task):
+            return False
+        name = (args.get("name") or "").strip().lower()
+        role = (args.get("role") or "").strip().lower()
+        finalization_names = ("send", "send now", "review", "continue", "finish")
+        return role in ("button", "menuitem", "tab") and any(n in name for n in finalization_names)
+
+    @staticmethod
+    def _missing_compose_fields(state: ProjectState) -> list[str]:
+        signals = state.get("status_signals") or {}
+        compose_fields = signals.get("compose_fields") or {}
+        required = ("recipient", "subject", "body")
+        return [key for key in required if not bool(compose_fields.get(key, False))]
+
+    def _build_compose_checklist(self, state: ProjectState, current_task: str) -> str:
+        if not self._is_compose_task(current_task):
+            return ""
+        signals = state.get("status_signals") or {}
+        compose_fields = signals.get("compose_fields") or {}
+        recipient_done = bool(compose_fields.get("recipient", False))
+        subject_done = bool(compose_fields.get("subject", False))
+        body_done = bool(compose_fields.get("body", False))
+        missing = [
+            name for name, done in (
+                ("recipient", recipient_done),
+                ("subject", subject_done),
+                ("body", body_done),
+            ) if not done
+        ]
+        next_required = missing[0] if missing else "none"
+        gate_note = (
+            "Do not choose finalization actions (Send/Review/Continue) until all required compose fields are done."
+            if missing else
+            "All compose prerequisites appear complete; finalization actions are allowed if the current step asks for them."
+        )
+        return (
+            "\n\nCOMPOSE_FIELD_STATUS:\n"
+            f"- recipient: {'done' if recipient_done else 'pending'}\n"
+            f"- subject: {'done' if subject_done else 'pending'}\n"
+            f"- body: {'done' if body_done else 'pending'}\n"
+            f"- missing_fields: {', '.join(missing) if missing else 'none'}\n"
+            f"- next_required_field: {next_required}\n"
+            f"- rule: {gate_note}"
+        )
+
+    @staticmethod
+    def _compose_content_required(current_task: str) -> bool:
+        task = (current_task or "").lower()
+        return any(tok in task for tok in ("subject", "message", "body", "content"))
+
+    @staticmethod
+    def _is_recipient_lane_target(action_name: str | None, args: dict) -> bool:
+        if not isinstance(args, dict):
+            return False
+        role = (args.get("role") or "").strip().lower()
+        name = (args.get("name") or "").strip().lower()
+        text = (args.get("text") or "").strip().lower()
+
+        recipient_tokens = (
+            "to",
+            "recipient",
+            "recipients",
+            "search my contacts",
+            "search for email",
+            "address book",
+            "add recipients",
+            "people",
+        )
+        if action_name == "click" and any(tok in name for tok in recipient_tokens):
+            return True
+        if action_name == "click" and role in {"searchbox", "combobox"}:
+            return True
+        if action_name == "type" and "@" in text:
+            return True
+        return False
+
+    def _is_compose_wrong_lane_action(self, action_name: str | None, args: dict, current_task: str, state: ProjectState) -> bool:
+        if not self._is_compose_task(current_task):
+            return False
+        if not self._compose_content_required(current_task):
+            return False
+
+        missing = self._missing_compose_fields(state)
+        missing_set = set(missing)
+        body_pending = "body" in missing_set
+        recipient_pending = "recipient" in missing_set
+
+        if not body_pending or recipient_pending:
+            return False
+        return self._is_recipient_lane_target(action_name, args)
+
+    @staticmethod
+    def _dom_snapshot_budget(current_task: str) -> int:
+        task = (current_task or "").lower()
+        data_entry_tokens = (
+            "compose", "draft", "recipient", "subject", "message", "body",
+            "fill", "form", "login", "sign in", "password", "username",
+        )
+        return 12000 if any(tok in task for tok in data_entry_tokens) else 8000
+
+    @staticmethod
+    def _build_dom_cache_context(state: ProjectState) -> str:
+        cache = state.get("dom_cache") or []
+        if not cache:
+            return ""
+        latest = (cache[-1] or "").strip()
+        if not latest:
+            return ""
+        clipped = latest[:3500]
+        if len(latest) > 3500:
+            clipped += "\n... [truncated]"
+        return f"\n\nDOM_TEXT_CONTEXT (latest page text snapshot):\n{clipped}"
+
+    @staticmethod
+    def _is_data_entry_task(current_task: str) -> bool:
+        text = (current_task or "").lower()
+        return bool(re.search(
+            r"\b(fill|enter|type|write|input|provide|set|update|complete|compose|draft|"
+            r"log\s*in|sign\s*in|authenticate|credentials?)\b",
+            text,
+        ))
+
+    @staticmethod
+    def _task_keywords(current_task: str) -> set[str]:
+        stop = {
+            "the", "and", "for", "with", "from", "into", "onto", "that", "this", "then",
+            "step", "page", "field", "fields", "button", "click", "open", "use", "using",
+            "form", "draft", "write", "enter", "fill", "type", "input", "update", "set",
+        }
+        words = re.findall(r"[a-z0-9]{3,}", (current_task or "").lower())
+        return {w for w in words if w not in stop}
+
+    @staticmethod
+    def _name_keywords(name: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9]{3,}", (name or "").lower()))
+
+    @classmethod
+    def _build_field_priority_context(cls, dom_snapshot: str, current_task: str) -> str:
+        if not cls._is_data_entry_task(current_task):
+            return ""
+
+        fields: list[tuple[str, str]] = []
+        controls: list[tuple[str, str]] = []
+        seen = set()
+        for line in (dom_snapshot or "").splitlines():
+            m = re.match(r'^\[role="([^"]+)"\]\s+"(.+)"$', line.strip())
+            if not m:
+                continue
+            role = (m.group(1) or "").strip().lower()
+            name = (m.group(2) or "").strip()
+            if not name:
+                continue
+            key = (role, name.lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            if role in {"textbox", "searchbox", "combobox", "textarea", "spinbutton"}:
+                fields.append((role, name))
+            elif role in {"button", "tab", "menuitem"}:
+                controls.append((role, name))
+
+        if not fields and not controls:
+            return ""
+
+        task_keywords = cls._task_keywords(current_task)
+        scored_fields: list[tuple[int, str, str]] = []
+        for role, name in fields:
+            overlap = len(task_keywords & cls._name_keywords(name))
+            scored_fields.append((overlap, role, name))
+        scored_fields.sort(key=lambda item: (-item[0], item[2].lower()))
+        relevant_fields = [(r, n) for score, r, n in scored_fields if score > 0]
+        shown_fields = (relevant_fields or [(r, n) for _, r, n in scored_fields])[:8]
+        shown_controls = controls[:6]
+
+        field_lines = "\n".join(f"- {r}: {n}" for r, n in shown_fields) if shown_fields else "- none detected"
+        control_lines = "\n".join(f"- {r}: {n}" for r, n in shown_controls) if shown_controls else "- none detected"
+
+        return (
+            "\n\nFIELD_PRIORITY_CONTEXT:\n"
+            "Use this as an action-order hint, not a hard ban.\n"
+            "If a relevant editable field is visible, prefer filling fields (focus/type) over clicking generic buttons.\n"
+            "Click buttons when needed to reveal/focus the required field, advance auth flow, or submit after required fields are complete.\n"
+            "Visible editable fields:\n"
+            f"{field_lines}\n"
+            "Visible actionable controls:\n"
+            f"{control_lines}"
         )
 
     @staticmethod
@@ -648,6 +940,70 @@ class Executor:
             "\n\nPREVIOUS_ACTIONS (already executed — do NOT repeat; if discovery found items, CLICK one):\n"
             + "\n".join(summaries)
         )
+
+    @staticmethod
+    def _build_adaptive_guidance(state: ProjectState, current_task: str) -> str:
+        """Create generic, non-domain-specific guidance from recent outcomes."""
+        logs = state.get("reasoning_log") or []
+        recent = [log for log in logs if isinstance(log, str)][-10:]
+        if not recent:
+            return ""
+
+        last_executor = next((e for e in reversed(recent) if e.startswith("[Executor]")), "")
+        if not last_executor:
+            return ""
+
+        action = ""
+        status = ""
+        message = ""
+        args = ""
+        for line in last_executor.split("\n"):
+            s = line.strip()
+            if s.startswith("[Executor] Action:"):
+                action = s.split(":", 1)[1].strip().lower()
+            elif s.startswith("[Executor] Status:"):
+                status = s.split(":", 1)[1].strip().lower()
+            elif s.startswith("[Executor] Message:"):
+                message = s.split(":", 1)[1].strip().lower()
+            elif s.startswith("[Executor] Args:"):
+                args = s.split(":", 1)[1].strip().lower()
+
+        hints: list[str] = []
+
+        # Generic failure guidance: avoid repeating the exact failed target.
+        if status == "failure" and "element_not_found" in last_executor.lower():
+            hints.append(
+                "The previous action failed with element_not_found. Do not repeat the same role/name target; choose a different locator strategy or complementary action."
+            )
+
+        # Generic anti-loop guidance for in-progress retries.
+        recent_executor = [e for e in recent if e.startswith("[Executor]")][-4:]
+        if len(recent_executor) >= 2:
+            action_seq = []
+            for entry in recent_executor:
+                for line in entry.split("\n"):
+                    s = line.strip()
+                    if s.startswith("[Executor] Action:"):
+                        action_seq.append(s.split(":", 1)[1].strip().lower())
+                        break
+            if len(action_seq) >= 2 and action_seq[-1] == action_seq[-2]:
+                hints.append(
+                    "You are repeating the same action type on this step. Try the next complementary action (e.g., after click use type/press_key; after type use confirm/select action)."
+                )
+
+        # If current task is data-entry and last click target was text-like but failed,
+        # suggest typing only when an input lane is clearly visible in snapshot.
+        task_lower = (current_task or "").lower()
+        if ("fill" in task_lower or "address" in task_lower or "enter" in task_lower or "draft" in task_lower):
+            if action == "click" and status == "failure":
+                hints.append(
+                    "For data-entry steps, if click-to-focus fails, choose a direct field-entry strategy into a visible input/combo/contenteditable lane instead of re-clicking the same label."
+                )
+
+        if not hints:
+            return ""
+
+        return "\n\nADAPTIVE_GUIDANCE (from recent outcomes):\n- " + "\n- ".join(hints)
 
     _LOGIN_KEYWORDS = re.compile(
         r"\blog\s*in\b|\bsign\s*in\b|\bcredential|\busername\b|\bpassword\b"

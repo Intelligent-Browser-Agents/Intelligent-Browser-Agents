@@ -65,7 +65,23 @@ You will be given:
 - For `navigate`, the URL must be a single valid `http(s)` URL. If PLAN_STEP contains an explicit URL, use that exact URL only.
 - For web search, prefer `https://duckduckgo.com` first, then `https://www.bing.com`. Use Google only when the user explicitly requires Google.
 - If PLAN_STEP implies interacting with a page element (button, link, tab), use `click` with an ARIA role + accessible name from DOM_SNAPSHOT.
-- Use `type(text)` only when an input is already focused (or when the plan step clearly indicates typing into a field you can target first in a later action).
+- Use `type(text)` when a visible editable target is present. If a needed field is visible but not focused, focus that exact editable field first (for example the recipient textbox/contenteditable lane), then type. Avoid generic focus clicks when a specific editable target is already visible.
+- For data-entry/form steps, when a relevant editable field is visible, prefer field-filling actions over generic button clicks. Still use button clicks when they are required to reveal/focus the field, advance authentication, or submit after required fields are populated.
+- For content-writing steps, if recipient/address fields are already completed, do not route back into recipient/search-contact controls; target the remaining content field directly.
+- If focus-navigation actions (like repeated Tab) are not producing field entry progress, stop repeating them and choose an explicit field-targeting action.
+- If PREVIOUS_ACTIONS already contains two consecutive `press_key(Tab)` actions on the same step, do not choose `press_key(Tab)` again.
+- For recipient-entry steps, prioritize direct typing into a visible recipient textbox/contenteditable lane. If both a generic `To` control and an editable recipient lane are visible, do not click `To`; type into (or focus then type into) the editable recipient lane.
+- For open-compose steps, once compose controls are visible, avoid extra focus-only actions and move directly to the next field-entry milestone.
+- Scope discipline: if PLAN_STEP is only to open/start a draft, do not perform recipient/subject/body entry actions in that same step. Once draft-open evidence exists, choose actions consistent with completing only the open-draft objective.
+
+### Recipient-step sequencing (important)
+- If PLAN_STEP is explicitly about filling/adding a recipient:
+  - First check for a visible editable recipient target (textbox/combobox/contenteditable). If present, use direct entry actions (or focus that exact editable target, then type).
+  - Only if no editable recipient target is visible, a single focus action to reveal it (for example click `To` or `Add Recipients`) is acceptable.
+  - If recipient input/searchbox/combobox is visible, do not keep clicking `To`/focus controls; perform entry/confirmation actions instead.
+  - Do not click contacts-directory style controls (`To`, `People`, `Address book`, `Add Recipients`) when an inline editable recipient lane is already visible.
+  - After a successful recipient `type` of an email address, the next action should usually be confirmation (`press_key(Enter)` or click a matching suggestion/option chip), not another focus click.
+  - If PREVIOUS_ACTIONS already includes a successful `click` on `To` in the current step, do not select the same `click(role=button,name=To)` again unless there is explicit evidence that compose focus was lost.
 - Use `scroll(down|up)` when the target is likely off-screen.
 - Use `wait(seconds)` only for brief page loading or transitions when no better action is available.
 - Use `press_key(key)` for simple submissions/escapes when appropriate.

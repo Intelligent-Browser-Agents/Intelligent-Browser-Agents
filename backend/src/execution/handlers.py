@@ -151,7 +151,7 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
                 for rt in role_tries:
                     for nt in name_tries:
                         try:
-                            locator = fr.get_by_role(rt, name=nt).first
+                            locator = fr.get_by_role(rt, name=nt, exact=short_name).first
                             if await _try_locator_click(locator):
                                 await _settle_after_navigation()
                                 return ExecutionOutput(
@@ -192,26 +192,13 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
                                 continue
 
             # get_by_text fallback when role was wrong or name is visible text only.
-            for fr in frames:
-                for nt in name_tries:
-                    try:
-                        loc = fr.get_by_text(nt, exact=True).first
-                        if await _try_locator_click(loc):
-                            await _settle_after_navigation()
-                            return ExecutionOutput(
-                                action="click",
-                                args={"role": role_normalized, "name": name_trimmed},
-                                status="success",
-                                error_type="none",
-                                message=f"Clicked element with exact text '{nt}'",
-                                execution_time_ms=_elapsed(),
-                            )
-                    except Exception as e:
-                        last_error = str(e)
-                        continue
-                    if not short_name:
+            # Do not use this for text-entry roles; labels often resolve to chips/buttons.
+            disallow_text_fallback_roles = {"textbox", "searchbox", "combobox"}
+            if role_normalized not in disallow_text_fallback_roles:
+                for fr in frames:
+                    for nt in name_tries:
                         try:
-                            loc = fr.get_by_text(nt, exact=False).first
+                            loc = fr.get_by_text(nt, exact=True).first
                             if await _try_locator_click(loc):
                                 await _settle_after_navigation()
                                 return ExecutionOutput(
@@ -219,12 +206,28 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
                                     args={"role": role_normalized, "name": name_trimmed},
                                     status="success",
                                     error_type="none",
-                                    message=f"Clicked element matching text '{nt}'",
+                                    message=f"Clicked element with exact text '{nt}'",
                                     execution_time_ms=_elapsed(),
                                 )
                         except Exception as e:
                             last_error = str(e)
                             continue
+                        if not short_name:
+                            try:
+                                loc = fr.get_by_text(nt, exact=False).first
+                                if await _try_locator_click(loc):
+                                    await _settle_after_navigation()
+                                    return ExecutionOutput(
+                                        action="click",
+                                        args={"role": role_normalized, "name": name_trimmed},
+                                        status="success",
+                                        error_type="none",
+                                        message=f"Clicked element matching text '{nt}'",
+                                        execution_time_ms=_elapsed(),
+                                    )
+                            except Exception as e:
+                                last_error = str(e)
+                                continue
 
             # Last resort: anchors/buttons whose visible text matches (dashboard tiles).
             if not short_name:
@@ -407,10 +410,12 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             "textarea",
             "[contenteditable='true']",
         ]
-        recipient_selectors = [
+        contact_selectors = [
             "input[aria-label*='recipient' i]",
             "input[name*='recipient' i]",
             "input[placeholder*='recipient' i]",
+            "input[aria-label*='add recipients' i]",
+            "input[placeholder*='add recipients' i]",
             "input[aria-label*='to' i]",
             "input[name='to' i]",
             "input[placeholder*='to' i]",
@@ -421,8 +426,25 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             "input[placeholder*='contact' i]",
             "input[aria-label*='address' i]",
             "input[placeholder*='address' i]",
+            "input[aria-label*='phone' i]",
+            "input[name*='phone' i]",
+            "input[placeholder*='phone' i]",
         ]
-        subject_selectors = [
+        compose_recipient_selectors = [
+            "input[aria-label='to' i]",
+            "input[name='to' i]",
+            "input[placeholder*='to' i]",
+            "input[aria-label*='recipient' i]",
+            "input[name*='recipient' i]",
+            "input[placeholder*='recipient' i]",
+            "input[aria-label*='add recipients' i]",
+            "input[placeholder*='add recipients' i]",
+            "[contenteditable='true'][aria-label*='to' i]",
+            "[contenteditable='true'][aria-label*='recipient' i]",
+            "[role='combobox'][aria-label*='add recipients' i]",
+            "[role='textbox'][aria-label*='to' i]",
+        ]
+        title_selectors = [
             "input[aria-label*='subject' i]",
             "textarea[aria-label*='subject' i]",
             "input[name*='subject' i]",
@@ -432,6 +454,17 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             "input[aria-label*='title' i]",
             "input[name*='title' i]",
             "input[placeholder*='title' i]",
+        ]
+        code_selectors = [
+            "input[aria-label*='code' i]",
+            "input[name*='code' i]",
+            "input[placeholder*='code' i]",
+            "input[aria-label*='otp' i]",
+            "input[name*='otp' i]",
+            "input[placeholder*='otp' i]",
+            "input[aria-label*='verification' i]",
+            "input[name*='verification' i]",
+            "input[placeholder*='verification' i]",
         ]
         body_selectors = [
             "textarea[aria-label*='message' i]",
@@ -451,6 +484,38 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                     loc = frame.locator(sel).first
                     if await loc.count() > 0 and await loc.is_visible():
                         return loc
+                except Exception:
+                    continue
+            return None
+
+        async def _is_search_like_input(locator) -> bool:
+            try:
+                meta = await locator.evaluate(
+                    """el => {
+                        const bits = [
+                            el.getAttribute && el.getAttribute('aria-label'),
+                            el.getAttribute && el.getAttribute('placeholder'),
+                            el.getAttribute && el.getAttribute('name'),
+                            el.getAttribute && el.getAttribute('role'),
+                            el.id,
+                            el.className,
+                        ].filter(Boolean).join(' ').toLowerCase();
+                        return bits;
+                    }"""
+                )
+            except Exception:
+                return False
+            return any(tok in (meta or "") for tok in ("search", "find", "lookup", "directory"))
+
+        async def _find_visible_contact_in_frame(frame, selectors: list[str], avoid_search_like: bool):
+            for sel in selectors:
+                try:
+                    loc = frame.locator(sel).first
+                    if await loc.count() == 0 or not await loc.is_visible():
+                        continue
+                    if avoid_search_like and await _is_search_like_input(loc):
+                        continue
+                    return loc
                 except Exception:
                     continue
             return None
@@ -494,6 +559,60 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             except Exception:
                 return ""
 
+        async def _get_focused_info() -> dict:
+            try:
+                return await page.evaluate(
+                    """() => {
+                        const el = document.activeElement;
+                        if (!el) return { tag: '', type: '', meta: '', isContentEditable: false };
+                        const tag = (el.tagName || '').toLowerCase();
+                        const type = (el.type || '').toLowerCase();
+                        const meta = [
+                            el.getAttribute && el.getAttribute('aria-label'),
+                            el.getAttribute && el.getAttribute('placeholder'),
+                            el.getAttribute && el.getAttribute('name'),
+                            el.id,
+                            el.getAttribute && el.getAttribute('role'),
+                        ].filter(Boolean).join(' ').toLowerCase();
+                        return {
+                            tag,
+                            type,
+                            meta,
+                            isContentEditable: !!el.isContentEditable,
+                        };
+                    }"""
+                )
+            except Exception:
+                return {"tag": "", "type": "", "meta": "", "isContentEditable": False}
+
+        async def _describe_target(locator) -> str:
+            try:
+                return await locator.evaluate(
+                    """el => {
+                        const tag = (el.tagName || '').toLowerCase();
+                        const role = (el.getAttribute && el.getAttribute('role')) || '';
+                        const label = (el.getAttribute && el.getAttribute('aria-label')) || '';
+                        const placeholder = (el.getAttribute && el.getAttribute('placeholder')) || '';
+                        const name = (el.getAttribute && el.getAttribute('name')) || '';
+                        const id = el.id || '';
+                        const t = (el.type || '').toLowerCase();
+                        const contentEditable = !!el.isContentEditable;
+                        const bits = [
+                            tag && `tag=${tag}`,
+                            role && `role=${role}`,
+                            label && `label=${label}`,
+                            placeholder && `placeholder=${placeholder}`,
+                            name && `name=${name}`,
+                            id && `id=${id}`,
+                            t && `type=${t}`,
+                            contentEditable && 'contenteditable=true',
+                        ].filter(Boolean);
+                        return bits.join(', ') || 'unknown target';
+                    }"""
+                )
+            except Exception:
+                return "unknown target"
+
         def _looks_auth_context(hint_text: str) -> bool:
             if not hint_text:
                 return False
@@ -503,33 +622,109 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             has_compose = any(tok in hint_text for tok in compose_tokens)
             return has_auth and not has_compose
 
+        def _looks_compose_context(hint_text: str) -> bool:
+            if not hint_text:
+                return False
+            compose_tokens = ("new mail", "compose", "subject", "message body", "recipient", "to:", "send")
+            return any(tok in hint_text for tok in compose_tokens)
+
+        def _infer_text_intent(value: str) -> str:
+            v = (value or "").strip()
+            if not v:
+                return "generic"
+            if _looks_like_password(v):
+                return "password"
+            if re.fullmatch(r"\d{4,8}", v):
+                return "code"
+            if "@" in v:
+                return "contact"
+            words = len(re.findall(r"\S+", v))
+            longish = len(v) >= 40 or words >= 8 or any(p in v for p in (".", "!", "?"))
+            if longish:
+                return "body"
+            return "title"
+
         target = None
         page_hint = await _get_page_hint_text()
         auth_context = _looks_auth_context(page_hint)
+        compose_context = _looks_compose_context(page_hint)
+        text_intent = _infer_text_intent(text)
+        focused_info = await _get_focused_info()
+        focused_meta = (focused_info.get("meta") or "").lower()
+        focused_tag = (focused_info.get("tag") or "").lower()
+        focused_type = (focused_info.get("type") or "").lower()
+        focused_is_typeable_input = focused_tag in ("input", "textarea") and focused_type not in (
+            "hidden", "checkbox", "radio", "submit", "button", "file", "image",
+        )
+        focused_is_contenteditable = bool(focused_info.get("isContentEditable"))
+        focused_is_contactish = any(tok in focused_meta for tok in ("to", "recipient", "contact", "email", "address", "phone"))
+        focused_is_subjectish = any(tok in focused_meta for tok in ("subject", "title"))
+        focused_is_bodyish = any(tok in focused_meta for tok in ("message", "body", "content"))
+        focused_is_codeish = any(tok in focused_meta for tok in ("code", "otp", "verification"))
+
+        # Respect explicit focus intent for non-credential typing. This avoids
+        # typing body text into a different semantic field selected by heuristics.
+        if not is_credential and (focused_is_typeable_input or focused_is_contenteditable):
+            target = page.locator(":focus").first
+            if await target.count() == 0:
+                target = None
+
+        # For credential typing, only trust focus when it semantically matches.
+        if target is None and text_intent == "contact" and focused_is_typeable_input and focused_is_contactish:
+            target = page.locator(":focus").first
+            if await target.count() == 0:
+                target = None
+        if target is None and text_intent == "password" and focused_is_typeable_input and (
+            "password" in focused_meta or focused_type == "password"
+        ):
+            target = page.locator(":focus").first
+            if await target.count() == 0:
+                target = None
+        if target is None and text_intent == "code" and focused_is_typeable_input and focused_is_codeish:
+            target = page.locator(":focus").first
+            if await target.count() == 0:
+                target = None
 
         # 0. Semantic field targeting first, to avoid typing into unrelated focus.
-        if is_email_like:
+        if target is None and text_intent == "contact":
             for fr in frames:
                 if auth_context:
                     target = await _find_visible_in_frame(fr, username_selectors)
+                elif compose_context:
+                    target = await _find_visible_contact_in_frame(
+                        fr, compose_recipient_selectors, avoid_search_like=True
+                    )
+                    if target is None:
+                        target = await _find_visible_contact_in_frame(
+                            fr, contact_selectors, avoid_search_like=True
+                        )
                 else:
-                    target = await _find_visible_prefer_empty(fr, recipient_selectors)
+                    target = await _find_visible_prefer_empty(fr, contact_selectors)
                     if target is None:
                         target = await _find_visible_in_frame(fr, username_selectors)
                 if target is not None:
                     break
-        elif is_password_like:
+        elif target is None and text_intent == "password":
             for fr in frames:
                 target = await _find_visible_in_frame(fr, password_selectors)
                 if target is not None:
                     break
-        else:
-            # For non-credential text, prefer semantic compose/form fields:
-            # empty subject/title first, then message/body editors.
+        elif target is None and text_intent == "code":
             for fr in frames:
-                target = await _find_visible_prefer_empty(fr, subject_selectors)
+                target = await _find_visible_in_frame(fr, code_selectors)
                 if target is not None:
                     break
+        elif target is None:
+            # For general text, prefer semantic form fields by intent.
+            if (focused_is_subjectish or focused_is_bodyish) and (focused_is_typeable_input or focused_is_contenteditable):
+                target = page.locator(":focus").first
+                if await target.count() == 0:
+                    target = None
+            if target is None and text_intent == "title":
+                for fr in frames:
+                    target = await _find_visible_prefer_empty(fr, title_selectors)
+                    if target is not None:
+                        break
             if target is None:
                 for fr in frames:
                     target = await _find_visible_in_frame(fr, body_selectors)
@@ -590,6 +785,7 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                     break
 
         if target is not None:
+            target_desc = await _describe_target(target)
             try:
                 await target.scroll_into_view_if_needed(timeout=3000)
             except Exception:
@@ -601,10 +797,22 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                 raise
 
             try:
-                await target.fill(text, timeout=5000)
+                if focused_is_contenteditable or "contenteditable=true" in target_desc:
+                    await target.click(timeout=5000)
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.type(text)
+                else:
+                    await target.fill(text, timeout=5000)
             except Exception:
                 await target.click(timeout=5000)
-                await target.fill(text, timeout=5000)
+                try:
+                    if focused_is_contenteditable or "contenteditable=true" in target_desc:
+                        await page.keyboard.press("Control+A")
+                        await page.keyboard.type(text)
+                    else:
+                        await target.fill(text, timeout=5000)
+                except Exception:
+                    await target.type(text, timeout=5000)
         else:
             return ExecutionOutput(
                 action="type",
@@ -628,7 +836,7 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             args={"text": text},
             status="success",
             error_type="none",
-            message=f"Typed '{text}'",
+            message=f"Typed '{text}' into {target_desc}",
             execution_time_ms=elapsed
         )
     except Exception as e:

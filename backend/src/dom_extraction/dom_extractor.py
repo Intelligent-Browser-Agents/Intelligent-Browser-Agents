@@ -208,7 +208,7 @@ async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
 
             dom_tree = "\n".join(dom_parts) if dom_parts else await page.content()
         except PlaywrightError as e:
-            data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+            data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = str(e), execution_time = time.perf_counter() - start)
             return data.model_dump_json(indent = 4)
 
         #Filters out chars from webpage's domain that don't abide by file naming standards
@@ -222,7 +222,7 @@ async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
         try:
             page_screenshot = await page.screenshot(path = file_path, full_page = True) #Takes screenshot of webpage and saves it to file_path
         except PlaywrightError as e:
-            data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+            data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = str(e), execution_time = time.perf_counter() - start)
             return data.model_dump_json(indent = 4)
 
         #Packages function webpage data with function metadata into a Pydantic object
@@ -237,7 +237,7 @@ async def get_dom_tree_and_page_screenshot(page: Page) -> tuple[str, bytes]:
 
         return data.model_dump_json(indent = 4), page_screenshot, page #Converts object to JSON
     except Exception as e:
-        data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+        data = FuncFailed(tool_name = 'get_dom_tree_and_page_screenshot', status = 'failed', error = str(e), execution_time = time.perf_counter() - start)
         return data.model_dump_json(indent = 4)
 
     
@@ -324,7 +324,7 @@ def retrieve_interactive_elements(page_data: str) -> str:
         
         return data.model_dump_json(indent = 4) #Converts object to JSON
     except Exception as e:
-        data = FuncFailed(tool_name = 'retrieve_interactive_elements', status = 'failed', error = e, execution_time = time.perf_counter() - start)
+        data = FuncFailed(tool_name = 'retrieve_interactive_elements', status = 'failed', error = str(e), execution_time = time.perf_counter() - start)
         return data.model_dump_json(indent = 4)
 
 async def get_page_text(page: Page, max_chars: int = 15000) -> str:

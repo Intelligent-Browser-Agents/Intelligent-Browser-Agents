@@ -29,6 +29,12 @@ Decompose the goal into **3-8** ordered steps:
 - Avoid irreversible or risky actions unless explicitly requested.
 - Ensure each step is necessary and moves toward completion.
 
+### Step Granularity (Critical)
+- Each step should map to one observable milestone, not a bundle of multiple milestones.
+- Avoid combining recipient + subject + body + send into one step.
+- Prefer: open compose -> fill recipient -> draft subject/body -> review/send -> verify sent.
+- This reduces retry confusion and improves autonomous recovery when one milestone fails.
+
 ### Saved Credentials & Auto-Fill
 The context may include an `AVAILABLE USER CREDENTIALS` section listing what information the system already has (service logins, personal info, payment methods, experience/education). When credentials are available for a service:
 - Plan the login step as an **automated** step, e.g. "Log in to [service] using saved credentials." Do **not** phrase it as a human-in-the-loop step.

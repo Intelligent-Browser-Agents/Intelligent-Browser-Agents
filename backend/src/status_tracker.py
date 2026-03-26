@@ -24,6 +24,15 @@ _LOGIN_KEYWORDS = (
     "credential", "password", "username",
 )
 
+_FIELD_ENTRY_KEYWORDS = (
+    "fill", "enter", "type", "populate", "write", "draft", "answer",
+    "provide", "input", "complete", "form", "survey", "question", "field", "box",
+)
+
+_FINALIZATION_KEYWORDS = (
+    "send", "submit", "review", "confirm", "finish", "finalize",
+)
+
 
 # ── public helpers ─────────────────────────────────────────────────────
 
@@ -110,6 +119,35 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
     # ── Login phase ────────────────────────────────────────────────────
     login_phase = signals.get("login_phase", "not_started")
 
+    # ── Compose fields ─────────────────────────────────────────────────
+    compose_fields = signals.get("compose_fields") or {
+        "recipient": False,
+        "subject": False,
+        "body": False,
+    }
+    compose_section = (
+        f"- recipient: {'done' if compose_fields.get('recipient') else 'pending'}\n"
+        f"- subject: {'done' if compose_fields.get('subject') else 'pending'}\n"
+        f"- body: {'done' if compose_fields.get('body') else 'pending'}"
+    )
+
+    # ── Generic field progress ───────────────────────────────────────
+    field_progress = signals.get("field_progress") or {}
+    required_count = int(field_progress.get("required_count") or 0)
+    completed_fields = list(field_progress.get("completed_fields") or [])
+    completed_count = len(completed_fields)
+    if required_count > 0:
+        missing_count = max(required_count - completed_count, 0)
+        tracked = ", ".join(completed_fields[:8]) or "none"
+        field_progress_section = (
+            f"- required: {required_count}\n"
+            f"- completed: {min(completed_count, required_count)}\n"
+            f"- missing: {missing_count}\n"
+            f"- tracked fields: {tracked}"
+        )
+    else:
+        field_progress_section = "(not tracking field-by-field completion for current step)"
+
     # ── HITL history ───────────────────────────────────────────────────
     hitl_events: list[dict] = signals.get("hitl_events") or []
     if hitl_events:
@@ -140,6 +178,12 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
 
 ## Login Phase
 {login_phase}
+
+## Compose Fields
+{compose_section}
+
+## Field Progress
+{field_progress_section}
 
 ## Blocking Issues
 {blocking}
@@ -201,6 +245,34 @@ def _update_orchestrator(signals: dict, state: dict, result: dict) -> None:
     elif signals.get("login_phase") == "in_progress":
         signals["login_phase"] = "completed"
 
+    # Reset compose field tracker when starting/opening a fresh draft step.
+    if any(tok in task for tok in ("new email draft", "open a new email draft", "start a new email draft", "new mail")):
+        signals["compose_fields"] = {
+            "recipient": False,
+            "subject": False,
+            "body": False,
+        }
+
+    # Start/reset generic field progress when the step objective changes.
+    current_task = (result.get("current_task") or state.get("current_task") or "").strip()
+    task_signature = _normalize_task_signature(current_task)
+    existing = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else {}
+    if _is_field_tracking_task(task_signature):
+        required_count = _infer_required_field_count(task_signature)
+        if existing.get("task_signature") != task_signature:
+            signals["field_progress"] = {
+                "task_signature": task_signature,
+                "required_count": required_count,
+                "completed_fields": [],
+                "named_required_fields": _infer_required_field_names(task_signature),
+            }
+        elif existing:
+            existing["required_count"] = max(int(existing.get("required_count") or 0), required_count)
+            existing["named_required_fields"] = existing.get("named_required_fields") or _infer_required_field_names(task_signature)
+            signals["field_progress"] = existing
+    else:
+        signals.pop("field_progress", None)
+
 
 def _update_executor(signals: dict, state: dict, result: dict) -> None:
     log_entries = result.get("reasoning_log") or []
@@ -223,6 +295,69 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
         "status": action_status or "unknown",
         "message": (action_msg or "")[:200],
     }
+
+    compose_fields = dict(signals.get("compose_fields") or {
+        "recipient": False,
+        "subject": False,
+        "body": False,
+    })
+    entry_l = (last_entry or "").lower()
+    target_l = (target or "").lower()
+
+    # Successful recipient entry or selection.
+    if action_status == "success":
+        if action_type == "type":
+            typed_text = _extract_typed_text(last_entry or "")
+            if "@" in typed_text and any(tok in entry_l for tok in (
+                "label=to",
+                "name=to",
+                "label=recipient",
+                "placeholder=recipient",
+                "search my contacts",
+                "add recipients",
+                "search for email",
+            )):
+                compose_fields["recipient"] = True
+
+            if any(tok in entry_l for tok in ("label=subject", "placeholder=add a subject", "name=subject")):
+                if len(typed_text) >= 3:
+                    compose_fields["subject"] = True
+
+            words = len(re.findall(r"\S+", typed_text or ""))
+            recipient_context = any(tok in entry_l for tok in (
+                "label=to",
+                "name=to",
+                "label=recipient",
+                "search my contacts",
+                "add recipients",
+                "search for email",
+            ))
+            body_context = any(tok in entry_l for tok in (
+                "label=message body",
+                "placeholder=message",
+            )) or ("contenteditable=true" in entry_l and not recipient_context)
+            # Field completion should be field-dependent, not content-length dependent.
+            if body_context and bool((typed_text or "").strip()):
+                compose_fields["body"] = True
+
+            # Generic field-progress tracking for any multi-field step.
+            field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
+            task_signature = _normalize_task_signature((state.get("current_task") or "").strip())
+            if field_progress and field_progress.get("task_signature") == task_signature:
+                completed = list(field_progress.get("completed_fields") or [])
+                field_id = _extract_field_identifier(last_entry or "")
+                if not field_id and typed_text.strip():
+                    # Fallback for sparse logs when labels are missing.
+                    field_id = f"typed:{len(completed) + 1}"
+                if field_id and field_id not in completed:
+                    completed.append(field_id)
+                    field_progress["completed_fields"] = completed
+                    signals["field_progress"] = field_progress
+
+        if action_type == "click" and "role=option" in target_l and "@" in target_l:
+            compose_fields["recipient"] = True
+
+    signals["compose_fields"] = compose_fields
 
     # Update login phase based on executor actions
     lp = signals.get("login_phase", "not_started")
@@ -252,6 +387,28 @@ def _update_verifier(signals: dict, state: dict, result: dict) -> None:
     msg_l = message.lower()
     if any(k in msg_l for k in ("multi-factor", "mfa", "2fa", "two-factor", "two-step")):
         signals["login_phase"] = "mfa_pending"
+
+    compose_fields = dict(signals.get("compose_fields") or {
+        "recipient": False,
+        "subject": False,
+        "body": False,
+    })
+    if "recipient entry appears confirmed" in msg_l:
+        compose_fields["recipient"] = True
+    if "subject and message body appear populated" in msg_l:
+        compose_fields["subject"] = True
+        compose_fields["body"] = True
+    signals["compose_fields"] = compose_fields
+
+    # Allow verifier messages to finalize generic field-progress state.
+    field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
+    if field_progress and "field-entry step complete" in msg_l:
+        required_count = int(field_progress.get("required_count") or 0)
+        completed = list(field_progress.get("completed_fields") or [])
+        while required_count > 0 and len(completed) < required_count:
+            completed.append(f"verified:{len(completed) + 1}")
+        field_progress["completed_fields"] = completed
+        signals["field_progress"] = field_progress
 
 
 def _update_fallback(signals: dict, state: dict, result: dict) -> None:
@@ -293,3 +450,91 @@ def _update_interaction(signals: dict, state: dict, result: dict) -> None:
 def _extract(text: str, pattern: str) -> str | None:
     m = re.search(pattern, text or "", re.IGNORECASE)
     return m.group(1).strip() if m else None
+
+
+def _normalize_task_signature(task: str) -> str:
+    text = (task or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"\s*\[Recovery Hint:.*$", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"\s*\[Then continue objective:.*$", "", text, flags=re.IGNORECASE).strip()
+    return text.lower()
+
+
+def _is_field_tracking_task(task_signature: str) -> bool:
+    if not task_signature:
+        return False
+    if any(tok in task_signature for tok in _LOGIN_KEYWORDS):
+        return False
+    if any(tok in task_signature for tok in _FINALIZATION_KEYWORDS):
+        return False
+    return any(tok in task_signature for tok in _FIELD_ENTRY_KEYWORDS)
+
+
+def _infer_required_field_names(task_signature: str) -> list[str]:
+    text = task_signature or ""
+    names: list[str] = []
+    keyword_map = (
+        ("recipient", ("recipient", "to field", "to:")),
+        ("subject", ("subject", "subject line")),
+        ("body", ("message body", "email body", "body", "message content", "content")),
+        ("name", ("full name", "name")),
+        ("email", ("email", "e-mail")),
+        ("phone", ("phone", "telephone")),
+        ("address", ("address",)),
+        ("city", ("city",)),
+        ("state", ("state", "province")),
+        ("zip", ("zip", "postal code")),
+        ("country", ("country",)),
+    )
+    for canonical, variants in keyword_map:
+        if any(v in text for v in variants):
+            names.append(canonical)
+    return names
+
+
+def _infer_required_field_count(task_signature: str) -> int:
+    text = task_signature or ""
+
+    count_match = re.search(
+        r"\b(\d{1,3})\b\s+(?:different\s+)?(?:boxes|fields|inputs|textboxes|questions|answers)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if count_match:
+        try:
+            parsed = int(count_match.group(1))
+            if parsed > 0:
+                return parsed
+        except Exception:
+            pass
+
+    named = _infer_required_field_names(text)
+    if named:
+        return len(named)
+
+    return 1 if _is_field_tracking_task(text) else 0
+
+
+def _extract_typed_text(entry: str) -> str:
+    args_match = re.search(r"\[Executor\] Args:\s*.*text=([^\n]+)", entry or "", re.IGNORECASE)
+    if not args_match:
+        return ""
+    return args_match.group(1).strip().strip("\"'")
+
+
+def _extract_field_identifier(entry: str) -> str:
+    text = (entry or "").lower()
+    patterns = (
+        r"label=([^,\n]+)",
+        r"placeholder=([^,\n]+)",
+        r"name=([^,\n]+)",
+        r"id=([^,\n]+)",
+    )
+    for pattern in patterns:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            value = (m.group(1) or "").strip().strip("\"'")
+            if value:
+                return value
+    return ""

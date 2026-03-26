@@ -227,9 +227,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
 
         if step_complete and safe_step >= total_steps - 1:
             original_step = current_plan[safe_step]
-            completed_fallback_prereq = (
-                current_task.strip() != original_step.strip()
-            )
+            completed_fallback_prereq = self._is_explicit_prerequisite_variant(current_task, original_step)
             if completed_fallback_prereq:
                 reasoning = (
                     f"[Decision] Fallback prerequisite completed; "
@@ -281,7 +279,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             }
         if step_complete and safe_step < total_steps - 1:
             original_step = current_plan[safe_step]
-            if current_task.strip() != original_step.strip():
+            if self._is_explicit_prerequisite_variant(current_task, original_step):
                 reasoning = (
                     f"[Decision] Fallback prerequisite completed; "
                     f"retrying original step {safe_step + 1}/{total_steps}."
@@ -365,6 +363,15 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             "needs_fallback": False,
             "mission_failed": False,
         }
+
+    @staticmethod
+    def _is_explicit_prerequisite_variant(current_task: str, original_step: str) -> bool:
+        task = (current_task or "").strip()
+        original = (original_step or "").strip()
+        if task == original:
+            return False
+        # Only treat as prerequisite when fallback explicitly marked it.
+        return "[Then continue objective:" in task
 
     def _decision_fallback(
         self,
