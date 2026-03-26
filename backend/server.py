@@ -386,6 +386,7 @@ async def login_user(request: Request):
             'exp': datetime.now(timezone.utc) + timedelta(hours=1)  # Token expires in 1 hour
         }
         token = jwt.encode(payload, secret_key, algorithm='HS256')
+        error = ''
         return {'token': token, 'error': error}
     else:
         error = 'Invalid Username or Password'
