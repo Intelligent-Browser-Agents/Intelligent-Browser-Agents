@@ -38,6 +38,11 @@ class Verifier:
         Applies to any step type — no keyword classification needed.
         """
         out = dict(partial)
+        if out.get("made_progress"):
+            out.pop("made_progress", None)
+            out["stall_cycles"] = 0
+            out["stall_tracked_step"] = current_step
+            return out
         if out.get("needs_fallback") or bool(out.get("last_step_complete")):
             out["stall_cycles"] = 0
             out["stall_tracked_step"] = current_step
@@ -163,6 +168,7 @@ class Verifier:
                         "is_complete": False,
                         "last_step_complete": True,
                         "step_attempts": 0,
+                        "made_progress": True,
                         "reasoning_log": [verification_log],
                     },
                 )
@@ -184,6 +190,7 @@ class Verifier:
                         "is_complete": False,
                         "last_step_complete": False,
                         "step_attempts": int(state.get("step_attempts", 0)),
+                        "made_progress": True,
                         "reasoning_log": [verification_log],
                     },
                 )
@@ -300,7 +307,16 @@ If this is the last step of the plan and the step is complete, set goal_complete
     def _is_email_compose_step(task: str) -> bool:
         text = (task or "").lower()
         has_mail_context = any(token in text for token in ("email", "mail", "draft", "compose", "recipient", "subject", "message body"))
-        has_field_fill_intent = any(token in text for token in ("to field", "recipient", "subject", "message body", "body", "fill"))
+        has_field_fill_intent = any(token in text for token in (
+            "to field",
+            "recipient",
+            "addressed",
+            "address",
+            "subject",
+            "message body",
+            "body",
+            "fill",
+        ))
         return has_mail_context and has_field_fill_intent
 
     @staticmethod

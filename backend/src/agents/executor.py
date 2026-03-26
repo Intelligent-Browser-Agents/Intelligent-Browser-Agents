@@ -121,7 +121,7 @@ class Executor:
             args = self._normalize_tool_args(name, args, current_task)
 
             # Deterministic credential enforcement for login-form typing.
-            # The LLM may hallucinate placeholder credentials (e.g. NID@ucf.edu /
+            # The LLM may hallucinate placeholder credentials (e.g. user@example.com /
             # Password123). For `type` during a login step, we overwrite the
             # tool arg with the *actual* saved credentials for the best-matching
             # service, based on whether the tool arg looks "email-like"
@@ -290,8 +290,8 @@ class Executor:
             name = (normalized.get("name") or "").strip()
             if role in ("a", "anchor", "hyperlink"):
                 role = "link"
-            # Outlook compose trap: clicking a generic "To" button can open
-            # the global "To Do" app instead of the draft recipient field.
+            # Compose trap: clicking a generic "To" control can navigate to an
+            # unrelated module instead of focusing the draft recipient field.
             # For compose-recipient steps, force a field-like target.
             if self._is_email_compose_recipient_task(current_task):
                 if name.lower() == "to" and role in ("button", "link", "tab"):
@@ -322,7 +322,7 @@ class Executor:
         text = (current_task or "").lower()
         return (
             any(token in text for token in ("compose", "draft", "new mail", "recipient", "to field"))
-            and any(token in text for token in ("email", "mail", "outlook", "inesculent@gmail.com", "@"))
+            and any(token in text for token in ("email", "mail", "message", "@"))
         )
 
     @staticmethod
@@ -659,8 +659,8 @@ class Executor:
     def _should_enforce_saved_credentials_for_typing(current_task: str) -> bool:
         """
         Only rewrite `type` args when the plan step is clearly about login/credentials.
-        URL-matched services alone are not enough — otherwise navigation on my.ucf.edu
-        overwrites arbitrary typing with the saved password.
+        URL-matched services alone are not enough — otherwise unrelated typing
+        can be overwritten with saved credentials.
         """
         t = (current_task or "").lower()
         nav_like = any(p in t for p in (

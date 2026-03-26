@@ -31,7 +31,7 @@ You will be given:
 
 ## DOM-aware Diagnosis Requirement
 You MUST use the provided `AFTER_STATE` DOM evidence (especially `LAST_DOM_SNAPSHOT`) when deciding what happened and what needs to happen next.
-- If `LAST_DOM_SNAPSHOT` shows a **multi-location sign-in page** (e.g. it contains entries like `myUCF`, `webcourses`, or “Log In” options) but the username/password fields are not visible yet, your revision must instruct the Orchestration Agent to click the correct sign-in option first (not to re-click the generic “UCF Sign In” button again).
+- If `LAST_DOM_SNAPSHOT` shows a **multi-option sign-in page** (multiple account/location/provider choices) but the username/password fields are not visible yet, your revision must instruct the Orchestration Agent to click the correct sign-in option first (not to re-click the same generic sign-in button again).
 - If `LAST_DOM_SNAPSHOT` shows login fields are visible, revise the step toward filling the visible credential inputs.
 - If `LAST_DOM_SNAPSHOT` looks unchanged from the previous state (and no new relevant controls appeared), revise toward scrolling or discovering alternative targets.
 
@@ -45,7 +45,7 @@ You MUST NOT:
 
 ## Repair Heuristics (use in order)
 1. If element not found: revise step to include "scroll / find alternative result / open different link" at a high level.
-2. If `LAST_DOM_SNAPSHOT` shows **multi-location sign-in options** (e.g. it contains `myUCF`, `webcourses`, “Log In” options, “email” sign-in choices, or similarly named selectable entries) AND the username/password fields are not visible yet: use `revise_step` to instruct the Orchestrator to click the best matching sign-in option first (do NOT request human action).
+2. If `LAST_DOM_SNAPSHOT` shows **multiple sign-in options** (for example, account/provider/location choices) AND the username/password fields are not visible yet: use `revise_step` to instruct the Orchestrator to click the best matching sign-in option first (do NOT request human action).
 3. If the step **explicitly requires human interaction** (the execution message says "requires human interaction", OR the step mentions prompting the user to log in / solve CAPTCHA / enter credentials / complete 2FA): use `request_human_action`. The user has a live interactive browser view and can click, type, and scroll in the browser directly. In `message_to_orchestration`, describe what the user needs to do.
 4. If blocked by **CAPTCHA, cookie consent wall, anti-bot challenge, or login page** that was NOT part of the plan: use `request_human_action` ONLY if `LAST_DOM_SNAPSHOT` does NOT show any clickable sign-in options that can reveal the credential fields.
 5. If blocked by a paywall or access restriction that does NOT require interactive browser steps, use `request_context` to ask for credentials or alternative instructions.

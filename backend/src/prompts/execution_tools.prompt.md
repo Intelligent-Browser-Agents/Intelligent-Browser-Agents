@@ -19,7 +19,6 @@ You will be given:
 3. **NEVER call `list_links` or `dom_search` twice in a row.** If PREVIOUS_ACTIONS shows you already called a discovery tool and it returned clickable targets, your NEXT action MUST be `click(role, name)` using one of those targets. Discovery is for finding things; once found, ACT on them.
 4. Prefer tools that directly match the plan step:
    - **Navigation step** (words like "navigate to", "go to", "open", "visit") → `navigate(url)` with a direct URL. Do NOT use `search` for navigation — go straight to the site.
-   - For **University of Central Florida (UCF) / myUCF** portal goals, prefer `navigate(https://my.ucf.edu)` for the student portal entry point instead of the public marketing site (`www.ucf.edu`), which adds extra sign-in hops.
    - Search step → `search(text)`
    - Selecting/opening a result from search results → `click(role, name)`
    - Extract/summarize/gather info → `extract_content(max_chars)`
@@ -30,16 +29,18 @@ You will be given:
 5. If you cannot identify required `click` args from `DOM_SNAPSHOT`, do **not** hallucinate them.
    - Instead choose a tool that can still help progress, e.g. `list_links(...)`, `dom_search(...)`, or `extract_content(...)`.
 
-## Weather-specific guidance
-When the plan step is about **weather** (e.g., "current weather in Orlando/New York City"):
-- Prefer to extract/summarize info from a loaded results page using `extract_content(max_chars)` if you already have a likely weather source page.
-- If you are on search results, prefer `list_links(filter_text=...)` or `dom_search(query=...)` to identify a reliable link, then `click(role, name)` in a later turn.
+## Generic task progression guidance
+When the step is information retrieval/extraction:
+- If the target page is already open, prefer `extract_content(max_chars)`.
+- If you are on a results/listing page, identify promising targets with `list_links(filter_text=...)` or `dom_search(query=...)`, then click the best match in a later turn.
 
-## Schedule-specific guidance
-When the plan step is about the user's **schedule** (e.g., "Access the user's schedule", "my schedule", "timetable", "classes", "courses"):
-- Prefer locating the schedule section via `list_links(filter_text=...)` or `dom_search(query=...)` before clicking.
-- If you use `list_links(...)`, set `filter_text` to a schedule-relevant keyword inferred from `PLAN_STEP` (e.g., `schedule`, `classes`, `courses`, `student center`), rather than calling it with an empty argument.
-- After you identify the right schedule tab/link from the candidates, do the actual navigation with `click(role, name)` in a later turn (use exact role/name from `DOM_SNAPSHOT`).
+When the step is form completion:
+- Prefer targeting specific fields explicitly (e.g., recipient, subject, body, name, email, address) rather than broad navigation clicks.
+- Fill one field per turn using `type(text)`, confirming focus/field visibility between turns.
+
+When the step is multi-action and sequential:
+- Prefer deterministic progression: open target area, focus required control, enter data, confirm/submit.
+- Avoid jumping to a final submit/send action until required prerequisite field entries are complete.
 
 ## Saved-credentials login guidance
 If login/form-filling information is present in the provided context (`USER_CREDENTIALS` block):
@@ -57,13 +58,13 @@ If login/form-filling information is present in the provided context (`USER_CRED
 - If `DOM_SNAPSHOT` does not show a visible username/email textbox or password textbox, do NOT type.
   - Use `wait(seconds)` briefly and/or use `click(role, name)` on the control that reveals/focuses the login input.
 
-### "Log in" is often multi-step (SSO location first)
+### "Log in" is often multi-step (option selection first)
 If the `PLAN_STEP` is about logging in with saved credentials AND `DOM_SNAPSHOT` does NOT show visible username/email AND password input fields yet:
-- Your next tool call must be discovery (`list_links(...)` with an appropriate `filter_text`, or `dom_search(...)`) to find the correct next sign-in option (e.g. `myUCF`, `webcourses`, `email`, or a “continue/next” option that reveals the credential form).
-- Do NOT assume a single click on a generic “Log In” button will directly reveal the fields.
+- Your next tool call must be discovery (`list_links(...)` with an appropriate `filter_text`, or `dom_search(...)`) to find the correct next sign-in option (for example, a role/account/location chooser or a continue/next option that reveals the credential form).
+- Do NOT assume a single click on a generic "Log In" button will directly reveal the fields.
 
-### Handling multi-location / multiple sign-in options
-When you click a generic “Sign In” button and the page shows multiple “locations” (multiple SSO entries / sign-in options) and the username/email + password inputs are still NOT visible in `DOM_SNAPSHOT`:
+### Handling multiple sign-in options
+When you click a generic “Sign In” button and the page shows multiple sign-in options and the username/email + password inputs are still NOT visible in `DOM_SNAPSHOT`:
 - Do NOT assume the first clicked option is complete.
 - Instead, if needed, use `wait(seconds)` only briefly to allow the next page/SSO options to render, then use one action to make the correct next sign-in option visible:
   - Prefer `list_links(...)` or `dom_search(...)` to identify the available sign-in options.
@@ -73,17 +74,14 @@ When you click a generic “Sign In” button and the page shows multiple “loc
 
 ### Prevent typing into unrelated fields
 - If you cannot see a login email/username field or a password field in `DOM_SNAPSHOT`, you must NOT use `type(text)`.
-- Instead, choose among sign-in options (e.g., “myUCF”, “webcourses”, “email”, etc.) using `list_links`/`dom_search`, then re-check `DOM_SNAPSHOT` before typing.
+ - Instead, choose among visible sign-in options using `list_links`/`dom_search`, then re-check `DOM_SNAPSHOT` before typing.
 
 ## Backtracking — wrong page recovery
 If PREVIOUS_ACTIONS or PLAN_STEP indicates you clicked the wrong link and ended up on an unrelated page:
 - Use `go_back()` to return to the previous page, then try a different path.
-- Example: if you clicked "Build My Schedule" but need the enrolled schedule from "Student Self Service", call `go_back()` first, then on the next turn click the correct link.
 
 ## Choosing the right link
-When multiple links are available, pick the one most relevant to the PLAN_STEP:
-- For viewing an **enrolled schedule** or **class schedule**, prefer links like "Student Self Service", "Student Center", "My Classes", "Enrollment" over schedule *builders* or *planners*.
-- "Build My Schedule" or "Schedule Builder" are planning tools, NOT the enrolled schedule viewer.
+When multiple links are available, pick the one most semantically aligned with `PLAN_STEP` and avoid similarly named but functionally different alternatives.
 
 ## Success Criteria for Tool Args
 Before choosing the tool call:

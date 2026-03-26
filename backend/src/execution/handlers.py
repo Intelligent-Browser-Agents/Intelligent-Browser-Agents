@@ -381,7 +381,10 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
     start = asyncio.get_event_loop().time()
 
     try:
-        is_credential = "@" in (text or "") or _looks_like_password(text or "")
+        text = (text or "").strip()
+        is_email_like = "@" in text
+        is_password_like = _looks_like_password(text)
+        is_credential = is_email_like or is_password_like
 
         password_selectors = ["input[type='password']", "input[name*='password' i]"]
         username_selectors = [
@@ -404,6 +407,41 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             "textarea",
             "[contenteditable='true']",
         ]
+        recipient_selectors = [
+            "input[aria-label*='recipient' i]",
+            "input[name*='recipient' i]",
+            "input[placeholder*='recipient' i]",
+            "input[aria-label*='to' i]",
+            "input[name='to' i]",
+            "input[placeholder*='to' i]",
+            "input[aria-label*='email' i]",
+            "input[name*='email' i]",
+            "input[placeholder*='email' i]",
+            "input[aria-label*='contact' i]",
+            "input[placeholder*='contact' i]",
+            "input[aria-label*='address' i]",
+            "input[placeholder*='address' i]",
+        ]
+        subject_selectors = [
+            "input[aria-label*='subject' i]",
+            "textarea[aria-label*='subject' i]",
+            "input[name*='subject' i]",
+            "textarea[name*='subject' i]",
+            "input[placeholder*='subject' i]",
+            "textarea[placeholder*='subject' i]",
+            "input[aria-label*='title' i]",
+            "input[name*='title' i]",
+            "input[placeholder*='title' i]",
+        ]
+        body_selectors = [
+            "textarea[aria-label*='message' i]",
+            "textarea[name*='message' i]",
+            "textarea[placeholder*='message' i]",
+            "[contenteditable='true'][aria-label*='message' i]",
+            "[contenteditable='true'][role='textbox']",
+            "textarea",
+            "[contenteditable='true']",
+        ]
 
         frames = [page.main_frame] + list(page.frames)
 
@@ -417,35 +455,115 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                     continue
             return None
 
-        target = None
+        async def _looks_empty(locator) -> bool:
+            try:
+                return await locator.evaluate(
+                    """el => {
+                        const tag = (el.tagName || '').toLowerCase();
+                        if (tag === 'input' || tag === 'textarea') {
+                            return !((el.value || '').trim());
+                        }
+                        if (el.isContentEditable) {
+                            return !((el.innerText || '').trim());
+                        }
+                        return true;
+                    }"""
+                )
+            except Exception:
+                return True
 
-        # 1. Respect current focus — if the LLM just clicked an input, type there.
+        async def _find_visible_prefer_empty(frame, selectors: list[str]):
+            candidate = await _find_visible_in_frame(frame, selectors)
+            if candidate is None:
+                return None
+            try:
+                if await _looks_empty(candidate):
+                    return candidate
+            except Exception:
+                return candidate
+            return candidate
+
+        async def _get_page_hint_text() -> str:
+            try:
+                return await page.evaluate(
+                    """() => {
+                        const t = (document.body && (document.body.innerText || document.body.textContent)) || '';
+                        return t.slice(0, 4000).toLowerCase();
+                    }"""
+                )
+            except Exception:
+                return ""
+
+        def _looks_auth_context(hint_text: str) -> bool:
+            if not hint_text:
+                return False
+            auth_tokens = ("sign in", "log in", "login", "password", "authenticate", "verification")
+            compose_tokens = ("subject", "message", "recipient", "to:", "send")
+            has_auth = any(tok in hint_text for tok in auth_tokens)
+            has_compose = any(tok in hint_text for tok in compose_tokens)
+            return has_auth and not has_compose
+
+        target = None
+        page_hint = await _get_page_hint_text()
+        auth_context = _looks_auth_context(page_hint)
+
+        # 0. Semantic field targeting first, to avoid typing into unrelated focus.
+        if is_email_like:
+            for fr in frames:
+                if auth_context:
+                    target = await _find_visible_in_frame(fr, username_selectors)
+                else:
+                    target = await _find_visible_prefer_empty(fr, recipient_selectors)
+                    if target is None:
+                        target = await _find_visible_in_frame(fr, username_selectors)
+                if target is not None:
+                    break
+        elif is_password_like:
+            for fr in frames:
+                target = await _find_visible_in_frame(fr, password_selectors)
+                if target is not None:
+                    break
+        else:
+            # For non-credential text, prefer semantic compose/form fields:
+            # empty subject/title first, then message/body editors.
+            for fr in frames:
+                target = await _find_visible_prefer_empty(fr, subject_selectors)
+                if target is not None:
+                    break
+            if target is None:
+                for fr in frames:
+                    target = await _find_visible_in_frame(fr, body_selectors)
+                    if target is not None:
+                        break
+
+        # 1. Respect current focus only if semantic targeting didn't find a field.
         try:
-            focused_tag = await page.evaluate(
-                "() => { const el = document.activeElement; "
-                "return el ? el.tagName.toLowerCase() : ''; }"
-            )
-            if focused_tag in ("input", "textarea"):
-                focused_type = await page.evaluate(
-                    "() => (document.activeElement.type || '').toLowerCase()"
+            if target is None:
+                focused_tag = await page.evaluate(
+                    "() => { const el = document.activeElement; "
+                    "return el ? el.tagName.toLowerCase() : ''; }"
                 )
-                typeable = focused_type not in (
-                    "hidden", "checkbox", "radio", "submit", "button", "file", "image",
-                )
-                if typeable:
+                if focused_tag in ("input", "textarea"):
+                    focused_type = await page.evaluate(
+                        "() => (document.activeElement.type || '').toLowerCase()"
+                    )
+                    typeable = focused_type not in (
+                        "hidden", "checkbox", "radio", "submit", "button", "file", "image",
+                    )
+                    if typeable:
+                        target = page.locator(":focus").first
+                        if await target.count() == 0:
+                            target = None
+                elif focused_tag and await page.evaluate(
+                    "() => document.activeElement.isContentEditable"
+                ):
                     target = page.locator(":focus").first
                     if await target.count() == 0:
                         target = None
-            elif focused_tag and await page.evaluate(
-                "() => document.activeElement.isContentEditable"
-            ):
-                target = page.locator(":focus").first
-                if await target.count() == 0:
-                    target = None
         except Exception:
-            target = None
+            pass
 
-        # 2. If nothing focused, use context-appropriate selectors.
+        # 2. If no semantic/focus target, use broader context-appropriate selectors.
         if target is None:
             if is_credential:
                 preferred = username_selectors if "@" in (text or "") else password_selectors
