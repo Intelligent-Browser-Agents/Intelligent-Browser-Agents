@@ -134,6 +134,52 @@ class Verifier:
                 },
             )
 
+        # Deterministic compose-progress rule: email drafting is often multi-action
+        # (recipient, subject, body). A single successful click/type should count as
+        # progress unless we clearly navigated away (e.g., Outlook To Do).
+        if self._is_email_compose_step(current_task):
+            if self._looks_like_todo_misnavigation(last_exec_lower, current_url):
+                verification_log = (
+                    "[Verifier] Verdict: failure\n"
+                    "[Verifier] Step Complete: False\n"
+                    "[Verifier] Goal Complete: False\n"
+                    "[Verifier] Message: Compose step navigated to Outlook To Do instead of draft fields; fallback required.\n"
+                    "[Verifier] Handoff: fallback"
+                )
+                return self._apply_stall_cap(
+                    state,
+                    current_step,
+                    {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "needs_fallback": True,
+                        "is_complete": False,
+                        "last_step_complete": False,
+                        "step_attempts": int(state.get("step_attempts", 0)) + 1,
+                        "reasoning_log": [verification_log],
+                    },
+                )
+
+            if self._is_compose_field_progress(last_exec_lower):
+                verification_log = (
+                    "[Verifier] Verdict: success\n"
+                    "[Verifier] Step Complete: False\n"
+                    "[Verifier] Goal Complete: False\n"
+                    "[Verifier] Message: Compose step is in progress; field interaction succeeded and more draft fields remain.\n"
+                    "[Verifier] Handoff: orchestration"
+                )
+                return self._apply_stall_cap(
+                    state,
+                    current_step,
+                    {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "needs_fallback": False,
+                        "is_complete": False,
+                        "last_step_complete": False,
+                        "step_attempts": int(state.get("step_attempts", 0)),
+                        "reasoning_log": [verification_log],
+                    },
+                )
+
         # Provide recent executor history so the LLM verifier can detect
         # patterns (repeated actions, discovery loops, login progress, etc.).
         recent_executor_logs = [
@@ -249,6 +295,41 @@ If this is the last step of the plan and the step is complete, set goal_complete
         if hasattr(user_message, "content"):
             return user_message.content
         return str(user_message) if user_message else "Unknown intent"
+
+    @staticmethod
+    def _is_email_compose_step(task: str) -> bool:
+        text = (task or "").lower()
+        has_mail_context = any(token in text for token in ("email", "mail", "outlook", "draft", "compose"))
+        has_field_fill_intent = any(token in text for token in ("to field", "recipient", "subject", "message body", "body", "fill"))
+        return has_mail_context and has_field_fill_intent
+
+    @staticmethod
+    def _looks_like_todo_misnavigation(last_exec_lower: str, current_url: str) -> bool:
+        url = (current_url or "").lower()
+        return (
+            "todoid" in url
+            or "to do" in last_exec_lower
+            or "outlook to do" in last_exec_lower
+        )
+
+    @staticmethod
+    def _is_compose_field_progress(last_exec_lower: str) -> bool:
+        if "[executor] status: success" not in last_exec_lower:
+            return False
+        action_is_interactive = any(
+            marker in last_exec_lower
+            for marker in (
+                "[executor] action: click",
+                "[executor] action: type",
+                "[executor] action: press_key",
+                "[executor] action: wait",
+            )
+        )
+        if not action_is_interactive:
+            return False
+        if "error type:" in last_exec_lower and "none" not in last_exec_lower:
+            return False
+        return True
 
     @classmethod
     def reset_simulation(cls):
