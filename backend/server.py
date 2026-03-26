@@ -354,8 +354,8 @@ async def login_user(request: Request):
             decoded = jwt.decode(token, secret_key, algorithms='HS256')
             return {'token': token, 'error': error}
         except jwt.InvalidTokenError as e:
-            return {'error': str(e)}
-        
+            error = str(e)
+
     username = body['username']
     password = body['password']
 
@@ -367,8 +367,6 @@ async def login_user(request: Request):
     
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
     hashed_password = hashed_password.decode('utf-8')
-    
-    #print(hashed_password)
 
     query = 'SELECT * FROM users WHERE username = %s AND password = %s;'
     cur.execute(query, (username, hashed_password))
