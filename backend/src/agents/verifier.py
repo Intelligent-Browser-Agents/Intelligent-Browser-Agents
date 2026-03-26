@@ -3,6 +3,8 @@ Verification Agent
 Uses an LLM to decide whether the execution satisfied the current plan step.
 """
 
+import re
+
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from state import ProjectState
@@ -77,6 +79,11 @@ class Verifier:
         user_intent = self._get_user_intent(state)
 
         last_exec_lower = (last_execution or "").lower()
+        recent_executor_logs = [
+            entry for entry in (reasoning_log or [])
+            if isinstance(entry, str) and entry.startswith("[Executor]")
+        ]
+        recent_executor_history = "\n\n".join(recent_executor_logs[-4:]) if recent_executor_logs else ""
 
         # Deterministic guardrail: do not allow failed executor actions to be
         # marked as successful just because page content looks plausible.
@@ -136,25 +143,26 @@ class Verifier:
 
         # Deterministic compose-progress rule: email drafting is often multi-action
         # (recipient, subject, body). A single successful click/type should count as
-        # progress unless we clearly navigated away (e.g., Outlook To Do).
+        # progress, and recipient-confirm sequences should complete the recipient step.
         if self._is_email_compose_step(current_task):
-            if self._looks_like_todo_misnavigation(last_exec_lower, current_url):
+            target_email = self._extract_email(current_task)
+            if target_email and self._recipient_step_confirmed(target_email, last_exec_lower, recent_executor_logs):
                 verification_log = (
-                    "[Verifier] Verdict: failure\n"
-                    "[Verifier] Step Complete: False\n"
+                    "[Verifier] Verdict: success\n"
+                    "[Verifier] Step Complete: True\n"
                     "[Verifier] Goal Complete: False\n"
-                    "[Verifier] Message: Compose step navigated to Outlook To Do instead of draft fields; fallback required.\n"
-                    "[Verifier] Handoff: fallback"
+                    "[Verifier] Message: Recipient entry appears confirmed for this compose step.\n"
+                    "[Verifier] Handoff: orchestration"
                 )
                 return self._apply_stall_cap(
                     state,
                     current_step,
                     {
                         "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-                        "needs_fallback": True,
+                        "needs_fallback": False,
                         "is_complete": False,
-                        "last_step_complete": False,
-                        "step_attempts": int(state.get("step_attempts", 0)) + 1,
+                        "last_step_complete": True,
+                        "step_attempts": 0,
                         "reasoning_log": [verification_log],
                     },
                 )
@@ -179,14 +187,6 @@ class Verifier:
                         "reasoning_log": [verification_log],
                     },
                 )
-
-        # Provide recent executor history so the LLM verifier can detect
-        # patterns (repeated actions, discovery loops, login progress, etc.).
-        recent_executor_logs = [
-            entry for entry in (reasoning_log or [])
-            if isinstance(entry, str) and entry.startswith("[Executor]")
-        ]
-        recent_executor_history = "\n\n".join(recent_executor_logs[-4:]) if recent_executor_logs else ""
 
         mission_status = state.get("mission_status") or ""
 
@@ -299,38 +299,46 @@ If this is the last step of the plan and the step is complete, set goal_complete
     @staticmethod
     def _is_email_compose_step(task: str) -> bool:
         text = (task or "").lower()
-        has_mail_context = any(token in text for token in ("email", "mail", "outlook", "draft", "compose"))
+        has_mail_context = any(token in text for token in ("email", "mail", "draft", "compose", "recipient", "subject", "message body"))
         has_field_fill_intent = any(token in text for token in ("to field", "recipient", "subject", "message body", "body", "fill"))
         return has_mail_context and has_field_fill_intent
 
     @staticmethod
-    def _looks_like_todo_misnavigation(last_exec_lower: str, current_url: str) -> bool:
-        # Only treat as misnavigation when URL-level evidence indicates a true
-        # app switch to To Do. Outlook Mail DOM often contains "To Do" labels
-        # even while still on the compose page.
-        url = (current_url or "").lower()
-        looks_like_todo_url = any(token in url for token in (
-            "/todoid",
-            "/todo",
-            "microsoft.todo",
-        ))
-        if not looks_like_todo_url:
-            return False
+    def _extract_email(text: str) -> str:
+        match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text or "")
+        return match.group(0).lower() if match else ""
 
-        # Guard against stale URL fragments: if executor AFTER_STATE clearly
-        # shows Outlook Mail compose context, do not force misnavigation.
-        mail_compose_markers = (
-            "mail -",
-            "new mail",
-            "(no subject)",
-            "message body",
-            "[executor] args: role=textbox, name=subject",
-            "[executor] args: role=textbox, name=message body",
+    @classmethod
+    def _recipient_step_confirmed(cls, target_email: str, last_exec_lower: str, recent_executor_logs: list[str]) -> bool:
+        if not target_email:
+            return False
+        combined = "\n".join(recent_executor_logs[-8:]).lower()
+        typed_target = (
+            "[executor] action: type" in combined
+            and target_email in combined
         )
-        if any(marker in last_exec_lower for marker in mail_compose_markers):
-            return False
-
-        return True
+        confirmed_action = (
+            "[executor] status: success" in last_exec_lower
+            and (
+                (
+                    "[executor] action: click" in last_exec_lower
+                    and any(token in last_exec_lower for token in (
+                        "name=save",
+                        "name=add",
+                        "name=done",
+                        "name=ok",
+                        "name=confirm",
+                        "name=apply",
+                    ))
+                )
+                or (
+                    "[executor] action: press_key" in last_exec_lower
+                    and "key=enter" in last_exec_lower
+                )
+            )
+        )
+        recipient_visible = target_email in last_exec_lower
+        return typed_target and (confirmed_action or recipient_visible)
 
     @staticmethod
     def _is_compose_field_progress(last_exec_lower: str) -> bool:
