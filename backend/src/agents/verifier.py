@@ -309,11 +309,28 @@ If this is the last step of the plan and the step is complete, set goal_complete
         # app switch to To Do. Outlook Mail DOM often contains "To Do" labels
         # even while still on the compose page.
         url = (current_url or "").lower()
-        return any(token in url for token in (
+        looks_like_todo_url = any(token in url for token in (
             "/todoid",
             "/todo",
             "microsoft.todo",
         ))
+        if not looks_like_todo_url:
+            return False
+
+        # Guard against stale URL fragments: if executor AFTER_STATE clearly
+        # shows Outlook Mail compose context, do not force misnavigation.
+        mail_compose_markers = (
+            "mail -",
+            "new mail",
+            "(no subject)",
+            "message body",
+            "[executor] args: role=textbox, name=subject",
+            "[executor] args: role=textbox, name=message body",
+        )
+        if any(marker in last_exec_lower for marker in mail_compose_markers):
+            return False
+
+        return True
 
     @staticmethod
     def _is_compose_field_progress(last_exec_lower: str) -> bool:
