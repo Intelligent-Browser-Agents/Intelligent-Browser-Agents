@@ -3,6 +3,14 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel
 from playwright.async_api import Page
 
+
+_MAX_PLAN_HISTORY = 6
+_MAX_EXTRACTED_ENTRIES = 6
+_MAX_EXTRACTED_TOTAL_CHARS = 50000
+_MAX_EXTRACTED_ITEM_CHARS = 12000
+_MAX_REASONING_ENTRIES = 16
+_MAX_REASONING_ITEM_CHARS = 3200
+
 def append_plan(old_plans: List[List[str]], new_plan: List[str]) -> List[List[str]]:
     """
     Keeps a history of every version of the plan.
@@ -11,15 +19,24 @@ def append_plan(old_plans: List[List[str]], new_plan: List[str]) -> List[List[st
     """
     if old_plans is None:
         return [new_plan]
-    # Append the new plan version to the history
-    return old_plans + [new_plan]
+    # Append the new plan version to the history and keep it bounded.
+    return (old_plans + [new_plan])[-_MAX_PLAN_HISTORY:]
 
 
 def append_extracted(old: List[str], new: List[str]) -> List[str]:
     """Append newly extracted content chunks (for state reducer)."""
     if new is None:
         return old or []
-    return (old or []) + (new if isinstance(new, list) else [new] if new else [])
+    items = new if isinstance(new, list) else [new] if new else []
+    cleaned = [str(item)[:_MAX_EXTRACTED_ITEM_CHARS] for item in items if item]
+    combined = (old or []) + cleaned
+    combined = combined[-_MAX_EXTRACTED_ENTRIES:]
+
+    total_chars = sum(len(chunk) for chunk in combined)
+    while combined and total_chars > _MAX_EXTRACTED_TOTAL_CHARS:
+        removed = combined.pop(0)
+        total_chars -= len(removed)
+    return combined
 
 
 def append_dom_cache(old: List[str], new: List[str]) -> List[str]:
@@ -37,8 +54,9 @@ def append_reasoning(old: List[str], new: List[str]) -> List[str]:
     if new is None:
         return old or []
     items = new if isinstance(new, list) else [new] if new else []
-    combined = (old or []) + items
-    return combined[-20:]
+    clipped = [str(item)[:_MAX_REASONING_ITEM_CHARS] for item in items if item]
+    combined = (old or []) + clipped
+    return combined[-_MAX_REASONING_ENTRIES:]
 
 
 class ProjectState(TypedDict):

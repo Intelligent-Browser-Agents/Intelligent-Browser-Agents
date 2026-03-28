@@ -32,9 +32,9 @@ class Fallback:
         dom_cache = state.get("dom_cache") or []
         last_dom_snapshot = dom_cache[-1] if dom_cache else ""
         # Keep the context bounded; dom_cache entries can be large.
-        last_dom_snapshot = (last_dom_snapshot or "").strip()[:12000]
+        last_dom_snapshot = (last_dom_snapshot or "").strip()[:6000]
         previous_dom_snapshot = dom_cache[-2] if len(dom_cache) >= 2 else ""
-        previous_dom_snapshot = (previous_dom_snapshot or "").strip()[:8000]
+        previous_dom_snapshot = (previous_dom_snapshot or "").strip()[:4000]
 
         last_verification = self._find_latest_log(reasoning_log, "[Verifier]") or "Verification failed."
         last_execution = (
@@ -43,7 +43,7 @@ class Fallback:
             or "No execution log."
         )
 
-        mission_status = state.get("mission_status") or ""
+        mission_status = self._clip_text(state.get("mission_status") or "", 4000)
         context = f"""
 MAIN_GOAL: {user_intent}
 
@@ -209,3 +209,12 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         if hasattr(user_message, "content"):
             return user_message.content
         return str(user_message) if user_message else "Unknown intent"
+
+    @staticmethod
+    def _clip_text(value: str, max_chars: int) -> str:
+        text = (value or "").strip()
+        if max_chars <= 0:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n... [truncated]"

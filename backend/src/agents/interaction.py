@@ -108,8 +108,9 @@ class InteractionAgent:
             for log in reasoning_log[-5:]
         ])
         extracted_block = "\n\n---\n\n".join(extracted_content) if extracted_content else "(No content extracted from pages.)"
+        extracted_block = self._clip_text(extracted_block, 15000)
 
-        mission_status = state.get("mission_status") or ""
+        mission_status = self._clip_text(state.get("mission_status") or "", 4000)
         context = f"""
             MAIN_GOAL: {user_intent}
 
@@ -118,7 +119,7 @@ class InteractionAgent:
             Plan Executed: {plan_history[-1] if plan_history else 'N/A'}
 
             EXTRACTED_CONTENT (from pages visited; use this to answer the user):
-            {extracted_block[:25000]}
+            {extracted_block}
 
             Recent Actions:
             {actions_summary}
@@ -240,3 +241,12 @@ class InteractionAgent:
         elif hasattr(user_message, "content"):
             return user_message.content
         return str(user_message) if user_message else "Unknown intent"
+
+    @staticmethod
+    def _clip_text(value: str, max_chars: int) -> str:
+        text = (value or "").strip()
+        if max_chars <= 0:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n... [truncated]"

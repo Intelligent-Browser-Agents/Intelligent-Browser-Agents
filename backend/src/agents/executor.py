@@ -58,7 +58,7 @@ class Executor:
         dom_cache_block = self._build_dom_cache_context(state)
         field_priority_block = self._build_field_priority_context(dom_snapshot, current_task)
 
-        mission_status = state.get("mission_status") or ""
+        mission_status = self._clip_text(state.get("mission_status") or "", 5000)
         context = f"""
         MAIN_GOAL: {user_intent}
 
@@ -152,6 +152,23 @@ class Executor:
                         if expected_username and expected_password:
                             looks_emailish = "@" in args.get("text", "")
                             args["text"] = expected_username if looks_emailish else expected_password
+
+            if (
+                self._is_email_compose_recipient_task(current_task)
+                and self._is_recipient_picker_focus_click(name, args)
+                and self._has_visible_inline_recipient_lane(dom_snapshot)
+            ):
+                return self._return_failure(
+                    state,
+                    current_url,
+                    action=name,
+                    args=args,
+                    message=(
+                        "Inline recipient input is already visible; avoid opening To/contacts picker. "
+                        "Focus the editable recipient field and type the address directly."
+                    ),
+                    error_type="ambiguous_step",
+                )
 
             if self._is_compose_finalization_action(name, args, current_task):
                 missing = self._missing_compose_fields(state)
@@ -273,8 +290,8 @@ class Executor:
                 text = json.dumps(result, ensure_ascii=False, indent=2, default=str)
             except Exception:
                 text = repr(result)
-            if len(text) > 14000:
-                text = text[:14000] + "\n... [truncated]"
+            if len(text) > 8000:
+                text = text[:8000] + "\n... [truncated]"
             # Include a brief preview of discovered items so the next LLM call
             # can see *what* was found and click one instead of re-discovering.
             preview_parts = []
@@ -305,7 +322,7 @@ class Executor:
                 error_type="none",
                 message=f"Tool {tool_name} completed.",
                 execution_time_ms=0,
-                extracted_text=result[:15000],
+                extracted_text=result[:8000],
             )
         return ExecutionOutput(
             action=tool_name,
@@ -314,7 +331,7 @@ class Executor:
             error_type="none",
             message=f"Tool {tool_name} returned {type(result).__name__}",
             execution_time_ms=0,
-            extracted_text=repr(result)[:15000],
+            extracted_text=repr(result)[:8000],
         )
 
     def _normalize_tool_args(self, tool_name: str, args: Any, current_task: str) -> dict:
@@ -472,7 +489,7 @@ class Executor:
             f"- missing_fields: {', '.join(missing) if missing else 'none'}\n"
             f"- next_required_field: {next_required}\n"
             f"- rule: {gate_note}"
-        )
+        )[:900]
 
     @staticmethod
     def _compose_content_required(current_task: str) -> bool:
@@ -521,13 +538,60 @@ class Executor:
         return self._is_recipient_lane_target(action_name, args)
 
     @staticmethod
+    def _is_recipient_picker_focus_click(action_name: str | None, args: dict) -> bool:
+        if action_name != "click" or not isinstance(args, dict):
+            return False
+        role = (args.get("role") or "").strip().lower()
+        name = (args.get("name") or "").strip().lower()
+        if not role and not name:
+            return False
+
+        picker_tokens = (
+            "to",
+            "recipient",
+            "add recipients",
+            "people",
+            "address book",
+            "contacts",
+            "directory",
+            "search my contacts",
+        )
+        if role in {"button", "link", "tab", "menuitem"} and any(tok in name for tok in picker_tokens):
+            return True
+        if role in {"searchbox", "combobox"} and any(tok in name for tok in ("contacts", "directory", "address book", "search my contacts")):
+            return True
+        return False
+
+    @staticmethod
+    def _has_visible_inline_recipient_lane(dom_snapshot: str) -> bool:
+        if not dom_snapshot:
+            return False
+        recipient_tokens = (
+            "to",
+            "recipient",
+            "add recipients",
+            "search for email",
+            "email address",
+        )
+        for raw in (dom_snapshot or "").splitlines():
+            line = raw.strip().lower()
+            m = re.search(r'^\[role="([^"]+)"\]\s+"(.+)"$', line)
+            if not m:
+                continue
+            role = (m.group(1) or "").strip().lower()
+            name = (m.group(2) or "").strip().lower()
+            if role in {"textbox", "combobox"} and any(tok in name for tok in recipient_tokens):
+                return True
+        return False
+
+    @staticmethod
     def _dom_snapshot_budget(current_task: str) -> int:
         task = (current_task or "").lower()
         data_entry_tokens = (
             "compose", "draft", "recipient", "subject", "message", "body",
             "fill", "form", "login", "sign in", "password", "username",
         )
-        return 12000 if any(tok in task for tok in data_entry_tokens) else 8000
+        return 6000 if any(tok in task for tok in data_entry_tokens) else 4000
 
     @staticmethod
     def _build_dom_cache_context(state: ProjectState) -> str:
@@ -537,8 +601,8 @@ class Executor:
         latest = (cache[-1] or "").strip()
         if not latest:
             return ""
-        clipped = latest[:3500]
-        if len(latest) > 3500:
+        clipped = latest[:1500]
+        if len(latest) > 1500:
             clipped += "\n... [truncated]"
         return f"\n\nDOM_TEXT_CONTEXT (latest page text snapshot):\n{clipped}"
 
@@ -606,7 +670,7 @@ class Executor:
         field_lines = "\n".join(f"- {r}: {n}" for r, n in shown_fields) if shown_fields else "- none detected"
         control_lines = "\n".join(f"- {r}: {n}" for r, n in shown_controls) if shown_controls else "- none detected"
 
-        return (
+        text = (
             "\n\nFIELD_PRIORITY_CONTEXT:\n"
             "Use this as an action-order hint, not a hard ban.\n"
             "If a relevant editable field is visible, prefer filling fields (focus/type) over clicking generic buttons.\n"
@@ -616,6 +680,7 @@ class Executor:
             "Visible actionable controls:\n"
             f"{control_lines}"
         )
+        return cls._clip_text(text, 1500)
 
     @staticmethod
     def _clean_tool_string(value: str) -> str:
@@ -624,6 +689,15 @@ class Executor:
         cleaned = re.sub(r"[}\],\s]+$", "", cleaned)
         cleaned = cleaned.strip("\"'` ")
         return cleaned
+
+    @staticmethod
+    def _clip_text(value: str, max_chars: int) -> str:
+        text = (value or "").strip()
+        if max_chars <= 0:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n... [truncated]"
 
     async def _finish_from_result(self, state, page, current_url, result):
         result_status = result.status
@@ -654,14 +728,14 @@ class Executor:
             new_url = page.url
         after_state = ""
         try:
-            after_state = await self._get_real_dom_snapshot(page, max_chars=4000)
+            after_state = await self._get_real_dom_snapshot(page, max_chars=2200)
         except Exception:
             after_state = f"[URL after action: {new_url}]"
 
         # For extract_content, show the extracted text to the verifier
         extracted = getattr(result, "extracted_text", None)
         if extracted and result.action == "extract_content":
-            after_state = f"EXTRACTED_TEXT:\n{extracted.strip()[:4000]}\n\nDOM_SNAPSHOT:\n{after_state}"
+            after_state = f"EXTRACTED_TEXT:\n{extracted.strip()[:2200]}\n\nDOM_SNAPSHOT:\n{after_state}"
 
         execution_log = self._build_execution_log(
             action=result.action,
@@ -681,7 +755,7 @@ class Executor:
             out["extracted_content"] = [extracted.strip()]
         # Also keep a lightweight DOM/text snapshot in dom_cache for later navigation tools
         try:
-            dom_text = await dom_extractor.get_page_text(page, max_chars=8000)
+            dom_text = await dom_extractor.get_page_text(page, max_chars=3500)
             if dom_text and dom_text.strip():
                 snapshot = f"URL: {new_url}\n\n{dom_text.strip()}"
                 out["dom_cache"] = [snapshot]
@@ -936,10 +1010,11 @@ class Executor:
                 summaries.append(entry)
         if not summaries:
             return ""
-        return (
+        text = (
             "\n\nPREVIOUS_ACTIONS (already executed — do NOT repeat; if discovery found items, CLICK one):\n"
             + "\n".join(summaries)
         )
+        return Executor._clip_text(text, 1800)
 
     @staticmethod
     def _build_adaptive_guidance(state: ProjectState, current_task: str) -> str:
@@ -1002,8 +1077,8 @@ class Executor:
 
         if not hints:
             return ""
-
-        return "\n\nADAPTIVE_GUIDANCE (from recent outcomes):\n- " + "\n- ".join(hints)
+        text = "\n\nADAPTIVE_GUIDANCE (from recent outcomes):\n- " + "\n- ".join(hints)
+        return Executor._clip_text(text, 500)
 
     _LOGIN_KEYWORDS = re.compile(
         r"\blog\s*in\b|\bsign\s*in\b|\bcredential|\busername\b|\bpassword\b"
@@ -1099,7 +1174,8 @@ class Executor:
 
         if not parts:
             return ""
-        return "\n\nUSER_CREDENTIALS (available for auto-fill — use `type` to enter these values):\n" + "\n".join(parts)
+        text = "\n\nUSER_CREDENTIALS (available for auto-fill — use `type` to enter these values):\n" + "\n".join(parts)
+        return self._clip_text(text, 1500)
 
     @staticmethod
     def _find_matching_service(creds: dict, task: str, url: str) -> dict | None:
@@ -1217,8 +1293,8 @@ class Executor:
         if error_type and error_type != "none":
             log += f"\n[Executor] Error Type: {error_type}"
         if after_state and after_state.strip():
-            snippet = after_state.strip()[:3000]
-            if len(after_state.strip()) > 3000:
+            snippet = after_state.strip()[:1600]
+            if len(after_state.strip()) > 1600:
                 snippet += "\n... (truncated)"
             log += f"\n[Executor] AFTER_STATE (page content for verification):\n{snippet}"
         return log

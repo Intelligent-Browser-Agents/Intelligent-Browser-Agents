@@ -33,6 +33,8 @@ _FINALIZATION_KEYWORDS = (
     "send", "submit", "review", "confirm", "finish", "finalize",
 )
 
+_MAX_HITL_EVENTS = 10
+
 
 # ── public helpers ─────────────────────────────────────────────────────
 
@@ -83,6 +85,7 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
         elif hasattr(first, "content"):
             objective = first.content
     objective = objective.replace("USER REQUEST: ", "").strip() or "(not set)"
+    objective = objective[:500] + ("..." if len(objective) > 500 else "")
 
     # ── Plan progress ──────────────────────────────────────────────────
     plan_lines: list[str] = []
@@ -149,7 +152,7 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
         field_progress_section = "(not tracking field-by-field completion for current step)"
 
     # ── HITL history ───────────────────────────────────────────────────
-    hitl_events: list[dict] = signals.get("hitl_events") or []
+    hitl_events: list[dict] = (signals.get("hitl_events") or [])[-_MAX_HITL_EVENTS:]
     if hitl_events:
         hitl_lines = []
         for ev in hitl_events:
@@ -346,11 +349,19 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
             if field_progress and field_progress.get("task_signature") == task_signature:
                 completed = list(field_progress.get("completed_fields") or [])
                 field_id = _extract_field_identifier(last_entry or "")
+                required_count = int(field_progress.get("required_count") or 0)
                 if not field_id and typed_text.strip():
-                    # Fallback for sparse logs when labels are missing.
-                    field_id = f"typed:{len(completed) + 1}"
+                    # For multi-field steps, avoid synthetic per-typing IDs that can
+                    # falsely inflate completion; only allow generic fallback on
+                    # single-field objectives.
+                    if required_count <= 1 and not completed:
+                        field_id = "typed:generic"
+
                 if field_id and field_id not in completed:
                     completed.append(field_id)
+                    cap = max(required_count, 20) if required_count > 0 else 20
+                    if len(completed) > cap:
+                        completed = completed[-cap:]
                     field_progress["completed_fields"] = completed
                     signals["field_progress"] = field_progress
 
@@ -439,7 +450,7 @@ def _update_interaction(signals: dict, state: dict, result: dict) -> None:
             "reply": reply[:100],
             "transaction": tx,
         })
-        signals["hitl_events"] = hitl_events
+        signals["hitl_events"] = hitl_events[-_MAX_HITL_EVENTS:]
         signals["blocking_issue"] = None
 
         # MFA completed
@@ -474,6 +485,17 @@ def _is_field_tracking_task(task_signature: str) -> bool:
 def _infer_required_field_names(task_signature: str) -> list[str]:
     text = task_signature or ""
     names: list[str] = []
+
+    # Generic compose-writing inference: when the step asks to write/draft an email
+    # but does not explicitly enumerate fields, track both subject and body.
+    is_compose_write = (
+        any(tok in text for tok in ("email", "mail", "message"))
+        and any(tok in text for tok in ("write", "draft", "compose"))
+        and not any(tok in text for tok in ("recipient", "to field", "to:", "send", "review", "confirm"))
+    )
+    if is_compose_write:
+        names.extend(["subject", "body"])
+
     keyword_map = (
         ("recipient", ("recipient", "to field", "to:")),
         ("subject", ("subject", "subject line")),
@@ -489,7 +511,8 @@ def _infer_required_field_names(task_signature: str) -> list[str]:
     )
     for canonical, variants in keyword_map:
         if any(v in text for v in variants):
-            names.append(canonical)
+            if canonical not in names:
+                names.append(canonical)
     return names
 
 

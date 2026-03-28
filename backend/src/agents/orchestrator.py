@@ -53,14 +53,14 @@ class Orchestrator:
         raw_msgs = state.get("messages", [])
         if len(raw_msgs) > 1:
             lines = []
-            for m in raw_msgs:
+            for m in raw_msgs[-6:]:
                 if isinstance(m, dict):
                     role, text = m.get("role", "?"), m.get("content", "")
                 elif hasattr(m, "type"):
                     role, text = m.type, getattr(m, "content", "")
                 else:
                     role, text = "?", str(m)
-                lines.append(f"  [{role.upper()}]: {text}")
+                lines.append(f"  [{role.upper()}]: {self._clip_text(str(text), 400)}")
             conversation_block = (
                 "\n\nCONVERSATION SO FAR (includes any user clarifications):\n"
                 + "\n".join(lines)
@@ -137,7 +137,7 @@ class Orchestrator:
         safe_step = min(max(current_step, 0), max(total_steps - 1, 0))
         current_task = state.get("current_task") or (current_plan[safe_step] if current_plan else "No task")
         user_intent = self._get_user_intent(state)
-        recent_log = (state.get("reasoning_log") or [])[-3:]
+        recent_log = [self._clip_text(str(entry), 600) for entry in (state.get("reasoning_log") or [])[-3:]]
 
         # Post-HITL handling via status_signals.
         # When the user just completed a HITL (e.g. MFA) and the login_phase
@@ -178,7 +178,8 @@ class Orchestrator:
                     "last_step_complete": False,
                 }
 
-        mission_status = state.get("mission_status") or ""
+        mission_status = self._clip_text(state.get("mission_status") or "", 4000)
+        recent_context_block = self._clip_text(chr(10).join(recent_log) if recent_log else "  (none yet)", 1500)
 
         # Extract the verifier's verdict and message so the decision-maker
         # can reason over evidence, not just the step_complete boolean.
@@ -209,7 +210,7 @@ VERIFIER VERDICT: {verifier_verdict or "(unknown)"}
 VERIFIER MESSAGE: {verifier_message or "(none)"}
 
 RECENT CONTEXT (execution/verification):
-{chr(10).join(recent_log) if recent_log else "  (none yet)"}
+{recent_context_block}
 
 MISSION_STATUS:
 {mission_status}
@@ -419,6 +420,15 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             "needs_fallback": False,
             "mission_failed": False,
         }
+
+    @staticmethod
+    def _clip_text(value: str, max_chars: int) -> str:
+        text = (value or "").strip()
+        if max_chars <= 0:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n... [truncated]"
 
     def _get_user_intent(self, state: ProjectState) -> str:
         user_message = state["messages"][0] if state["messages"] else None

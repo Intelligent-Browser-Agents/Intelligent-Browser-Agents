@@ -10,6 +10,7 @@ if str(SRC_DIR) not in sys.path:
 from agents.orchestrator import Orchestrator
 from agents.verifier import Verifier
 from agents.executor import Executor
+import state as state_reducers
 import status_tracker as tracker
 
 
@@ -222,6 +223,32 @@ def test_executor_allows_recipient_lane_when_recipient_still_pending():
         "Fill in the recipient as inesculent@gmail.com.",
         state,
     ) is False
+
+
+def test_executor_detects_recipient_picker_focus_click_controls():
+    assert Executor._is_recipient_picker_focus_click(
+        "click", {"role": "button", "name": "To"}
+    ) is True
+    assert Executor._is_recipient_picker_focus_click(
+        "click", {"role": "searchbox", "name": "Search my contacts"}
+    ) is True
+    assert Executor._is_recipient_picker_focus_click(
+        "click", {"role": "textbox", "name": "To"}
+    ) is False
+
+
+def test_executor_detects_visible_inline_recipient_lane_from_dom_snapshot():
+    dom = "\n".join([
+        '[role="textbox"] "To"',
+        '[role="textbox"] "Subject"',
+    ])
+    assert Executor._has_visible_inline_recipient_lane(dom) is True
+
+    dom_no_lane = "\n".join([
+        '[role="button"] "To"',
+        '[role="button"] "Add recipients"',
+    ])
+    assert Executor._has_visible_inline_recipient_lane(dom_no_lane) is False
 
 
 def test_executor_builds_field_priority_context_for_generic_data_entry_step():
@@ -532,4 +559,90 @@ def test_verifier_keeps_field_step_in_progress_when_required_count_not_met():
     result = verifier(state)
 
     assert result["needs_fallback"] is False
+    assert result["last_step_complete"] is False
+
+
+def test_state_append_plan_is_bounded():
+    history = []
+    for idx in range(10):
+        history = state_reducers.append_plan(history, [f"step {idx}"])
+
+    assert len(history) == 6
+    assert history[0] == ["step 4"]
+    assert history[-1] == ["step 9"]
+
+
+def test_state_append_extracted_caps_entries_and_total_chars():
+    old = ["x" * 12000 for _ in range(6)]
+    # add another oversized entry; reducer should keep bounded list and total size
+    combined = state_reducers.append_extracted(old, ["y" * 20000])
+
+    assert len(combined) <= 6
+    assert sum(len(chunk) for chunk in combined) <= 50000
+
+
+def test_status_tracker_caps_hitl_event_history():
+    signals = {"hitl_events": []}
+    state = {"number_of_transactions": 10}
+
+    for i in range(15):
+        result = {
+            "reasoning_log": [
+                "[Interaction] Type: request\n"
+                f"[Interaction] User replied: done-{i}"
+            ]
+        }
+        tracker._update_interaction(signals, state, result)
+
+    hitl_events = signals.get("hitl_events") or []
+    assert len(hitl_events) == 10
+    assert str(hitl_events[-1].get("reply", "")).startswith("done-14")
+
+
+def test_status_tracker_infers_subject_and_body_for_generic_write_email_step():
+    signals = {}
+    state = {
+        "current_step_index": 0,
+        "current_task": "Write an email about a cool fact involving an animal.",
+    }
+    result = {
+        "current_step_index": 0,
+        "current_task": "Write an email about a cool fact involving an animal.",
+    }
+
+    tracker._update_orchestrator(signals, state, result)
+
+    progress = signals.get("field_progress") or {}
+    assert progress.get("required_count") == 2
+    assert set(progress.get("named_required_fields") or []) >= {"subject", "body"}
+
+
+def test_verifier_does_not_complete_recipient_step_from_generic_field_progress_only():
+    verifier = Verifier()
+    state = {
+        "current_step_index": 2,
+        "current_plan": [
+            "Open a new email draft.",
+            "Enter inesculent@gmail.com as the recipient.",
+        ],
+        "current_task": "Enter inesculent@gmail.com as the recipient.",
+        "reasoning_log": [
+            "[Executor] Action: type\n"
+            "[Executor] Args: text=inesculent@gmail.com\n"
+            "[Executor] Status: success\n"
+            "[Executor] Message: Typed 'inesculent@gmail.com' into tag=input, label=Search my contacts, placeholder=Search for email"
+        ],
+        "status_signals": {
+            "field_progress": {
+                "task_signature": "enter inesculent@gmail.com as the recipient.",
+                "required_count": 1,
+                "completed_fields": ["search my contacts"],
+            }
+        },
+        "step_attempts": 1,
+        "number_of_transactions": 20,
+    }
+
+    result = verifier(state)
+
     assert result["last_step_complete"] is False

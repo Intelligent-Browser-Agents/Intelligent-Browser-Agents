@@ -88,7 +88,8 @@ class Verifier:
             entry for entry in (reasoning_log or [])
             if isinstance(entry, str) and entry.startswith("[Executor]")
         ]
-        recent_executor_history = "\n\n".join(recent_executor_logs[-4:]) if recent_executor_logs else ""
+        recent_executor_history = "\n\n".join(recent_executor_logs[-2:]) if recent_executor_logs else ""
+        recent_executor_history = self._clip_text(recent_executor_history, 6000)
 
         # Deterministic guardrail: do not allow failed executor actions to be
         # marked as successful just because page content looks plausible.
@@ -166,31 +167,6 @@ class Verifier:
                     "is_complete": False,
                     "last_step_complete": False,
                     "step_attempts": int(state.get("step_attempts", 0)) + 1,
-                    "reasoning_log": [verification_log],
-                },
-            )
-
-        # Generic field-dependent completion: if the status tracker reports
-        # that all required fields for this step are filled, complete the step.
-        fp_complete, fp_done, fp_required = self._field_progress_step_complete(state, current_task)
-        if fp_complete:
-            verification_log = (
-                "[Verifier] Verdict: success\n"
-                "[Verifier] Step Complete: True\n"
-                "[Verifier] Goal Complete: False\n"
-                f"[Verifier] Message: Field-entry step complete ({fp_done}/{fp_required} required fields captured).\n"
-                "[Verifier] Handoff: orchestration"
-            )
-            return self._apply_stall_cap(
-                state,
-                current_step,
-                {
-                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-                    "needs_fallback": False,
-                    "is_complete": False,
-                    "last_step_complete": True,
-                    "step_attempts": 0,
-                    "made_progress": True,
                     "reasoning_log": [verification_log],
                 },
             )
@@ -341,7 +317,34 @@ class Verifier:
                     },
                 )
 
-        mission_status = state.get("mission_status") or ""
+        # Generic field-dependent completion: if the status tracker reports
+        # that all required fields for this step are filled, complete the step.
+        # For compose-recipient steps, use compose-specific confirmation logic
+        # instead of generic field counting.
+        fp_complete, fp_done, fp_required = self._field_progress_step_complete(state, current_task)
+        if fp_complete and not self._is_compose_recipient_entry_task(current_task):
+            verification_log = (
+                "[Verifier] Verdict: success\n"
+                "[Verifier] Step Complete: True\n"
+                "[Verifier] Goal Complete: False\n"
+                f"[Verifier] Message: Field-entry step complete ({fp_done}/{fp_required} required fields captured).\n"
+                "[Verifier] Handoff: orchestration"
+            )
+            return self._apply_stall_cap(
+                state,
+                current_step,
+                {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "needs_fallback": False,
+                    "is_complete": False,
+                    "last_step_complete": True,
+                    "step_attempts": 0,
+                    "made_progress": True,
+                    "reasoning_log": [verification_log],
+                },
+            )
+
+        mission_status = self._clip_text(state.get("mission_status") or "", 5000)
 
         # Build an HITL-resolved note so the LLM knows old MFA/login
         # mentions in the history are stale and shouldn't influence the
@@ -368,7 +371,7 @@ MAIN_GOAL: {user_intent}
 PLAN_STEP (current): {current_task}
 {hitl_note}
 EXECUTION_OUTPUT (action, args, status, message) and AFTER_STATE (page content after the action) from the Execution Agent:
-{last_execution}
+{self._clip_text(last_execution, 2600)}
 
 RECENT_EXECUTION_HISTORY (last few executor logs):
 {recent_executor_history}
@@ -450,6 +453,15 @@ If this is the last step of the plan and the step is complete, set goal_complete
         return str(user_message) if user_message else "Unknown intent"
 
     @staticmethod
+    def _clip_text(value: str, max_chars: int) -> str:
+        text = (value or "").strip()
+        if max_chars <= 0:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n... [truncated]"
+
+    @staticmethod
     def _is_email_compose_step(task: str) -> bool:
         text = (task or "").lower()
         has_mail_context = any(token in text for token in ("email", "mail", "draft", "compose", "recipient", "subject", "message body"))
@@ -464,6 +476,11 @@ If this is the last step of the plan and the step is complete, set goal_complete
             "fill",
         ))
         return has_mail_context and has_field_fill_intent
+
+    @staticmethod
+    def _is_compose_recipient_entry_task(task: str) -> bool:
+        text = (task or "").lower()
+        return any(tok in text for tok in ("recipient", "to field", "to:", "addressed to", "add recipient", "add recipients")) and any(tok in text for tok in ("email", "mail", "@", "recipient"))
 
     @staticmethod
     def _extract_email(text: str) -> str:
