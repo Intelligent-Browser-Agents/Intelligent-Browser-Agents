@@ -10,6 +10,7 @@ if str(SRC_DIR) not in sys.path:
 from agents.orchestrator import Orchestrator
 from agents.verifier import Verifier
 from agents.executor import Executor
+from agents.interaction import InteractionAgent
 import state as state_reducers
 import status_tracker as tracker
 
@@ -249,6 +250,44 @@ def test_executor_detects_visible_inline_recipient_lane_from_dom_snapshot():
         '[role="button"] "Add recipients"',
     ])
     assert Executor._has_visible_inline_recipient_lane(dom_no_lane) is False
+
+
+def test_executor_sensitive_action_reason_for_send_click():
+    reason = Executor._sensitive_action_reason(
+        "click",
+        {"role": "button", "name": "Send"},
+        "Send the email to the recipient.",
+    )
+    assert isinstance(reason, str) and reason
+
+
+def test_executor_sensitive_action_reason_skips_non_sensitive_click():
+    reason = Executor._sensitive_action_reason(
+        "click",
+        {"role": "button", "name": "Search"},
+        "Search for UCF tuition details.",
+    )
+    assert reason is None
+
+
+def test_executor_sensitive_action_approval_requires_exact_signature():
+    approved_signature = Executor._action_signature("click", {"role": "button", "name": "Send"})
+    other_signature = Executor._action_signature("click", {"role": "button", "name": "Submit"})
+    state = {
+        "sensitive_action_approval": {
+            "approved": True,
+            "action_signature": approved_signature,
+        }
+    }
+
+    assert Executor._is_sensitive_action_approved(state, approved_signature) is True
+    assert Executor._is_sensitive_action_approved(state, other_signature) is False
+
+
+def test_interaction_parses_sensitive_confirmation_yes_no_unclear():
+    assert InteractionAgent._parse_sensitive_confirmation("Yes, proceed") is True
+    assert InteractionAgent._parse_sensitive_confirmation("No, cancel it") is False
+    assert InteractionAgent._parse_sensitive_confirmation("maybe") is None
 
 
 def test_executor_builds_field_priority_context_for_generic_data_entry_step():
@@ -597,6 +636,24 @@ def test_status_tracker_caps_hitl_event_history():
     hitl_events = signals.get("hitl_events") or []
     assert len(hitl_events) == 10
     assert str(hitl_events[-1].get("reply", "")).startswith("done-14")
+
+
+def test_status_tracker_sets_sensitive_confirmation_blocking_issue():
+    signals = {}
+    state = {"current_task": "Send the email to the recipient."}
+    result = {
+        "reasoning_log": [
+            "[Executor] Action: click\n"
+            "[Executor] Args: role=button, name=Send\n"
+            "[Executor] Status: failure\n"
+            "[Executor] Message: Sensitive action requires explicit user confirmation before execution.\n"
+            "[Executor] Error Type: tool_limit"
+        ]
+    }
+
+    tracker._update_executor(signals, state, result)
+
+    assert signals.get("blocking_issue") == "Sensitive action confirmation required before proceeding."
 
 
 def test_status_tracker_infers_subject_and_body_for_generic_write_email_step():

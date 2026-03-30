@@ -6,6 +6,8 @@ Uses LangGraph's interrupt() for human-in-the-loop:
   - "request" (clarification) responses pause the graph, collect user input, and resume.
 """
 
+import re
+
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 from schema import InteractionResponse
@@ -32,6 +34,79 @@ class InteractionAgent:
         is_complete = state.get("is_complete", False)
         mission_failed = state.get("mission_failed", False)
         abort_reason = state.get("abort_reason", "")
+
+        # ── Fast path: explicit sensitive-action confirmation checkpoint ──
+        pending_sensitive = state.get("pending_sensitive_action") or {}
+        if isinstance(pending_sensitive, dict) and pending_sensitive.get("action_signature"):
+            confirmation_message = (
+                pending_sensitive.get("message")
+                or "Please confirm this sensitive action. Reply yes to proceed or no to cancel."
+            )
+            user_reply = interrupt({
+                "type": "request",
+                "message": confirmation_message,
+                "requested_fields": ["approval"],
+            })
+            parsed = self._parse_sensitive_confirmation(str(user_reply))
+            interaction_log = (
+                "[Interaction] Type: request (sensitive_confirmation)\n"
+                f"[Interaction] User replied: {str(user_reply)[:200]}"
+            )
+
+            if parsed is True:
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "reasoning_log": [interaction_log],
+                    "handoff_interaction": False,
+                    "is_complete": False,
+                    "pending_sensitive_action": None,
+                    "sensitive_action_approval": {
+                        "approved": True,
+                        "reply": str(user_reply)[:200],
+                        "action_signature": pending_sensitive.get("action_signature"),
+                        "action": pending_sensitive.get("action"),
+                    },
+                    "messages": [
+                        {"role": "assistant", "content": confirmation_message},
+                        {"role": "user", "content": str(user_reply)},
+                    ],
+                }
+
+            if parsed is False:
+                final_message = "Sensitive action canceled. No irreversible action was executed."
+                interrupt({"type": "finish", "message": final_message})
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "reasoning_log": [
+                        "[Interaction] Type: finish (sensitive_confirmation_denied)\n"
+                        f"[Interaction] User replied: {str(user_reply)[:200]}\n"
+                        f"[Interaction] Final:\n{final_message}"
+                    ],
+                    "messages": [{"role": "assistant", "content": final_message}],
+                    "is_complete": True,
+                    "pending_sensitive_action": None,
+                    "sensitive_action_approval": {
+                        "approved": False,
+                        "reply": str(user_reply)[:200],
+                        "action_signature": pending_sensitive.get("action_signature"),
+                        "action": pending_sensitive.get("action"),
+                    },
+                }
+
+            # Unclear response: keep pending checkpoint and ask again on next loop.
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "reasoning_log": [
+                    interaction_log
+                    + "\n[Interaction] Sensitive confirmation unclear; waiting for explicit yes/no."
+                ],
+                "handoff_interaction": False,
+                "is_complete": False,
+                "messages": [
+                    {"role": "assistant", "content": confirmation_message},
+                    {"role": "user", "content": str(user_reply)},
+                ],
+            }
 
         # ── Fast path: orchestrator already generated clarification questions ──
         if state.get("plan_status") == "NEEDS_CLARIFICATION":
@@ -250,3 +325,17 @@ class InteractionAgent:
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + "\n... [truncated]"
+
+    @staticmethod
+    def _parse_sensitive_confirmation(reply: str) -> bool | None:
+        text = (reply or "").strip().lower()
+        if not text:
+            return None
+        collapsed = re.sub(r"\s+", " ", text)
+        positive = bool(re.search(r"\b(yes|y|approve|approved|confirm|confirmed|proceed|continue|go ahead|ok|okay)\b", collapsed))
+        negative = bool(re.search(r"\b(no|n|deny|denied|cancel|stop|do not|don't|dont|abort)\b", collapsed))
+        if positive and not negative:
+            return True
+        if negative and not positive:
+            return False
+        return None

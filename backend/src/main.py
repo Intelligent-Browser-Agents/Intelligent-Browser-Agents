@@ -63,8 +63,15 @@ def build_workflow(runtime):
         }
     )
 
-    # Execution -> Verification
-    workflow.add_edge("execution", "verification")
+    # Execution -> Interaction (HITL checkpoint) or Verification
+    workflow.add_conditional_edges(
+        "execution",
+        lambda state: "interaction" if state.get("handoff_interaction", False) else "verification",
+        {
+            "interaction": "interaction",
+            "verification": "verification",
+        }
+    )
 
     # Verification Logic: Path based on success/failure
     workflow.add_conditional_edges(

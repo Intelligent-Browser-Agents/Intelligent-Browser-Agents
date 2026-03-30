@@ -34,6 +34,44 @@ class Executor:
         self.system_prompt_tools = get_execution_tools_prompt()
         self.runtime = runtime
 
+    _SENSITIVE_TARGET_TOKENS = (
+        "buy",
+        "purchase",
+        "place order",
+        "checkout",
+        "pay",
+        "payment",
+        "transfer",
+        "wire",
+        "delete",
+        "remove",
+        "cancel subscription",
+        "authorize",
+        "approve",
+        "confirm",
+        "submit",
+    )
+
+    _SENSITIVE_TASK_TOKENS = (
+        "buy",
+        "purchase",
+        "checkout",
+        "payment",
+        "pay",
+        "transfer",
+        "wire",
+        "delete",
+        "remove",
+        "close account",
+        "cancel subscription",
+        "submit application",
+        "final submission",
+        "send the email",
+        "send email",
+        "authorize",
+        "approve",
+    )
+
     async def __call__(self, state: ProjectState) -> dict:
         page = self.runtime.get("page")
         if page is None:
@@ -205,6 +243,21 @@ class Executor:
                     message=f"Tool call missing required arguments for {name}.",
                     error_type="ambiguous_step",
                 )
+
+            sensitive_reason = self._sensitive_action_reason(name, args, current_task)
+            if sensitive_reason:
+                signature = self._action_signature(name, args)
+                if not self._is_sensitive_action_approved(state, signature):
+                    return self._request_sensitive_confirmation(
+                        state=state,
+                        current_url=current_url,
+                        action=name,
+                        args=args,
+                        current_task=current_task,
+                        reason=sensitive_reason,
+                        action_signature=signature,
+                    )
+
             try:
                 result = await tool_map[name].ainvoke(args)
             except Exception as e:
@@ -258,6 +311,30 @@ class Executor:
                     max_chars=getattr(validated.args, "max_chars", None) or 15000,
                 ),
             )
+
+            validated_args = {
+                "url": validated.args.url,
+                "role": validated.args.role,
+                "name": validated.args.name,
+                "text": validated.args.text,
+                "direction": validated.args.direction,
+                "key": validated.args.key,
+                "seconds": validated.args.seconds,
+            }
+            sensitive_reason = self._sensitive_action_reason(validated.action, validated_args, current_task)
+            if sensitive_reason:
+                signature = self._action_signature(validated.action, validated_args)
+                if not self._is_sensitive_action_approved(state, signature):
+                    return self._request_sensitive_confirmation(
+                        state=state,
+                        current_url=current_url,
+                        action=validated.action,
+                        args=validated_args,
+                        current_task=current_task,
+                        reason=sensitive_reason,
+                        action_signature=signature,
+                    )
+
             result = await dispatch_action(page, tool_action)
             print(f"[executor - {result.action} result]: ", result)
             return await self._finish_from_result(state, page, current_url, result)
@@ -271,6 +348,112 @@ class Executor:
             )],
             "current_url": current_url,
         }
+
+    def _request_sensitive_confirmation(
+        self,
+        *,
+        state: ProjectState,
+        current_url: str,
+        action: str,
+        args: dict,
+        current_task: str,
+        reason: str,
+        action_signature: str,
+    ) -> dict:
+        target_label = self._describe_sensitive_target(action, args)
+        prompt = (
+            "Sensitive action checkpoint. "
+            f"I am about to execute {target_label}. "
+            f"Reason: {reason}. "
+            "Reply 'yes' to proceed or 'no' to cancel."
+        )
+        blocked_log = self._build_execution_log(
+            action=action,
+            args=args if isinstance(args, dict) else {},
+            status="failure",
+            message="Sensitive action requires explicit user confirmation before execution.",
+            error_type="tool_limit",
+        )
+        return {
+            "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+            "reasoning_log": [blocked_log],
+            "current_url": current_url,
+            "handoff_interaction": True,
+            "pending_sensitive_action": {
+                "action": action,
+                "args": args if isinstance(args, dict) else {},
+                "current_task": current_task,
+                "reason": reason,
+                "target": target_label,
+                "message": prompt,
+                "action_signature": action_signature,
+            },
+            "sensitive_action_approval": None,
+        }
+
+    @classmethod
+    def _sensitive_action_reason(cls, action: str | None, args: dict, current_task: str) -> str | None:
+        action_l = (action or "").strip().lower()
+        role = (args.get("role") or "").strip().lower() if isinstance(args, dict) else ""
+        name = (args.get("name") or "").strip().lower() if isinstance(args, dict) else ""
+        key = (args.get("key") or "").strip().lower() if isinstance(args, dict) else ""
+        task_l = (current_task or "").strip().lower()
+        combined = f"{task_l}\n{name}"
+
+        has_sensitive_task = any(tok in task_l for tok in cls._SENSITIVE_TASK_TOKENS)
+        has_sensitive_target = any(tok in name for tok in cls._SENSITIVE_TARGET_TOKENS)
+        communication_send = (
+            "send" in name
+            and any(tok in task_l for tok in ("email", "mail", "message", "application"))
+        )
+
+        if action_l == "click" and role in {"button", "link", "menuitem", "tab"}:
+            if has_sensitive_task and has_sensitive_target:
+                return "This looks like a high-impact submit/confirm action"
+            if communication_send:
+                return "This sends user-authored content and may be irreversible"
+            if has_sensitive_task and any(tok in combined for tok in ("submit", "confirm", "approve", "authorize")):
+                return "This confirms a high-impact operation"
+
+        if action_l == "press_key" and key in {"enter", "return"} and has_sensitive_task:
+            return "Enter/Return may finalize a high-impact operation on this step"
+
+        return None
+
+    @staticmethod
+    def _action_signature(action: str | None, args: dict) -> str:
+        action_l = (action or "").strip().lower()
+        safe_args = {}
+        if isinstance(args, dict):
+            for key in ("url", "role", "name", "text", "direction", "key", "seconds"):
+                value = args.get(key)
+                if value is None:
+                    continue
+                if isinstance(value, str):
+                    value = value.strip().lower()
+                safe_args[key] = value
+        encoded = json.dumps(safe_args, ensure_ascii=True, sort_keys=True, default=str)
+        return f"{action_l}:{encoded}"
+
+    @staticmethod
+    def _is_sensitive_action_approved(state: ProjectState, action_signature: str) -> bool:
+        approval = state.get("sensitive_action_approval") or {}
+        if not isinstance(approval, dict):
+            return False
+        return bool(approval.get("approved") is True and approval.get("action_signature") == action_signature)
+
+    @staticmethod
+    def _describe_sensitive_target(action: str, args: dict) -> str:
+        if not isinstance(args, dict):
+            return action
+        role = (args.get("role") or "").strip()
+        name = (args.get("name") or "").strip()
+        key = (args.get("key") or "").strip()
+        if action == "click" and role and name:
+            return f"click({role}, {name})"
+        if action == "press_key" and key:
+            return f"press_key({key})"
+        return action
 
     @staticmethod
     def _coerce_tool_result_to_output(tool_name: str, result: Any) -> ExecutionOutput:

@@ -285,6 +285,7 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
     action_status = _extract(last_entry, r"\[Executor\] Status:\s*(\S+)")
     action_args = _extract(last_entry, r"\[Executor\] Args:\s*(.+?)(?:\n|$)")
     action_msg = _extract(last_entry, r"\[Executor\] Message:\s*(.+?)(?:\n|$)")
+    action_error = _extract(last_entry, r"\[Executor\] Error Type:\s*(\S+)")
 
     # Derive a human-readable target from args
     target = action_args or ""
@@ -298,6 +299,13 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
         "status": action_status or "unknown",
         "message": (action_msg or "")[:200],
     }
+
+    if (
+        (action_status or "").lower() == "failure"
+        and (action_error or "").lower() == "tool_limit"
+        and "sensitive action requires explicit user confirmation" in (action_msg or "").lower()
+    ):
+        signals["blocking_issue"] = "Sensitive action confirmation required before proceeding."
 
     compose_fields = dict(signals.get("compose_fields") or {
         "recipient": False,

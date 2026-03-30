@@ -125,6 +125,8 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
         "max_transactions": 80,
         "mission_failed": False,
         "abort_reason": None,
+        "pending_sensitive_action": None,
+        "sensitive_action_approval": None,
         "screenshot": None,
         "user_credentials": credentials or {},
         "mission_status": "",

@@ -90,6 +90,8 @@ class ProjectState(TypedDict):
     last_step_complete: bool
     mission_failed: bool
     abort_reason: Optional[str]
+    pending_sensitive_action: Optional[Dict]  # Pending sensitive action awaiting explicit user confirmation
+    sensitive_action_approval: Optional[Dict]  # Last confirmation response bound to an action signature
 
     # User-provided credentials (service logins, personal info, payment, experience)
     user_credentials: Optional[Dict]
