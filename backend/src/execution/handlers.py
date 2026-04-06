@@ -363,6 +363,7 @@ async def handle_click(page: Page, role: str, name: str) -> ExecutionOutput:
             execution_time_ms=_elapsed(),
         )
 
+
 def _looks_like_password(text: str) -> bool:
     """Heuristic: passwords typically mix cases, digits, and symbols."""
     has_upper = any(c.isupper() for c in text)
