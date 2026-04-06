@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
+import userNotificationSound from "../../assets/audio/user-notification.mp3";
 import "./Dashboard.css";
 
 // === COMPONENTS ===
@@ -271,7 +272,7 @@ export default function Dashboard() {
   const [password, setPassword] = useState("");
   const [didUserVerifyIdentity, setDidUserVerifyIdentity] = useState(false);
 
-  const activeChat = conversations.find((c) => c.id === activeChatId);
+  const activeChat = conversations.find((c) => c.id === activeChatId) || conversations[0];
   const chatListRef = useRef(null);
   const bottomRef = useRef(null);
   const navigate = useNavigate();
@@ -281,7 +282,9 @@ export default function Dashboard() {
   const [liveFrame, setLiveFrame] = useState(null);
   const socketRef = useRef(null);
   const [isHITL, setIsHITL] = useState(false);
+  const isHITLRef = useRef(false);
   const browserImgRef = useRef(null);
+  const notificationAudioRef = useRef(null);
 
   const [isAgentRunning, setIsAgentRunning] = useState(false);
   const isAgentRunningRef = useRef(false);
@@ -364,6 +367,21 @@ export default function Dashboard() {
   useEffect(() => {
     currentRunSessionIdRef.current = currentRunSessionId;
   }, [currentRunSessionId]);
+
+  useEffect(() => {
+    isHITLRef.current = isHITL;
+  }, [isHITL]);
+
+  useEffect(() => {
+    const audio = new Audio(userNotificationSound);
+    audio.preload = "auto";
+    notificationAudioRef.current = audio;
+
+    return () => {
+      audio.pause();
+      notificationAudioRef.current = null;
+    };
+  }, []);
 
   const createTextMessage = (text, isUser, channel = "main") => ({
     id: crypto.randomUUID(),
@@ -450,6 +468,26 @@ export default function Dashboard() {
           : session
       ),
     }));
+  };
+
+  const playUserNotification = () => {
+    const audio = notificationAudioRef.current;
+    if (!audio) return;
+
+    audio.pause();
+    audio.currentTime = 0;
+
+    const playPromise = audio.play();
+    if (playPromise?.catch) {
+      playPromise.catch((err) => {
+        console.warn("Unable to play notification sound:", err);
+      });
+    }
+  };
+
+  const setHitlState = (nextState) => {
+    isHITLRef.current = nextState;
+    setIsHITL(nextState);
   };
 
   const sendBrowserInput = (payload) => {
@@ -683,23 +721,29 @@ export default function Dashboard() {
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
         if (msg.content && msg.content.includes("[NODE]: __INTERRUPT__")) {
-          setIsHITL(true);
+          if (!isHITLRef.current) {
+            playUserNotification();
+          }
+          setHitlState(true);
         }
         if (msg.content && msg.source === "STDOUT" && msg.content.includes("[NODE]: ORCHESTRATOR")) {
-          setIsHITL(false);
+          setHitlState(false);
         }
       } else if (msg.type === "CLARIFICATION") {
-        setIsHITL(true);
+        if (!isHITLRef.current) {
+          playUserNotification();
+        }
+        setHitlState(true);
         appendSessionChatMessage(selectedChatId, sessionId, msg.message, false);
       } else if (msg.type === "RESPONSE") {
-        setIsHITL(false);
+        setHitlState(false);
         appendSessionChatMessage(selectedChatId, sessionId, msg.content, false);
       }
     };
 
     socketRef.current.onclose = () => {
       setLiveFrame(null);
-      setIsHITL(false);
+      setHitlState(false);
       markSessionFinished(selectedChatId, sessionId);
       setIsAgentRunning(false);
       setCurrentRunSessionId(null);
@@ -835,12 +879,6 @@ export default function Dashboard() {
       alert('Verification failed. Try again.');       
     }
   };
-
-  const validatePhoneNumber = (value) => {
-    // Accepts (407) 555-0123, 407-555-0123, 4075550123, +1 formats
-    const phoneRegex = /^(\+1\s?)?(\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}$/;
-    return phoneRegex.test(value.trim());
-  }
 
   const validateEmail = (value) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1091,10 +1129,36 @@ export default function Dashboard() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeChat.messages]);
+  }, [activeChatId, conversations, agentSessionsByChat]);
 
-  const mainLaneMessages = activeChat.messages.filter((msg) => msg.channel !== "chat-socket");
+  const mainLaneMessages = (activeChat?.messages || []).filter((msg) => msg.channel !== "chat-socket");
   const activeChatSessions = agentSessionsByChat[activeChatId] || [];
+  const runningSession =
+    activeChatSessions.find(
+      (session) => session.id === currentRunSessionId && session.status === "running"
+    ) || null;
+  const latestSession =
+    activeChatSessions.length > 0 ? activeChatSessions[activeChatSessions.length - 1] : null;
+  const thoughtSession = runningSession || latestSession;
+  const thoughtSessionIndex = thoughtSession
+    ? activeChatSessions.findIndex((session) => session.id === thoughtSession.id) + 1
+    : 0;
+  const browserIsInteractive = Boolean(runningSession && liveFrame && isHITL);
+  const browserStatusTone = browserIsInteractive ? "interactive" : runningSession ? "locked" : "idle";
+  const browserStatusLabel = browserIsInteractive
+    ? "Interactive"
+    : runningSession
+      ? liveFrame
+        ? "Locked"
+        : "Connecting"
+      : "Standby";
+  const browserStatusDetail = browserIsInteractive
+    ? "You can interact"
+    : runningSession
+      ? liveFrame
+        ? "Agent in control"
+        : "Waiting for stream"
+      : "Ready";
 
   return (
     <div className="dashboard-container">
@@ -1114,7 +1178,7 @@ export default function Dashboard() {
         <h1 className="dashboard-title">Intelligent Browser Agents</h1>
 
         <button className="sidebar-btn" onClick={() => { handleNewChat(); setMobileMenuOpen(false); }}>
-          ＋ New Chat
+          + New chat
         </button>
         
         <button className="sidebar-btn" onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }}>
@@ -1144,98 +1208,200 @@ export default function Dashboard() {
 
       {/* Main Chat */}
       <main className="dashboard-main">
-        {activeChat.messages.length === 0 && (
-          <h2 className="welcome-text">Welcome, {firstname}!</h2>
-        )}
+        <div className="dashboard-shell">
+          <section className="dashboard-stage">
+            <section className={`dashboard-card live-agent-panel ${browserStatusTone}`}>
+              <div className="panel-heading live-panel-heading">
+                <div>
+                  <p className="panel-kicker">Current Run</p>
+                  <h2>Live Agent View</h2>
+                </div>
+                <div className={`run-chip ${runningSession ? "live" : latestSession ? "review" : "idle"}`}>
+                  {runningSession ? "Running" : latestSession ? "Review" : "Idle"}
+                </div>
+              </div>
 
-        {mainLaneMessages.map((msg, index) => (
-          <div key={msg.id || index} className={msg.isUser ? "chat-user" : "chat-system"}>
-            {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
-          </div>
-        ))}
+              <div className="live-agent-viewport">
+                <div className={`browser-status-indicator ${browserStatusTone}`}>
+                  <span className="browser-status-dot" aria-hidden="true" />
+                  <div className="browser-status-copy">
+                    <strong>{browserStatusLabel}</strong>
+                    <span>{browserStatusDetail}</span>
+                  </div>
+                </div>
 
-        {activeChatSessions.map((session) => (
-          <div key={session.id} className="agent-session-block">
-            <div className="chat-user">{session.prompt}</div>
+                {runningSession && liveFrame ? (
+                  <div
+                    className={`browser-frame-wrapper browser-frame-shell${browserIsInteractive ? " browser-interactive" : ""}`}
+                    tabIndex={browserIsInteractive ? 0 : -1}
+                    onClick={browserIsInteractive ? handleBrowserClick : undefined}
+                    onKeyDown={browserIsInteractive ? handleBrowserKeyDown : undefined}
+                    onKeyUp={browserIsInteractive ? handleBrowserKeyUp : undefined}
+                    onWheel={browserIsInteractive ? handleBrowserScroll : undefined}
+                  >
+                    <img
+                      ref={browserImgRef}
+                      src={liveFrame}
+                      alt="Browser Stream"
+                      className="browser-frame"
+                      draggable={false}
+                    />
+                  </div>
+                ) : (
+                  <div className="live-agent-placeholder">
+                    <span className="placeholder-orbit placeholder-orbit-a" aria-hidden="true" />
+                    <span className="placeholder-orbit placeholder-orbit-b" aria-hidden="true" />
+                    <p className="placeholder-kicker">
+                      {latestSession ? "Run complete" : `Welcome${firstname ? `, ${firstname}` : ""}`}
+                    </p>
+                    <h3>{latestSession ? "Ready for the next run." : "Start a run to begin."}</h3>
+                    <p>{latestSession ? "Review chat and logs, or start again." : "The stream will appear here."}</p>
+                  </div>
+                )}
+              </div>
+            </section>
 
-            {session.logs.length > 0 && (
-              <div className="chat-system agent-log-bundle">
-                <details className="agent-log-details">
-                  <summary>Agent Status Logs ({session.logs.length})</summary>
-                  <div className="agent-log-content">
-                    {session.logs.map((line, lineIndex) => (
-                      <div key={`${session.id}-line-${lineIndex}`} className="agent-log-line">
-                        {line}
+            <section className="dashboard-card transcript-panel">
+              <div className="panel-heading">
+                <div>
+                  <p className="panel-kicker">Messages</p>
+                  <h2>Chat</h2>
+                </div>
+                <div className="panel-caption">
+                  {activeChatSessions.length > 0
+                    ? `${activeChatSessions.length} run${activeChatSessions.length === 1 ? "" : "s"}`
+                    : "No messages yet"}
+                </div>
+              </div>
+
+              <div className="transcript-scroll">
+                {mainLaneMessages.length === 0 && activeChatSessions.length === 0 ? (
+                  <div className="transcript-empty">
+                    <p>No messages yet.</p>
+                    <span>Start a run to begin.</span>
+                  </div>
+                ) : (
+                  <>
+                    {mainLaneMessages.map((msg, index) => (
+                      <div key={msg.id || `main-${index}`} className={msg.isUser ? "chat-user" : "chat-system"}>
+                        {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
                       </div>
                     ))}
-                  </div>
-                </details>
+
+                    {activeChatSessions.map((session, sessionIndex) => (
+                      <section key={session.id} className="transcript-run">
+                        <div className="transcript-run-header">
+                          <span className="transcript-run-title">Run {sessionIndex + 1}</span>
+                          <span className={`transcript-run-status ${session.status}`}>
+                            {session.status === "running" ? "Live" : "Complete"}
+                          </span>
+                        </div>
+
+                        <div className="transcript-stack">
+                          <div className="chat-user transcript-bubble">{session.prompt}</div>
+
+                          {session.chatMessages.length > 0 ? (
+                            session.chatMessages.map((msg, index) => (
+                              <div
+                                key={msg.id || `${session.id}-chat-${index}`}
+                                className={msg.isUser ? "chat-user transcript-bubble" : "chat-system transcript-bubble"}
+                              >
+                                {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
+                              </div>
+                            ))
+                          ) : session.status === "running" ? (
+                            <div className="transcript-awaiting">
+                              Waiting for agent response...
+                            </div>
+                          ) : null}
+                        </div>
+                      </section>
+                    ))}
+                    <div ref={bottomRef}></div>
+                  </>
+                )}
               </div>
-            )}
+            </section>
 
-            {session.status === "running" ? (
-              <div className="agent-running-badge">● Agent running...</div>
-            ) : (
-              <div className="agent-finished-badge">✓ Agent finished running</div>
-            )}
+            <div className="dashboard-card dashboard-input-bar">
+              <label className="input-label" htmlFor="dashboard-input">
+                {isAgentRunning ? "Reply" : "Input"}
+              </label>
+              <div className="input-row">
+                <input
+                  id="dashboard-input"
+                  className="dashboard-input"
+                  placeholder={
+                    isAgentRunning
+                      ? "Send reply..."
+                      : "Start browsing..."
+                  }
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                />
+                <button className="dashboard-bar-btn" onClick={handleSend} disabled={!input.trim()}>
+                  {isAgentRunning ? "Send" : "Launch"}
+                </button>
+              </div>
+            </div>
+          </section>
 
-            {session.status === "running" && liveFrame && session.id === currentRunSessionId && (
-              <div className="live-browser-container">
-                <div className="browser-header">
-                  {isHITL ? "Live Browser — You can interact" : "Live Agent View"}
+          <aside className="dashboard-card dashboard-thoughts-panel">
+            <div className="panel-heading thoughts-panel-heading">
+              <div>
+                <p className="panel-kicker">Logs</p>
+                <h2>Agent Logs</h2>
+              </div>
+              {thoughtSession?.status === "running" ? (
+                <div className="thinking-indicator" aria-live="polite">
+                  <span className="thinking-spinner" aria-hidden="true" />
+                  <span>(thinking...)</span>
                 </div>
-                {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
-                <div
-                  className={`browser-frame-wrapper${isHITL ? " browser-interactive" : ""}`}
-                  tabIndex={isHITL ? 0 : -1}
-                  onClick={isHITL ? handleBrowserClick : undefined}
-                  onKeyDown={isHITL ? handleBrowserKeyDown : undefined}
-                  onKeyUp={isHITL ? handleBrowserKeyUp : undefined}
-                  onWheel={isHITL ? handleBrowserScroll : undefined}
-                >
-                  <img
-                    ref={browserImgRef}
-                    src={liveFrame}
-                    alt="Browser Stream"
-                    className="browser-frame"
-                    draggable={false}
-                  />
-                </div>
-              </div>
-            )}
+              ) : thoughtSession ? (
+                <div className="thinking-complete">Complete</div>
+              ) : null}
+            </div>
 
-            {session.chatMessages.length > 0 && (
-              <div className="chat-socket-lane">
-                {session.chatMessages.map((msg, index) => (
-                  <div key={msg.id || index} className={msg.isUser ? "chat-user" : "chat-system"}>
-                    {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
+            <div className="thoughts-meta">
+              {thoughtSession ? (
+                <>
+                  <span className="thoughts-run-label">Run {thoughtSessionIndex}</span>
+                  <p className="thoughts-prompt">{thoughtSession.prompt}</p>
+                </>
+              ) : (
+                <p className="thoughts-prompt">Logs will appear here.</p>
+              )}
+            </div>
+
+            <div className="thoughts-stream">
+              {thoughtSession ? (
+                thoughtSession.logs.length > 0 ? (
+                  thoughtSession.logs.map((line, lineIndex) => (
+                    <div key={`${thoughtSession.id}-thought-${lineIndex}`} className="thought-line">
+                      <span className="thought-line-number">{String(lineIndex + 1).padStart(2, "0")}</span>
+                      <span className="thought-line-text">{line}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="thoughts-empty-state">
+                    {thoughtSession.status === "running"
+                      ? "Waiting for logs..."
+                      : "No more logs."}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-        <div ref={bottomRef}></div>
-
+                )
+              ) : (
+                <div className="thoughts-empty-state">Start a run to view logs.</div>
+              )}
+            </div>
+          </aside>
+        </div>
       </main>
-
-      {/* Input Bar */}
-      <div className="dashboard-input-bar">
-        <input
-          className="dashboard-input"
-          placeholder="Start browsing..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyPress}
-        />
-        <button className="dashboard-bar-btn" onClick={handleSend}>➤</button>
-      </div>
-
       {/* ---------- SETTINGS MODAL ---------- */}
       {showSettings && (
         <div className="modal-overlay" >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">✖</button>
+            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">X</button>
             <h2 className="modal-title">Settings</h2>
 
             <label className="modal-label">Agent Prompt</label>
@@ -1263,7 +1429,7 @@ export default function Dashboard() {
       {showUserCredentials && (
         <div className="modal-overlay">
           <div className="modal-content user-credentials-modal">
-            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close user credentials">✖</button>
+            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close user credentials">X</button>
             <h2 className="modal-title">User Credentials</h2>
             <hr className="modal-title-divider"/>
 
@@ -1328,5 +1494,6 @@ export default function Dashboard() {
     </div>
   );
 }
+
 
 
