@@ -244,6 +244,7 @@ class Executor:
                     error_type="ambiguous_step",
                 )
 
+            consume_sensitive_approval = False
             sensitive_reason = self._sensitive_action_reason(name, args, current_task)
             if sensitive_reason:
                 signature = self._action_signature(name, args)
@@ -257,6 +258,7 @@ class Executor:
                         reason=sensitive_reason,
                         action_signature=signature,
                     )
+                consume_sensitive_approval = True
 
             try:
                 result = await tool_map[name].ainvoke(args)
@@ -266,9 +268,16 @@ class Executor:
                     action=name, args=args,
                     message=str(e),
                     error_type="unknown",
+                    clear_sensitive_approval=consume_sensitive_approval,
                 )
             result = self._coerce_tool_result_to_output(name, result)
-            return await self._finish_from_result(state, page, current_url, result)
+            return await self._finish_from_result(
+                state,
+                page,
+                current_url,
+                result,
+                clear_sensitive_approval=consume_sensitive_approval,
+            )
         else:
             # Fallback: structured output (no tool_calls)
             try:
@@ -321,6 +330,7 @@ class Executor:
                 "key": validated.args.key,
                 "seconds": validated.args.seconds,
             }
+            consume_sensitive_approval = False
             sensitive_reason = self._sensitive_action_reason(validated.action, validated_args, current_task)
             if sensitive_reason:
                 signature = self._action_signature(validated.action, validated_args)
@@ -334,13 +344,29 @@ class Executor:
                         reason=sensitive_reason,
                         action_signature=signature,
                     )
+                consume_sensitive_approval = True
 
             result = await dispatch_action(page, tool_action)
             print(f"[executor - {result.action} result]: ", result)
-            return await self._finish_from_result(state, page, current_url, result)
+            return await self._finish_from_result(
+                state,
+                page,
+                current_url,
+                result,
+                clear_sensitive_approval=consume_sensitive_approval,
+            )
 
-    def _return_failure(self, state, current_url, action, args, message, error_type="unknown"):
-        return {
+    def _return_failure(
+        self,
+        state,
+        current_url,
+        action,
+        args,
+        message,
+        error_type="unknown",
+        clear_sensitive_approval: bool = False,
+    ):
+        out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "reasoning_log": [self._build_execution_log(
                 action=action, args=args if isinstance(args, dict) else {},
@@ -348,6 +374,9 @@ class Executor:
             )],
             "current_url": current_url,
         }
+        if clear_sensitive_approval:
+            out["sensitive_action_approval"] = None
+        return out
 
     def _request_sensitive_confirmation(
         self,
@@ -882,7 +911,7 @@ class Executor:
             return text
         return text[:max_chars] + "\n... [truncated]"
 
-    async def _finish_from_result(self, state, page, current_url, result):
+    async def _finish_from_result(self, state, page, current_url, result, clear_sensitive_approval: bool = False):
         result_status = result.status
         result_error_type = result.error_type
         result_message = result.message
@@ -944,6 +973,8 @@ class Executor:
                 out["dom_cache"] = [snapshot]
         except Exception:
             pass
+        if clear_sensitive_approval:
+            out["sensitive_action_approval"] = None
         return out
 
 

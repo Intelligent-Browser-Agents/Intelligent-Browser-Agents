@@ -92,6 +92,7 @@ class ProjectState(TypedDict):
     abort_reason: Optional[str]
     pending_sensitive_action: Optional[Dict]  # Pending sensitive action awaiting explicit user confirmation
     sensitive_action_approval: Optional[Dict]  # Last confirmation response bound to an action signature
+    requested_context: Optional[List[str]]  # Missing context requested from fallback for user clarification
 
     # User-provided credentials (service logins, personal info, payment, experience)
     user_credentials: Optional[Dict]

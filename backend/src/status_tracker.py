@@ -436,12 +436,20 @@ def _update_fallback(signals: dict, state: dict, result: dict) -> None:
 
     diagnosis = _extract(last_entry, r"\[Fallback\] Diagnosis:\s*(.+?)(?:\n|$)") or ""
     update_type = _extract(last_entry, r"\[Fallback\] Update Type:\s*(\S+)")
+    requested_context = [str(item).strip() for item in (result.get("requested_context") or []) if str(item).strip()]
 
     if update_type == "request_human_action":
         signals["blocking_issue"] = diagnosis[:200] or "Human action required."
+    elif update_type == "request_context":
+        if requested_context:
+            signals["blocking_issue"] = "Need user context: " + ", ".join(requested_context[:3])
+        else:
+            signals["blocking_issue"] = diagnosis[:200] or "Additional user context required."
     elif update_type == "revise_step":
         signals["blocking_issue"] = None
         signals["situation"] = f"Fallback revised step: {diagnosis[:200]}"
+    elif update_type == "abort":
+        signals["blocking_issue"] = diagnosis[:200] or "Mission aborted by fallback."
 
 
 def _update_interaction(signals: dict, state: dict, result: dict) -> None:

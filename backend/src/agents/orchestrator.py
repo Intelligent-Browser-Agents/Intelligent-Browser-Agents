@@ -86,7 +86,28 @@ class Orchestrator:
             HumanMessage(content=context),
         ]
 
-        plan: OrchestratorPlan = self.planner.invoke(messages)
+        try:
+            plan: OrchestratorPlan = self.planner.invoke(messages)
+        except Exception as e:
+            reasoning = (
+                "[Planner] Plan creation failed; requesting clarification for recovery.\n"
+                f"[Planner] Error: {e}"
+            )
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_plan": [],
+                "plan_history": [],
+                "current_step_index": 0,
+                "plan_status": "NEEDS_CLARIFICATION",
+                "current_task": "Awaiting user clarification",
+                "reasoning_log": [reasoning],
+                "is_complete": False,
+                "handoff_interaction": True,
+                "needs_fallback": False,
+                "last_step_complete": False,
+                "mission_failed": False,
+                "step_attempts": 0,
+            }
 
         if plan.needs_clarification:
             reasoning = "[Planner] Needs clarification:\n"
@@ -339,6 +360,30 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             }
 
         if decision_action == "advance":
+            if safe_step >= total_steps - 1:
+                if goal_already_complete:
+                    return {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "current_step_index": safe_step,
+                        "plan_status": "MAINTAIN",
+                        "current_task": current_plan[safe_step],
+                        "reasoning_log": [reasoning + "\n[Decision] Advance on final step converted to plan_complete."],
+                        "is_complete": True,
+                        "handoff_interaction": True,
+                        "needs_fallback": False,
+                        "mission_failed": False,
+                    }
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": safe_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": current_plan[safe_step],
+                    "reasoning_log": [reasoning + "\n[Decision] Advance on final step converted to retry."],
+                    "is_complete": False,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                    "last_step_complete": False,
+                }
             next_step = min(safe_step + 1, total_steps - 1)
             next_task = current_plan[next_step]
             return {

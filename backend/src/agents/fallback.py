@@ -90,6 +90,7 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 f"[Fallback] Message to Orchestration: Retry the current step."
             )
             needs_human = False
+            requested_context = []
         else:
             proposed = (
                 (strategy.proposed_step or "").strip()
@@ -103,7 +104,32 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 update_type=strategy.update_type,
             )
 
-            needs_human = strategy.update_type == "request_human_action"
+            needs_human = strategy.update_type in {"request_human_action", "request_context"}
+            requested_context = [str(item).strip() for item in (strategy.requested_context or []) if str(item).strip()]
+            if strategy.update_type == "request_context" and not requested_context:
+                requested_context = ["additional context about the missing information"]
+
+            if strategy.update_type == "abort":
+                reason = (
+                    (strategy.message_to_orchestration or "").strip()
+                    or (strategy.diagnosis or "").strip()
+                    or "Fallback requested mission abort."
+                )
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "reasoning_log": [
+                        "[Fallback] Update Type: abort\n"
+                        f"[Fallback] Diagnosis: {strategy.diagnosis}\n"
+                        f"[Fallback] Message to Orchestration: {strategy.message_to_orchestration}\n"
+                        f"[Fallback] Abort Reason: {reason}"
+                    ],
+                    "needs_fallback": False,
+                    "handoff_interaction": True,
+                    "is_complete": True,
+                    "mission_failed": True,
+                    "abort_reason": reason,
+                    "current_task": objective_task,
+                }
 
             fallback_log = (
                 f"[Fallback] Update Type: {strategy.update_type}\n"
@@ -121,6 +147,7 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         }
         if needs_human:
             out["handoff_interaction"] = True
+            out["requested_context"] = requested_context
             # Reset step_attempts so that human-in-the-loop pauses do not trigger
             # the orchestrator safety stop immediately after the user completes
             # the required action.
@@ -130,10 +157,10 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
     @staticmethod
     def _base_task(task: str) -> str:
         text = (task or "").strip()
-        marker = " [Recovery Hint:"
-        idx = text.find(marker)
-        if idx >= 0:
-            return text[:idx].strip()
+        for marker in (" [Recovery Hint:", " [Then continue objective:"):
+            idx = text.find(marker)
+            if idx >= 0:
+                return text[:idx].strip()
         return text or "Unknown task"
 
     @staticmethod

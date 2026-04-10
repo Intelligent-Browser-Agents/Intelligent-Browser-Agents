@@ -140,6 +140,35 @@ class InteractionAgent:
                 ],
             }
 
+        # ── Fast path: fallback requested additional user context ──
+        requested_context = state.get("requested_context") or []
+        if isinstance(requested_context, list) and requested_context:
+            message = "I need a bit more context to continue:"
+            for item in requested_context:
+                if str(item).strip():
+                    message += f"\n- {str(item).strip()}"
+
+            user_reply = interrupt({
+                "type": "request",
+                "message": message,
+                "requested_fields": [str(item).strip() for item in requested_context if str(item).strip()],
+            })
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "reasoning_log": [
+                    f"[Interaction] Type: request (fallback context)\n"
+                    f"[Interaction] Requested {len(requested_context)} context fields\n"
+                    f"[Interaction] User replied: {str(user_reply)[:200]}"
+                ],
+                "handoff_interaction": False,
+                "is_complete": False,
+                "requested_context": [],
+                "messages": [
+                    {"role": "assistant", "content": message},
+                    {"role": "user", "content": str(user_reply)},
+                ],
+            }
+
         if mission_failed:
             final_message = (
                 "The agent stopped before completing the request.\n"
@@ -176,7 +205,7 @@ class InteractionAgent:
         elif needs_human_action:
             system_status = "needs_human_action"
         else:
-            system_status = "goal_completed"
+            system_status = "in_progress"
 
         actions_summary = "\n".join([
             f"- {log[:150]}..." if len(log) > 150 else f"- {log}"
