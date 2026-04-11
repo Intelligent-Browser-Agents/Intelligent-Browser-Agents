@@ -951,7 +951,7 @@ async def send_logs(requests: Request):
 # Testing memory fix
 import gc
 
-@app.get("/nuke")
+@app.get("/api/nuke")
 async def manual_cleanup():
     # 1. Clear any global result lists/dicts here (e.g. results.clear())
     # 2. Force garbage collection
