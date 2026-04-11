@@ -948,6 +948,16 @@ async def send_logs(requests: Request):
     # send app.py output to the frontend
     pass 
 
+# Testing memory fix
+import gc
+
+@app.get("/nuke")
+async def manual_cleanup():
+    # 1. Clear any global result lists/dicts here (e.g. results.clear())
+    # 2. Force garbage collection
+    gc.collect()
+    return {"message": "GC triggered"}
+
 # # test endpoint
 # @app.get('/')
 # def test():
