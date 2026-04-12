@@ -134,12 +134,9 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
         "status_signals": {},
     }
 
-    print("=" * 60, flush=True)
     print("INTELLIGENT BROWSER AGENT - SIMULATION", flush=True)
-    print("=" * 60, flush=True)
     print(f"\nUser Request: {user_request}", flush=True)
     print(f"Starting URL: {graph_input['current_url']}", flush=True)
-    print("=" * 60, flush=True)
 
     headless = _launch_headless()
     async with async_playwright() as p:
@@ -240,9 +237,8 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
             # user's reply in the conversation.
             stream_input = Command(resume=user_reply)
 
-    print("\n" + "=" * 60, flush=True)
+    print("", flush=True)
     print("SIMULATION COMPLETE", flush=True)
-    print("=" * 60, flush=True)
 
 
 if __name__ == "__main__":

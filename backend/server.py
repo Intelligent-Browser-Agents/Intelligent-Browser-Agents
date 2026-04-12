@@ -534,6 +534,12 @@ HITL_REPLY_QUEUES: dict[str, asyncio.Queue] = {}
 HITL_ACCEPTING: dict[str, bool] = {}
 
 USER_HITL_REPLY_TYPE = "user_hitl_reply"
+ABORT_RUN_TYPE = "abort_run"
+
+
+def _is_stop_command(text: str) -> bool:
+    value = (text or "").strip().lower()
+    return value in {"stop", "cancel", "quit", "exit", "abort"}
 
 
 def _drain_async_queue(q: asyncio.Queue) -> None:
@@ -694,6 +700,26 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                 if msg.get("type") == "INPUT":
                     await _dispatch_cdp_input(msg)
                     continue
+
+                if msg.get("type") in {USER_HITL_REPLY_TYPE, ABORT_RUN_TYPE}:
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and _is_stop_command(content):
+                        print(f"[HITL] Stop requested via WebSocket: {content[:200]!r}")
+                        HITL_ACCEPTING[user_id] = False
+                        _drain_async_queue(reply_queue)
+                        try:
+                            await websocket.send_json({
+                                "type": "STATUS",
+                                "content": "Abort requested. Stopping agent...",
+                            })
+                        except Exception:
+                            pass
+                        try:
+                            if process.returncode is None:
+                                process.terminate()
+                        except Exception as exc:
+                            print(f"[HITL] Failed to terminate process: {exc}")
+                        continue
 
                 # Only explicit user HITL replies while a clarification is active.
                 if (

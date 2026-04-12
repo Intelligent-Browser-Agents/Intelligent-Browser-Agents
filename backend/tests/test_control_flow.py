@@ -73,6 +73,41 @@ def test_orchestrator_abort_guard_triggers():
     assert "Aborted after 6 failed attempts" in reason
 
 
+def test_orchestrator_transaction_abort_credit_reduces_effective_load():
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    state = {
+        "step_attempts": 0,
+        "max_step_attempts": 6,
+        "max_transactions": 10,
+        "number_of_transactions": 10,
+        "status_signals": {
+            "completed_steps": [0, 1, 2],
+        },
+        "last_step_complete": False,
+    }
+
+    reason = orchestrator._get_abort_reason(state)
+    assert reason == ""
+
+
+def test_orchestrator_transaction_abort_still_triggers_when_effective_load_too_high():
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    state = {
+        "step_attempts": 0,
+        "max_step_attempts": 6,
+        "max_transactions": 10,
+        "number_of_transactions": 20,
+        "status_signals": {
+            "completed_steps": [0, 1, 2],
+        },
+        "last_step_complete": False,
+    }
+
+    reason = orchestrator._get_abort_reason(state)
+    assert "effective load" in reason
+    assert "Aborted after 20 transactions" in reason
+
+
 def test_orchestrator_advances_on_success():
     orchestrator = Orchestrator.__new__(Orchestrator)
     state = {

@@ -520,10 +520,20 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 f"Aborted after {step_attempts} failed attempts on the current step "
                 f"(limit: {max_step_attempts})."
             )
-        if transactions >= max_transactions:
+        signals = state.get("status_signals") or {}
+        completed_steps_raw = signals.get("completed_steps") or []
+        completed_steps = len({int(step) for step in completed_steps_raw if isinstance(step, int)})
+        recent_step_success = 1 if bool(state.get("last_step_complete", False)) else 0
+
+        # Successful completed steps still consume budget, but less than pure retries.
+        success_credits = completed_steps + recent_step_success
+        effective_transactions = max(0, transactions - success_credits)
+
+        if effective_transactions >= max_transactions:
             return (
                 f"Aborted after {transactions} transactions without completion "
-                f"(limit: {max_transactions})."
+                f"(effective load: {effective_transactions}, success credits: {success_credits}, "
+                f"limit: {max_transactions})."
             )
         return ""
 
