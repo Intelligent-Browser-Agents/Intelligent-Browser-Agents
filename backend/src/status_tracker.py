@@ -128,11 +128,22 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
         "subject": False,
         "body": False,
     }
+    compose_draft = signals.get("compose_draft") or {}
     compose_section = (
         f"- recipient: {'done' if compose_fields.get('recipient') else 'pending'}\n"
         f"- subject: {'done' if compose_fields.get('subject') else 'pending'}\n"
         f"- body: {'done' if compose_fields.get('body') else 'pending'}"
     )
+    draft_subject = (compose_draft.get("subject") or "").strip()
+    draft_body = (compose_draft.get("body") or "").strip()
+    if draft_subject or draft_body:
+        body_preview = draft_body[:220] + ("..." if len(draft_body) > 220 else "")
+        compose_draft_section = (
+            f"- subject: {draft_subject or '(not captured)'}\n"
+            f"- body preview: {body_preview or '(not captured)'}"
+        )
+    else:
+        compose_draft_section = "(none captured yet)"
 
     # ── Generic field progress ───────────────────────────────────────
     field_progress = signals.get("field_progress") or {}
@@ -184,6 +195,9 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
 
 ## Compose Fields
 {compose_section}
+
+## Compose Draft
+{compose_draft_section}
 
 ## Field Progress
 {field_progress_section}
@@ -255,6 +269,10 @@ def _update_orchestrator(signals: dict, state: dict, result: dict) -> None:
             "subject": False,
             "body": False,
         }
+        signals["compose_draft"] = {
+            "subject": "",
+            "body": "",
+        }
 
     # Start/reset generic field progress when the step objective changes.
     current_task = (result.get("current_task") or state.get("current_task") or "").strip()
@@ -312,6 +330,10 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
         "subject": False,
         "body": False,
     })
+    compose_draft = dict(signals.get("compose_draft") or {
+        "subject": "",
+        "body": "",
+    })
     entry_l = (last_entry or "").lower()
     target_l = (target or "").lower()
 
@@ -319,6 +341,7 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
     if action_status == "success":
         if action_type == "type":
             typed_text = _extract_typed_text(last_entry or "")
+            normalized_typed = (typed_text or "").strip()
             if "@" in typed_text and any(tok in entry_l for tok in (
                 "label=to",
                 "name=to",
@@ -333,6 +356,8 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
             if any(tok in entry_l for tok in ("label=subject", "placeholder=add a subject", "name=subject")):
                 if len(typed_text) >= 3:
                     compose_fields["subject"] = True
+                    if normalized_typed and not compose_draft.get("subject"):
+                        compose_draft["subject"] = normalized_typed[:200]
 
             words = len(re.findall(r"\S+", typed_text or ""))
             recipient_context = any(tok in entry_l for tok in (
@@ -350,6 +375,8 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
             # Field completion should be field-dependent, not content-length dependent.
             if body_context and bool((typed_text or "").strip()):
                 compose_fields["body"] = True
+                if normalized_typed and not compose_draft.get("body"):
+                    compose_draft["body"] = normalized_typed[:1400]
 
             # Generic field-progress tracking for any multi-field step.
             field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
@@ -377,6 +404,7 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
             compose_fields["recipient"] = True
 
     signals["compose_fields"] = compose_fields
+    signals["compose_draft"] = compose_draft
 
     # Update login phase based on executor actions
     lp = signals.get("login_phase", "not_started")

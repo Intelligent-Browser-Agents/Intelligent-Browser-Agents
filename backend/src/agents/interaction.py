@@ -214,6 +214,18 @@ class InteractionAgent:
         extracted_block = "\n\n---\n\n".join(extracted_content) if extracted_content else "(No content extracted from pages.)"
         extracted_block = self._clip_text(extracted_block, 15000)
 
+        compose_draft = signals.get("compose_draft") or {}
+        compose_subject = (compose_draft.get("subject") or "").strip()
+        compose_body = (compose_draft.get("body") or "").strip()
+        if compose_subject or compose_body:
+            body_preview = compose_body[:320] + ("..." if len(compose_body) > 320 else "")
+            compose_draft_block = (
+                f"Subject: {compose_subject or '(not captured)'}\n"
+                f"Body Preview: {body_preview or '(not captured)'}"
+            )
+        else:
+            compose_draft_block = "(No compose draft captured.)"
+
         mission_status = self._clip_text(state.get("mission_status") or "", 4000)
         context = f"""
             MAIN_GOAL: {user_intent}
@@ -230,10 +242,13 @@ class InteractionAgent:
 
             SYSTEM_STATUS: {system_status}
 
+            COMPOSE_DRAFT_CAPTURED (authoritative when summarizing sent email content):
+            {compose_draft_block}
+
             MISSION_STATUS:
             {mission_status}
 
-            Generate a user-facing response based on this information. If EXTRACTED_CONTENT is present, summarize or use it to answer the user's goal.
+            Generate a user-facing response based on this information. If EXTRACTED_CONTENT is present, summarize or use it to answer the user's goal. If COMPOSE_DRAFT_CAPTURED is present, keep any sent-email summary aligned to that captured draft.
             """
 
         messages = [

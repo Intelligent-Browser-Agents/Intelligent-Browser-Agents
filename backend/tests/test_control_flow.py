@@ -351,6 +351,59 @@ def test_executor_sensitive_action_approval_requires_exact_signature():
     assert Executor._is_sensitive_action_approved(state, other_signature) is False
 
 
+def test_executor_prefers_locked_compose_body_draft_text():
+    executor = Executor.__new__(Executor)
+    state = {
+        "status_signals": {
+            "compose_fields": {
+                "recipient": True,
+                "subject": True,
+                "body": False,
+            },
+            "compose_draft": {
+                "subject": "Cool cat fact",
+                "body": "Cats sleep for around 12 to 16 hours each day.",
+            },
+        }
+    }
+    args = {"text": "Octopuses have three hearts and blue blood."}
+
+    adjusted = executor._prefer_compose_draft_text(
+        state,
+        "Draft an appropriate subject line and email content about a cool fact about an animal.",
+        args,
+    )
+
+    assert adjusted["text"] == "Cats sleep for around 12 to 16 hours each day."
+
+
+def test_status_tracker_compose_draft_keeps_first_body_capture():
+    signals = {}
+    state = {"current_task": "Draft an appropriate subject line and email content about a cool fact about an animal."}
+
+    first = {
+        "reasoning_log": [
+            "[Executor] Action: type\n"
+            "[Executor] Args: text=Cats sleep for around 12 to 16 hours each day.\n"
+            "[Executor] Status: success\n"
+            "[Executor] Message: Typed into tag=div, role=presentation, label=Message body, contenteditable=true"
+        ]
+    }
+    tracker._update_executor(signals, state, first)
+
+    second = {
+        "reasoning_log": [
+            "[Executor] Action: type\n"
+            "[Executor] Args: text=Octopuses have three hearts and blue blood.\n"
+            "[Executor] Status: success\n"
+            "[Executor] Message: Typed into tag=div, role=presentation, label=Message body, contenteditable=true"
+        ]
+    }
+    tracker._update_executor(signals, state, second)
+
+    assert signals.get("compose_draft", {}).get("body") == "Cats sleep for around 12 to 16 hours each day."
+
+
 def test_interaction_parses_sensitive_confirmation_yes_no_unclear():
     assert InteractionAgent._parse_sensitive_confirmation("Yes, proceed") is True
     assert InteractionAgent._parse_sensitive_confirmation("No, cancel it") is False

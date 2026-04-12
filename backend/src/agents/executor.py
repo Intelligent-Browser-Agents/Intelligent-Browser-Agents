@@ -190,6 +190,7 @@ class Executor:
                         if expected_username and expected_password:
                             looks_emailish = "@" in args.get("text", "")
                             args["text"] = expected_username if looks_emailish else expected_password
+                args = self._prefer_compose_draft_text(state, current_task, args)
 
             if (
                 self._is_email_compose_recipient_task(current_task)
@@ -330,6 +331,10 @@ class Executor:
                 "key": validated.args.key,
                 "seconds": validated.args.seconds,
             }
+            if validated.action == "type":
+                validated_args = self._prefer_compose_draft_text(state, current_task, validated_args)
+                validated.args.text = validated_args.get("text")
+
             consume_sensitive_approval = False
             sensitive_reason = self._sensitive_action_reason(validated.action, validated_args, current_task)
             if sensitive_reason:
@@ -677,9 +682,13 @@ class Executor:
             return ""
         signals = state.get("status_signals") or {}
         compose_fields = signals.get("compose_fields") or {}
+        compose_draft = signals.get("compose_draft") or {}
         recipient_done = bool(compose_fields.get("recipient", False))
         subject_done = bool(compose_fields.get("subject", False))
         body_done = bool(compose_fields.get("body", False))
+        draft_subject = (compose_draft.get("subject") or "").strip()
+        draft_body = (compose_draft.get("body") or "").strip()
+        draft_body_preview = draft_body[:140] + ("..." if len(draft_body) > 140 else "")
         missing = [
             name for name, done in (
                 ("recipient", recipient_done),
@@ -688,6 +697,11 @@ class Executor:
             ) if not done
         ]
         next_required = missing[0] if missing else "none"
+        consistency_note = (
+            "If you type subject/body again, reuse the locked draft text exactly to keep email content consistent."
+            if draft_subject or draft_body
+            else "No locked draft text yet; once typed, keep it stable across retries."
+        )
         gate_note = (
             "Do not choose finalization actions (Send/Review/Continue) until all required compose fields are done."
             if missing else
@@ -698,10 +712,63 @@ class Executor:
             f"- recipient: {'done' if recipient_done else 'pending'}\n"
             f"- subject: {'done' if subject_done else 'pending'}\n"
             f"- body: {'done' if body_done else 'pending'}\n"
+            f"- locked_subject: {draft_subject or 'none'}\n"
+            f"- locked_body_preview: {draft_body_preview or 'none'}\n"
             f"- missing_fields: {', '.join(missing) if missing else 'none'}\n"
             f"- next_required_field: {next_required}\n"
+            f"- consistency_rule: {consistency_note}\n"
             f"- rule: {gate_note}"
         )[:900]
+
+    def _prefer_compose_draft_text(self, state: ProjectState, current_task: str, args: dict) -> dict:
+        if not isinstance(args, dict):
+            return args
+        raw_text = args.get("text")
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            return args
+        if not self._is_compose_task(current_task):
+            return args
+
+        signals = state.get("status_signals") or {}
+        compose_fields = signals.get("compose_fields") or {}
+        compose_draft = signals.get("compose_draft") or {}
+
+        subject_done = bool(compose_fields.get("subject", False))
+        body_done = bool(compose_fields.get("body", False))
+        draft_subject = (compose_draft.get("subject") or "").strip()
+        draft_body = (compose_draft.get("body") or "").strip()
+        typed = raw_text.strip()
+
+        if self._compose_content_required(current_task):
+            if not subject_done and draft_subject and self._is_materially_different_text(typed, draft_subject):
+                args["text"] = draft_subject
+                return args
+            if subject_done and not body_done and draft_body and self._is_materially_different_text(typed, draft_body):
+                args["text"] = draft_body
+                return args
+
+        if self._is_finalization_task(current_task) and draft_body and self._is_materially_different_text(typed, draft_body):
+            args["text"] = draft_body
+            return args
+
+        return args
+
+    @staticmethod
+    def _is_materially_different_text(left: str, right: str) -> bool:
+        def _normalize(value: str) -> str:
+            text = re.sub(r"\s+", " ", (value or "").strip().lower())
+            text = re.sub(r"[^a-z0-9 ]+", "", text)
+            return text
+
+        a = _normalize(left)
+        b = _normalize(right)
+        if not a or not b:
+            return False
+        if a == b:
+            return False
+        if a in b or b in a:
+            return False
+        return True
 
     @staticmethod
     def _compose_content_required(current_task: str) -> bool:
