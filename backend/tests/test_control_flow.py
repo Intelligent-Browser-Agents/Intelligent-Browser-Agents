@@ -93,6 +93,73 @@ def test_orchestrator_advances_on_success():
     assert result["is_complete"] is False
 
 
+def test_orchestrator_does_not_treat_sensitive_approval_hitl_as_login_completion():
+    orchestrator = Orchestrator.__new__(Orchestrator)
+
+    class _FailingDecisionMaker:
+        def invoke(self, _messages):
+            raise RuntimeError("force rule-based fallback")
+
+    orchestrator.decision_maker = _FailingDecisionMaker()
+    orchestrator.reasoning_prompt = "test"
+
+    plan = [
+        "Open the checkout page.",
+        "Submit the order.",
+    ]
+    state = {
+        "messages": [{"role": "user", "content": "USER REQUEST: place the order"}],
+        "current_task": "Submit the order.",
+        "last_step_complete": False,
+        "number_of_transactions": 10,
+        "status_signals": {
+            "login_phase": "completed",
+            "hitl_events": [
+                {
+                    "reason": "Sensitive action confirmation required before proceeding.",
+                    "reply": "yes",
+                    "transaction": 9,
+                }
+            ],
+        },
+    }
+
+    result = orchestrator._make_decision(plan, 1, state)
+
+    assert result["is_complete"] is False
+    assert result["current_step_index"] == 1
+
+
+def test_orchestrator_keeps_login_hitl_shortcut_for_auth_events():
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    plan = [
+        "Approve the sign-in request.",
+        "Continue to inbox.",
+    ]
+    state = {
+        "messages": [{"role": "user", "content": "USER REQUEST: log into email"}],
+        "current_task": "Approve the sign-in request.",
+        "last_step_complete": False,
+        "number_of_transactions": 6,
+        "status_signals": {
+            "login_phase": "completed",
+            "hitl_events": [
+                {
+                    "reason": "Approve sign-in request in the authenticator app.",
+                    "reply": "done",
+                    "transaction": 5,
+                }
+            ],
+        },
+    }
+
+    result = orchestrator._make_decision(plan, 0, state)
+
+    assert result["is_complete"] is False
+    assert result["current_step_index"] == 1
+    assert result["current_task"] == "Continue to inbox."
+
+
 def test_executor_anti_bot_ignores_oauth_pkce_challenge_params():
     executor = Executor.__new__(Executor)
     microsoft_oauth_url = (

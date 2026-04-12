@@ -167,12 +167,18 @@ class Orchestrator:
             signals = state.get("status_signals") or {}
             hitl_events = signals.get("hitl_events") or []
             login_phase = signals.get("login_phase", "not_started")
+            last_hitl_event = hitl_events[-1] if hitl_events else {}
+            hitl_reason = str(last_hitl_event.get("reason", ""))
 
             just_returned_from_hitl = bool(hitl_events) and (
-                hitl_events[-1].get("transaction", -1)
+                last_hitl_event.get("transaction", -1)
                 >= state.get("number_of_transactions", 0) - 2
             )
-            if just_returned_from_hitl and login_phase == "completed":
+            if (
+                just_returned_from_hitl
+                and login_phase == "completed"
+                and self._is_login_related_hitl_event(hitl_reason, current_task)
+            ):
                 next_step = min(safe_step + 1, total_steps - 1)
                 next_task = current_plan[next_step]
                 if safe_step >= total_steps - 1:
@@ -418,6 +424,26 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             return False
         # Only treat as prerequisite when fallback explicitly marked it.
         return "[Then continue objective:" in task
+
+    @staticmethod
+    def _is_login_related_hitl_event(hitl_reason: str, current_task: str) -> bool:
+        text = f"{hitl_reason or ''}\n{current_task or ''}".lower()
+        login_tokens = (
+            "mfa",
+            "2fa",
+            "two-factor",
+            "two step",
+            "approve sign-in",
+            "approve sign in",
+            "verify your identity",
+            "captcha",
+            "anti-bot",
+            "sign in",
+            "log in",
+            "authenticate",
+            "login",
+        )
+        return any(token in text for token in login_tokens)
 
     def _decision_fallback(
         self,

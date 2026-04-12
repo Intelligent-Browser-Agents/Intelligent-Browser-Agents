@@ -275,6 +275,7 @@ export default function Dashboard() {
   const activeChat = conversations.find((c) => c.id === activeChatId) || conversations[0];
   const chatListRef = useRef(null);
   const bottomRef = useRef(null);
+  const thoughtsStreamRef = useRef(null);
   const navigate = useNavigate();
   const activeChatIdRef = useRef(activeChatId);
 
@@ -391,6 +392,22 @@ export default function Dashboard() {
     channel,
   });
 
+  const sanitizeAgentLogLine = (line) => {
+    const raw = String(line ?? "").trim();
+    if (!raw) return "";
+
+    const cleaned = raw.replace(/-{3,}/g, "").replace(/\s{2,}/g, " ").trim();
+    if (!cleaned) return "";
+
+    const separatorIndex = cleaned.indexOf(":");
+    if (separatorIndex < 0) return cleaned;
+
+    const source = cleaned.slice(0, separatorIndex + 1);
+    const content = cleaned.slice(separatorIndex + 1).trim();
+    if (!content) return "";
+    return `${source} ${content}`;
+  };
+
   const appendMessageToChat = (chatId, text, isUser, channel = "main") => {
     setConversations((prev) =>
       prev.map((chat) =>
@@ -435,11 +452,16 @@ export default function Dashboard() {
   };
 
   const appendAgentLogLine = (chatId, sessionId, line) => {
+    const sanitizedLine = sanitizeAgentLogLine(line);
+    if (!sanitizedLine) {
+      return;
+    }
+
     setAgentSessionsByChat((prev) => ({
       ...prev,
       [chatId]: (prev[chatId] || []).map((session) =>
         session.id === sessionId
-          ? { ...session, logs: [...session.logs, line] }
+          ? { ...session, logs: [...session.logs, sanitizedLine] }
           : session
       ),
     }));
@@ -1143,6 +1165,13 @@ export default function Dashboard() {
   const thoughtSessionIndex = thoughtSession
     ? activeChatSessions.findIndex((session) => session.id === thoughtSession.id) + 1
     : 0;
+
+  useEffect(() => {
+    const container = thoughtsStreamRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [thoughtSession?.id, thoughtSession?.logs.length]);
+
   const browserIsInteractive = Boolean(runningSession && liveFrame && isHITL);
   const browserStatusTone = browserIsInteractive ? "interactive" : runningSession ? "locked" : "idle";
   const browserStatusLabel = browserIsInteractive
@@ -1374,7 +1403,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div className="thoughts-stream">
+            <div className="thoughts-stream" ref={thoughtsStreamRef}>
               {thoughtSession ? (
                 thoughtSession.logs.length > 0 ? (
                   thoughtSession.logs.map((line, lineIndex) => (
