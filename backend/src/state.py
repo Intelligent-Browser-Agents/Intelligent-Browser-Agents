@@ -66,6 +66,7 @@ class ProjectState(TypedDict):
     # Browser-specific context
     current_url: str
     screenshot: Optional[str]  # Base64 encoded
+    screenshot_meta: Optional[Dict]  # Capture metadata for freshness/escalation checks
     dom_cache: Annotated[List[str], append_dom_cache]  # Recent DOM/text snapshots for navigation
 
     # Plan tracking

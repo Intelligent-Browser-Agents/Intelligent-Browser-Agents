@@ -5,6 +5,7 @@ Uses LangChain tool calls when possible; falls back to structured output.
 """
 
 import asyncio
+import base64
 import json
 import re
 from typing import Any
@@ -100,6 +101,9 @@ class Executor:
         "authorize",
         "approve",
     )
+
+    _RECOVERY_SCREENSHOT_MAX_BYTES = 220_000
+    _RECOVERY_SCREENSHOT_MAX_DATA_URL_CHARS = 420_000
 
     async def __call__(self, state: ProjectState) -> dict:
         page = self.runtime.get("page")
@@ -446,6 +450,8 @@ class Executor:
                 message=message,
                 error_type=error_type,
             ),
+            "screenshot": None,
+            "screenshot_meta": None,
         }
         if clear_sensitive_approval:
             out["sensitive_action_approval"] = None
@@ -1172,9 +1178,108 @@ class Executor:
                 out["dom_cache"] = [snapshot]
         except Exception:
             pass
+
+        should_capture_screenshot = self._should_capture_recovery_screenshot(
+            state=state,
+            result_status=result_status,
+            result_error_type=result_error_type,
+        )
+        if should_capture_screenshot:
+            screenshot_data_url = await self._capture_recovery_screenshot(page)
+            if screenshot_data_url:
+                out["screenshot"] = screenshot_data_url
+                out["screenshot_meta"] = self._build_recovery_screenshot_meta(
+                    state=state,
+                    transaction_index=out["number_of_transactions"],
+                    result_status=result_status,
+                    result_error_type=result_error_type,
+                    action=result.action,
+                )
+            else:
+                out["screenshot"] = None
+                out["screenshot_meta"] = None
+        else:
+            # Clear stale screenshot artifacts so fallback does not use old visuals.
+            out["screenshot"] = None
+            out["screenshot_meta"] = None
+
         if clear_sensitive_approval:
             out["sensitive_action_approval"] = None
         return out
+
+    @classmethod
+    def _should_capture_recovery_screenshot(
+        cls,
+        *,
+        state: ProjectState,
+        result_status: str,
+        result_error_type: str | None,
+    ) -> bool:
+        status = (result_status or "").strip().lower()
+        error_type = (result_error_type or "").strip().lower()
+        step_attempts = int(state.get("step_attempts", 0) or 0)
+        stall_cycles = int(state.get("stall_cycles", 0) or 0)
+
+        high_signal_error_tokens = (
+            "blocked",
+            "captcha",
+            "navigation_blocked",
+            "tool_limit",
+            "unexpected_state",
+        )
+        has_high_signal_error = any(tok in error_type for tok in high_signal_error_tokens)
+
+        if status != "success":
+            return has_high_signal_error or step_attempts >= 1 or stall_cycles >= 1
+        return False
+
+    @classmethod
+    async def _capture_recovery_screenshot(cls, page) -> str | None:
+        """Capture a compressed screenshot suitable for occasional fallback escalation."""
+        try:
+            image_bytes = await page.screenshot(
+                type="jpeg",
+                quality=45,
+                full_page=False,
+                animations="disabled",
+            )
+            if not image_bytes:
+                return None
+            if len(image_bytes) > cls._RECOVERY_SCREENSHOT_MAX_BYTES:
+                image_bytes = await page.screenshot(
+                    type="jpeg",
+                    quality=30,
+                    full_page=False,
+                    animations="disabled",
+                )
+            if not image_bytes or len(image_bytes) > cls._RECOVERY_SCREENSHOT_MAX_BYTES:
+                return None
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            data_url = f"data:image/jpeg;base64,{encoded}"
+            if len(data_url) > cls._RECOVERY_SCREENSHOT_MAX_DATA_URL_CHARS:
+                return None
+            return data_url
+        except Exception:
+            return None
+
+    @staticmethod
+    def _build_recovery_screenshot_meta(
+        *,
+        state: ProjectState,
+        transaction_index: int,
+        result_status: str,
+        result_error_type: str | None,
+        action: str,
+    ) -> dict:
+        return {
+            "transaction_index": int(transaction_index),
+            "step_index": int(state.get("current_step_index", 0) or 0),
+            "step_attempts": int(state.get("step_attempts", 0) or 0),
+            "status": (result_status or "unknown").strip().lower(),
+            "error_type": (result_error_type or "none").strip().lower(),
+            "action": (action or "").strip().lower(),
+            "capture_mode": "fallback_last_resort",
+        }
 
 
     def _get_user_intent(self, state: ProjectState) -> str:

@@ -434,3 +434,44 @@ def test_dom_snapshot_budget_for_listing_tasks_is_moderate_and_bounded():
     budget = Executor._dom_snapshot_budget("Select a hotel from the booking results listing.")
 
     assert budget == 5500
+
+
+def test_recovery_screenshot_capture_gate_requires_retry_or_high_signal_error():
+    should_capture = Executor._should_capture_recovery_screenshot(
+        state={"step_attempts": 0, "stall_cycles": 0},
+        result_status="failure",
+        result_error_type="execution_failure",
+    )
+    assert should_capture is False
+
+    should_capture_retry = Executor._should_capture_recovery_screenshot(
+        state={"step_attempts": 1, "stall_cycles": 0},
+        result_status="failure",
+        result_error_type="execution_failure",
+    )
+    assert should_capture_retry is True
+
+    should_capture_blocked = Executor._should_capture_recovery_screenshot(
+        state={"step_attempts": 0, "stall_cycles": 0},
+        result_status="failure",
+        result_error_type="navigation_blocked",
+    )
+    assert should_capture_blocked is True
+
+
+def test_build_recovery_screenshot_meta_tracks_freshness_fields():
+    meta = Executor._build_recovery_screenshot_meta(
+        state={"current_step_index": 3, "step_attempts": 2},
+        transaction_index=18,
+        result_status="failure",
+        result_error_type="navigation_blocked",
+        action="click",
+    )
+
+    assert meta["transaction_index"] == 18
+    assert meta["step_index"] == 3
+    assert meta["step_attempts"] == 2
+    assert meta["status"] == "failure"
+    assert meta["error_type"] == "navigation_blocked"
+    assert meta["action"] == "click"
+    assert meta["capture_mode"] == "fallback_last_resort"

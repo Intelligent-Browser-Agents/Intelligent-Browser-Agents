@@ -148,3 +148,42 @@ def test_fallback_short_circuits_to_popup_recovery_without_llm():
     assert "[recovery hint:" in result["current_task"].lower()
     assert "close" in result["current_task"].lower() or "dismiss" in result["current_task"].lower()
     assert "popup signal" in result["reasoning_log"][0].lower()
+
+
+def test_select_last_resort_screenshot_escalates_on_repeat_loop():
+    screenshot, reasons = Fallback._select_last_resort_screenshot(
+        state={
+            "screenshot": "data:image/jpeg;base64,ZmFrZQ==",
+            "screenshot_meta": {"transaction_index": 9, "step_index": 2},
+            "number_of_transactions": 10,
+            "current_step_index": 2,
+            "step_attempts": 2,
+            "stall_cycles": 1,
+        },
+        loop_signal={"is_loop": True, "dom_unchanged": True},
+        last_verification="[Verifier] Verdict: failure\n[Verifier] Error Type: insufficient_evidence",
+        last_dom_snapshot="[role=button]",
+    )
+
+    assert screenshot.startswith("data:image/jpeg;base64,")
+    assert "repeat_loop" in reasons
+    assert "high_step_attempts" in reasons
+
+
+def test_select_last_resort_screenshot_rejects_stale_capture():
+    screenshot, reasons = Fallback._select_last_resort_screenshot(
+        state={
+            "screenshot": "data:image/jpeg;base64,ZmFrZQ==",
+            "screenshot_meta": {"transaction_index": 1, "step_index": 2},
+            "number_of_transactions": 12,
+            "current_step_index": 2,
+            "step_attempts": 4,
+            "stall_cycles": 3,
+        },
+        loop_signal={"is_loop": True, "dom_unchanged": True},
+        last_verification="[Verifier] Verdict: failure",
+        last_dom_snapshot="",
+    )
+
+    assert screenshot == ""
+    assert reasons == []

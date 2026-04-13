@@ -23,6 +23,9 @@ class Fallback:
         self.llm = Models.fallback(FallbackStrategy)
         self.prompt = get_fallback_prompt()
 
+    _SCREENSHOT_MAX_DATA_URL_CHARS = 420_000
+    _SCREENSHOT_STALE_TRANSACTION_WINDOW = 4
+
     def __call__(self, state: ProjectState) -> dict:
         current_task = state.get("current_task", "Unknown task")
         rc_in = state.get("recovery_context")
@@ -95,6 +98,18 @@ class Fallback:
             or "No execution log."
         )
 
+        screenshot_data_url, screenshot_reasons = self._select_last_resort_screenshot(
+            state=state,
+            loop_signal=loop_signal,
+            last_verification=last_verification,
+            last_dom_snapshot=last_dom_snapshot,
+        )
+        screenshot_block = self._build_screenshot_context_block(
+            state=state,
+            screenshot_enabled=bool(screenshot_data_url),
+            screenshot_reasons=screenshot_reasons,
+        )
+
         mission_status = self._clip_text(state.get("mission_status") or "", 2000)
         context = f"""
 MAIN_GOAL: {user_intent}
@@ -119,22 +134,37 @@ PREVIOUS_DOM_SNAPSHOT (optional):
 MISSION_STATUS:
 {mission_status}
 
+{screenshot_block}
+
 {loop_analysis_block}
 
-Diagnose the failure and propose a recovery. Use update_type: revise_step with proposed_step for a single revised instruction; use insert_step_before with insert_step to add a prerequisite; use request_context if user input is needed; use abort only if the goal cannot be continued.
+Diagnose the failure and propose a recovery. Use update_type: revise_step with proposed_step for a single revised instruction; use insert_step_before with insert_step to add a prerequisite; use request_context if user input is needed; use abort only if the goal cannot be continued. If SCREENSHOT_SIGNAL says enabled, use screenshot evidence only as a last-resort tie-breaker for visual blockers/occlusion.
 """
 
-        messages = [
-            SystemMessage(content=self.prompt),
-            HumanMessage(content=context.strip()),
-        ]
-
         err = None
+        used_multimodal = False
         try:
-            strategy: FallbackStrategy = self.llm.invoke(messages)
+            if screenshot_data_url:
+                strategy: FallbackStrategy = self.llm.invoke(
+                    self._build_llm_messages(
+                        context=context.strip(),
+                        screenshot_data_url=screenshot_data_url,
+                    )
+                )
+                used_multimodal = True
+            else:
+                strategy = self.llm.invoke(self._build_llm_messages(context=context.strip()))
         except Exception as e:
             err = e
             strategy = None
+
+        if strategy is None and screenshot_data_url:
+            # Failsafe: if multimodal invocation fails, retry once as text-only.
+            try:
+                strategy = self.llm.invoke(self._build_llm_messages(context=context.strip()))
+            except Exception as retry_err:
+                err = RuntimeError(f"multimodal={err}; text_retry={retry_err}")
+                strategy = None
 
         proposed_for_context = ""
         if strategy is None:
@@ -197,6 +227,13 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 f"[Fallback] Message to Orchestration: {strategy.message_to_orchestration}\n"
                 f"[Fallback] Proposed Step: {revised_task}\n"
                 f"[Fallback] Last Verification: {last_verification[:180]}"
+            )
+
+        if screenshot_data_url:
+            mode = "last_resort_multimodal" if used_multimodal else "last_resort_text_retry"
+            fallback_log += (
+                "\n"
+                f"[Fallback] Screenshot Escalation: {mode}; reasons={', '.join(screenshot_reasons) or 'none'}"
             )
 
         revised_task, steering_note = self._enforce_directional_recovery(
@@ -582,3 +619,121 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + "\n... [truncated]"
+
+    def _build_llm_messages(self, context: str, screenshot_data_url: str | None = None) -> list:
+        if screenshot_data_url:
+            return [
+                SystemMessage(content=self.prompt),
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": context},
+                        {"type": "image_url", "image_url": {"url": screenshot_data_url}},
+                    ]
+                ),
+            ]
+        return [
+            SystemMessage(content=self.prompt),
+            HumanMessage(content=context),
+        ]
+
+    @classmethod
+    def _select_last_resort_screenshot(
+        cls,
+        *,
+        state: ProjectState,
+        loop_signal: dict,
+        last_verification: str,
+        last_dom_snapshot: str,
+    ) -> tuple[str, list[str]]:
+        screenshot_data_url = (state.get("screenshot") or "").strip()
+        if not screenshot_data_url.startswith("data:image/"):
+            return "", []
+        if len(screenshot_data_url) > cls._SCREENSHOT_MAX_DATA_URL_CHARS:
+            return "", []
+
+        meta = state.get("screenshot_meta") or {}
+        if not isinstance(meta, dict):
+            meta = {}
+        if not cls._screenshot_is_fresh(meta=meta, state=state):
+            return "", []
+
+        reasons: list[str] = []
+        step_attempts = int(state.get("step_attempts", 0) or 0)
+        stall_cycles = int(state.get("stall_cycles", 0) or 0)
+        if step_attempts >= 2:
+            reasons.append("high_step_attempts")
+        if stall_cycles >= 2:
+            reasons.append("stall_cycles")
+        if bool(loop_signal.get("is_loop", False)):
+            reasons.append("repeat_loop")
+        if bool(loop_signal.get("dom_unchanged", False)):
+            reasons.append("dom_unchanged")
+
+        verifier_lower = (last_verification or "").lower()
+        verifier_tokens = (
+            "blocked",
+            "insufficient_evidence",
+            "unexpected_state",
+            "captcha",
+            "human action required",
+        )
+        if any(token in verifier_lower for token in verifier_tokens):
+            reasons.append("verifier_block_signal")
+
+        if not (last_dom_snapshot or "").strip():
+            reasons.append("dom_missing")
+        elif len((last_dom_snapshot or "").strip()) < 220:
+            reasons.append("dom_sparse")
+
+        should_escalate = (
+            "repeat_loop" in reasons
+            or "high_step_attempts" in reasons
+            or "stall_cycles" in reasons
+            or "verifier_block_signal" in reasons
+            or "dom_missing" in reasons
+            or ("dom_sparse" in reasons and "dom_unchanged" in reasons)
+        )
+        if not should_escalate:
+            return "", []
+        return screenshot_data_url, reasons
+
+    @classmethod
+    def _screenshot_is_fresh(cls, *, meta: dict, state: ProjectState) -> bool:
+        tx = meta.get("transaction_index")
+        step_index = meta.get("step_index")
+        try:
+            tx_i = int(tx)
+        except (TypeError, ValueError):
+            return False
+        current_tx = int(state.get("number_of_transactions", 0) or 0)
+        if (current_tx - tx_i) > cls._SCREENSHOT_STALE_TRANSACTION_WINDOW:
+            return False
+        try:
+            snap_step = int(step_index)
+        except (TypeError, ValueError):
+            return False
+        current_step = int(state.get("current_step_index", 0) or 0)
+        return snap_step == current_step
+
+    @staticmethod
+    def _build_screenshot_context_block(
+        *,
+        state: ProjectState,
+        screenshot_enabled: bool,
+        screenshot_reasons: list[str],
+    ) -> str:
+        meta = state.get("screenshot_meta") or {}
+        tx = meta.get("transaction_index", "unknown") if isinstance(meta, dict) else "unknown"
+        if screenshot_enabled:
+            return (
+                "SCREENSHOT_SIGNAL:\n"
+                "- mode: enabled_last_resort\n"
+                f"- trigger_reasons: {', '.join(screenshot_reasons)}\n"
+                f"- captured_transaction: {tx}\n"
+                "- use_policy: use screenshot only to resolve visual ambiguity/occlusion when DOM evidence is insufficient"
+            )
+        return (
+            "SCREENSHOT_SIGNAL:\n"
+            "- mode: disabled\n"
+            "- use_policy: default to DOM and execution evidence"
+        )
