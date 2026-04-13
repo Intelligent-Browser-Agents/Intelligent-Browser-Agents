@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import userNotificationSound from "../../assets/audio/user-notification.mp3";
+import agentLogIcon from "../../assets/icons/agent.png";
+import stdoutLogIcon from "../../assets/icons/log.png";
+import statusLogIcon from "../../assets/icons/status.png";
 import "./Dashboard.css";
 
 // === COMPONENTS ===
@@ -465,6 +468,29 @@ export default function Dashboard() {
           : session
       ),
     }));
+  };
+
+  const renderAgentLogLine = (line) => {
+    const prefixes = {
+      AGENT: { icon: agentLogIcon, alt: "Agent" },
+      STATUS: { icon: statusLogIcon, alt: "Status" },
+      STDOUT: { icon: stdoutLogIcon, alt: "Stdout" },
+    };
+
+    const match = String(line ?? "").match(/^(AGENT|STATUS|STDOUT):\s*(.*)$/);
+    if (!match) {
+      return <span className="thought-line-text">{line}</span>;
+    }
+
+    const [, source, content] = match;
+    const prefix = prefixes[source];
+
+    return (
+      <span className="thought-line-text thought-line-text-with-icon">
+        <img className="thought-line-icon" src={prefix.icon} alt={prefix.alt} />
+        <span>{content}</span>
+      </span>
+    );
   };
 
   const appendSessionChatMessage = (chatId, sessionId, text, isUser) => {
@@ -1409,7 +1435,7 @@ export default function Dashboard() {
                   thoughtSession.logs.map((line, lineIndex) => (
                     <div key={`${thoughtSession.id}-thought-${lineIndex}`} className="thought-line">
                       <span className="thought-line-number">{String(lineIndex + 1).padStart(2, "0")}</span>
-                      <span className="thought-line-text">{line}</span>
+                      {renderAgentLogLine(line)}
                     </div>
                   ))
                 ) : (

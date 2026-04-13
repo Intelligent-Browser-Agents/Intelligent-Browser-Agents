@@ -671,6 +671,20 @@
   word-break: break-word;
 }
 
+.thought-line-text-with-icon {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.thought-line-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-top: 2px;
+  object-fit: contain;
+}
+
 .thoughts-empty-state {
   margin: auto 0;
   padding: 16px;
