@@ -344,6 +344,35 @@ class Verifier:
                 },
             )
 
+        # Deterministic info-capture completion: some plans use phrasing like
+        # "find/search/copy a fact" even though clipboard operations are not a
+        # tool primitive. A successful extract_content with non-empty extracted
+        # content should satisfy these retrieval/capture steps.
+        if self._is_information_capture_step(current_task) and self._extract_content_succeeded(last_exec_lower):
+            extracted_chunks = state.get("extracted_content") or []
+            has_extracted_text = any(isinstance(chunk, str) and len(chunk.strip()) >= 60 for chunk in extracted_chunks)
+            if has_extracted_text:
+                verification_log = (
+                    "[Verifier] Verdict: success\n"
+                    "[Verifier] Step Complete: True\n"
+                    "[Verifier] Goal Complete: False\n"
+                    "[Verifier] Message: Information was successfully extracted for this retrieval/capture step.\n"
+                    "[Verifier] Handoff: orchestration"
+                )
+                return self._apply_stall_cap(
+                    state,
+                    current_step,
+                    {
+                        "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                        "needs_fallback": False,
+                        "is_complete": False,
+                        "last_step_complete": True,
+                        "step_attempts": 0,
+                        "made_progress": True,
+                        "reasoning_log": [verification_log],
+                    },
+                )
+
         mission_status = self._clip_text(state.get("mission_status") or "", 5000)
 
         # Build an HITL-resolved note so the LLM knows old MFA/login
@@ -460,6 +489,52 @@ If this is the last step of the plan and the step is complete, set goal_complete
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + "\n... [truncated]"
+
+    @staticmethod
+    def _extract_content_succeeded(last_exec_lower: str) -> bool:
+        text = (last_exec_lower or "").lower()
+        return "[executor] action: extract_content" in text and "[executor] status: success" in text
+
+    @staticmethod
+    def _is_information_capture_step(task: str) -> bool:
+        text = (task or "").lower()
+        if not text.strip():
+            return False
+
+        retrieval_tokens = (
+            "find",
+            "search",
+            "extract",
+            "gather",
+            "collect",
+            "copy",
+            "fact",
+            "information",
+            "details",
+            "content",
+        )
+        has_retrieval_intent = any(token in text for token in retrieval_tokens)
+
+        # Exclude data-entry/composition steps where "copy" can appear but the
+        # task still requires typing/pasting into form fields.
+        entry_tokens = (
+            "compose",
+            "draft",
+            "recipient",
+            "subject",
+            "body",
+            "email",
+            "mail",
+            "paste into",
+            "fill",
+            "type",
+            "enter",
+            "form",
+            "login",
+            "sign in",
+        )
+        has_entry_intent = any(token in text for token in entry_tokens)
+        return has_retrieval_intent and not has_entry_intent
 
     @staticmethod
     def _is_email_compose_step(task: str) -> bool:

@@ -61,6 +61,32 @@ def test_verifier_marks_failure_and_increments_attempts():
     assert result["step_attempts"] == 3
 
 
+def test_verifier_marks_information_capture_step_complete_after_extract_content():
+    verifier = Verifier()
+    state = {
+        "current_step_index": 0,
+        "current_plan": ["Search for a cool animal fact on duckduckgo.com and copy it."],
+        "current_task": "Search for a cool animal fact on duckduckgo.com and copy it.",
+        "reasoning_log": [
+            "[Executor] Action: extract_content\n"
+            "[Executor] Args: None\n"
+            "[Executor] Status: success\n"
+            "[Executor] Message: Extracted 15016 characters from the page"
+        ],
+        "extracted_content": [
+            "Pistol shrimp can snap their claw so fast it creates a cavitation bubble and a shockwave stronger than a gunshot."
+        ],
+        "step_attempts": 2,
+        "number_of_transactions": 11,
+    }
+
+    result = verifier(state)
+
+    assert result["needs_fallback"] is False
+    assert result["last_step_complete"] is True
+    assert result["step_attempts"] == 0
+
+
 def test_orchestrator_abort_guard_triggers():
     orchestrator = Orchestrator.__new__(Orchestrator)
     state = {
@@ -210,7 +236,10 @@ def test_orchestrator_handoffs_final_report_step_when_content_exists():
         "last_step_complete": False,
         "current_step_index": 3,
         "number_of_transactions": 12,
-        "extracted_content": ["Orlando weather: 78F and partly cloudy with light wind."],
+        "extracted_content": [
+            "Orlando weather report: currently 78F and partly cloudy with light wind. "
+            "Forecast indicates warm temperatures through the afternoon with low rain chances."
+        ],
         "dom_cache": [],
         "reasoning_log": [],
     }
