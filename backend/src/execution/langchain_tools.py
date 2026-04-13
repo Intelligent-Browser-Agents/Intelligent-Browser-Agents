@@ -133,6 +133,49 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
             return []
         return dom_extractor.search_dom_text([f"URL: {page.url}\n\n{text}"], query=query, max_results=max_results)
 
+    def _flatten_accessibility_click_targets(node: dict | None, out: list[dict], max_items: int) -> None:
+        if node is None or len(out) >= max_items:
+            return
+        role = (node.get("role") or "").strip().lower()
+        name = (node.get("name") or "").strip()
+        if name and role in {"link", "button", "tab", "menuitem"}:
+            out.append({
+                "role": role,
+                "name": name,
+                "url": page.url,
+                "title": "",
+            })
+            if len(out) >= max_items:
+                return
+        for child in node.get("children") or []:
+            _flatten_accessibility_click_targets(child, out, max_items)
+            if len(out) >= max_items:
+                return
+
+    async def _list_links_from_accessibility(filter_text: str | None, max_results: int) -> list[dict]:
+        try:
+            snapshot = await page.accessibility.snapshot(interesting_only=True)
+        except Exception:
+            snapshot = None
+        targets: list[dict] = []
+        _flatten_accessibility_click_targets(snapshot, targets, max_results * 3)
+        if not targets:
+            return []
+        f = (filter_text or "").strip().lower()
+        deduped: list[dict] = []
+        seen = set()
+        for target in targets:
+            key = (target.get("role"), (target.get("name") or "").lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            if f and f not in (target.get("name") or "").lower():
+                continue
+            deduped.append(target)
+            if len(deduped) >= max_results:
+                break
+        return deduped
+
     async def list_links(filter_text: str | None = None, max_results: int = 30):
         """
         List link-like interactive elements from the current page (role=link, name),
@@ -140,12 +183,25 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
         """
         dom_json, *_ = await dom_extractor.main(page)
         interactive_json = dom_extractor.retrieve_interactive_elements(dom_json)
-        return dom_extractor.list_dom_click_targets_from_interactive_json(
+        strict_targets = dom_extractor.list_dom_click_targets_from_interactive_json(
             interactive_json,
             filter_text=filter_text,
             max_results=max_results,
             roles=("link", "button", "tab"),
         )
+        if strict_targets:
+            return strict_targets
+
+        relaxed_targets = dom_extractor.list_dom_click_targets_from_interactive_json(
+            interactive_json,
+            filter_text=filter_text,
+            max_results=max_results,
+            roles=("link", "button", "tab", "generic"),
+        )
+        if relaxed_targets:
+            return relaxed_targets
+
+        return await _list_links_from_accessibility(filter_text=filter_text, max_results=max_results)
 
     async def go_back():
         return await handle_go_back(page)

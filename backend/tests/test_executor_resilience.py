@@ -413,3 +413,24 @@ def test_executionargs_accepts_legacy_query_alias():
 def test_actionargs_rejects_unexpected_extra_field():
     with pytest.raises(ValidationError):
         ActionArgs(text="academics", unexpected="value")
+
+
+def test_dom_cache_context_prefers_diff_summary_when_two_snapshots_exist():
+    state = {
+        "dom_cache": [
+            "URL: https://booking.com\nWhere are you going?\nSearch\nPopular destinations",
+            "URL: https://booking.com/searchresults\nRiu Plaza Chicago\nShow prices\nFilter by price",
+        ]
+    }
+
+    context = Executor._build_dom_cache_context(state)
+
+    assert "cached diff summary" in context
+    assert "text_added_count" in context
+    assert "Riu Plaza Chicago" in context
+
+
+def test_dom_snapshot_budget_for_listing_tasks_is_moderate_and_bounded():
+    budget = Executor._dom_snapshot_budget("Select a hotel from the booking results listing.")
+
+    assert budget == 5500

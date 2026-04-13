@@ -866,11 +866,35 @@ class Executor:
     @staticmethod
     def _dom_snapshot_budget(current_task: str) -> int:
         task = (current_task or "").lower()
+        listing_tokens = (
+            "result", "results", "listing", "listings", "hotel", "property", "room", "booking", "show prices",
+        )
         data_entry_tokens = (
             "compose", "draft", "recipient", "subject", "message", "body",
             "fill", "form", "login", "sign in", "password", "username",
         )
+        if any(tok in task for tok in listing_tokens):
+            return 5500
         return 6000 if any(tok in task for tok in data_entry_tokens) else 4000
+
+    @staticmethod
+    def _split_dom_cache_snapshot(snapshot: str) -> tuple[str, list[str]]:
+        lines = [line.strip() for line in (snapshot or "").splitlines() if line and line.strip()]
+        if not lines:
+            return "", []
+        url = ""
+        if lines[0].lower().startswith("url:"):
+            url = lines[0][4:].strip()
+            lines = lines[1:]
+        return url, lines
+
+    @staticmethod
+    def _build_dom_delta_lines(latest_lines: list[str], previous_lines: list[str], max_items: int = 8) -> tuple[list[str], list[str]]:
+        prev_set = set(previous_lines)
+        latest_set = set(latest_lines)
+        added = [line for line in latest_lines if line not in prev_set][:max_items]
+        removed = [line for line in previous_lines if line not in latest_set][:max_items]
+        return added, removed
 
     @staticmethod
     def _build_dom_cache_context(state: ProjectState) -> str:
@@ -880,10 +904,33 @@ class Executor:
         latest = (cache[-1] or "").strip()
         if not latest:
             return ""
-        clipped = latest[:1500]
-        if len(latest) > 1500:
-            clipped += "\n... [truncated]"
-        return f"\n\nDOM_TEXT_CONTEXT (latest page text snapshot):\n{clipped}"
+        if len(cache) == 1:
+            clipped = latest[:900]
+            if len(latest) > 900:
+                clipped += "\n... [truncated]"
+            return f"\n\nDOM_TEXT_CONTEXT (latest page text snapshot):\n{clipped}"
+
+        previous = (cache[-2] or "").strip()
+        latest_url, latest_lines = Executor._split_dom_cache_snapshot(latest)
+        previous_url, previous_lines = Executor._split_dom_cache_snapshot(previous)
+        added, removed = Executor._build_dom_delta_lines(latest_lines, previous_lines, max_items=8)
+
+        added_block = "\n".join(f"- {line[:140]}" for line in added) if added else "- none"
+        removed_block = "\n".join(f"- {line[:140]}" for line in removed) if removed else "- none"
+        same_url = bool(latest_url and previous_url and latest_url == previous_url)
+        delta = (
+            "\n\nDOM_TEXT_CONTEXT (cached diff summary):\n"
+            f"- latest_url: {latest_url or 'unknown'}\n"
+            f"- previous_url: {previous_url or 'unknown'}\n"
+            f"- url_unchanged: {same_url}\n"
+            f"- text_added_count: {len(added)}\n"
+            f"- text_removed_count: {len(removed)}\n"
+            "Added text highlights:\n"
+            f"{added_block}\n"
+            "Removed text highlights:\n"
+            f"{removed_block}"
+        )
+        return Executor._clip_text(delta, 1500)
 
     @staticmethod
     def _is_data_entry_task(current_task: str) -> bool:

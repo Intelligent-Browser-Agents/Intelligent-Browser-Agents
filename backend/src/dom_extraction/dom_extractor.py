@@ -57,7 +57,28 @@ def infer_role_from_tag(tag: str, attrs: dict) -> str:
         return 'link'
     # Many portal frameworks use clickable div/span containers with onclick
     elif tag in ('div', 'span'):
-        if 'onclick' in attrs or 'ng-click' in attrs or 'data-action' in attrs:
+        class_value = attrs.get('class', [])
+        if isinstance(class_value, list):
+            class_text = " ".join(str(v) for v in class_value)
+        else:
+            class_text = str(class_value or "")
+        marker_text = " ".join([
+            class_text,
+            str(attrs.get('data-testid', '')),
+            str(attrs.get('data-action', '')),
+            str(attrs.get('data-clickable', '')),
+            str(attrs.get('data-handler', '')),
+        ]).lower()
+        if (
+            'onclick' in attrs
+            or 'ng-click' in attrs
+            or 'data-action' in attrs
+            or attrs.get('data-clickable')
+            or attrs.get('data-handler')
+            or any(tok in marker_text for tok in (
+                'click', 'btn', 'button', 'result', 'card', 'hotel', 'property', 'select', 'show-price', 'show prices'
+            ))
+        ):
             return 'button'
         return 'generic'
     elif tag == 'input':
@@ -119,7 +140,7 @@ def extract_aria_name(element, attrs: dict) -> str:
         pass
 
     # 3. Text content (trimmed and cleaned)
-    text_content = element.get_text(strip=True)
+    text_content = element.get_text(separator=' ', strip=True)
     if text_content:
         return text_content
 
@@ -142,6 +163,12 @@ def extract_aria_name(element, attrs: dict) -> str:
     # 8. name attribute as last resort
     if 'name' in attrs:
         return attrs['name'].strip()
+
+    # 9. common data-* labels used in component-heavy UIs
+    for key in ('data-name', 'data-label', 'data-testid', 'id'):
+        value = attrs.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
 
     return ""  # No accessible name found
 
@@ -425,11 +452,46 @@ def list_dom_click_targets_from_interactive_json(
     out: list[dict] = []
     f = (filter_text or "").lower()
 
+    def _stringify_attr(value) -> str:
+        if isinstance(value, list):
+            return " ".join(str(v) for v in value if v)
+        return str(value or "")
+
+    def _normalize_name(raw_name: str, attrs: dict) -> str:
+        name = (raw_name or "").strip()
+        if name:
+            return name
+        for key in ("aria-label", "title", "data-name", "data-label", "name", "id"):
+            value = attrs.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        testid = attrs.get("data-testid")
+        if isinstance(testid, str) and testid.strip():
+            human = testid.replace("-", " ").replace("_", " ").strip()
+            return human[:120]
+        return ""
+
+    def _maybe_promote_generic_role(role: str, attrs: dict) -> str:
+        if role != "generic":
+            return role
+        marker = " ".join([
+            _stringify_attr(attrs.get("class")),
+            _stringify_attr(attrs.get("data-testid")),
+            _stringify_attr(attrs.get("data-action")),
+            _stringify_attr(attrs.get("data-clickable")),
+            _stringify_attr(attrs.get("data-handler")),
+        ]).lower()
+        if any(tok in marker for tok in ("click", "btn", "button", "result", "card", "select", "show prices", "property", "hotel")):
+            return "button"
+        return role
+
     for el in elements:
+        attrs = el.get("attributes") if isinstance(el.get("attributes"), dict) else {}
         role = (el.get("role") or "").strip().lower()
+        role = _maybe_promote_generic_role(role, attrs)
         if role and role not in roles:
             continue
-        name = (el.get("name") or "").strip()
+        name = _normalize_name(el.get("name"), attrs)
         if not name:
             continue
         if f and f not in name.lower():

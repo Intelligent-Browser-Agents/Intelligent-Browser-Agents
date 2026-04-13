@@ -37,9 +37,12 @@ import threading
 
 import asyncio
 import json
+import time
 
 # credential storage 
 CREDENTIALS_BY_SESSION = {}
+SESSION_CREDENTIAL_CREATED_AT = {}
+SESSION_CREDENTIAL_TTL_SECONDS = 60 * 30
 
 # Windows requires ProactorEventLoop for asyncio subprocess support.
 if sys.platform == "win32":
@@ -506,7 +509,9 @@ async def store_credentials(request: Request):
     if not session_id: 
         return {"ok": False, "error": "session_id is required."}
 
+    _prune_stale_session_credentials()
     CREDENTIALS_BY_SESSION[session_id] = credentials
+    SESSION_CREDENTIAL_CREATED_AT[session_id] = time.monotonic()
     return {"ok": True, "error": ""}
 
 
@@ -550,6 +555,63 @@ def _drain_async_queue(q: asyncio.Queue) -> None:
             break
 
 
+def _prune_stale_session_credentials() -> None:
+    """Drop expired session credential blobs to keep memory bounded."""
+    now = time.monotonic()
+    stale_ids = [
+        session_id
+        for session_id, created_at in SESSION_CREDENTIAL_CREATED_AT.items()
+        if now - created_at > SESSION_CREDENTIAL_TTL_SECONDS
+    ]
+    for session_id in stale_ids:
+        CREDENTIALS_BY_SESSION.pop(session_id, None)
+        SESSION_CREDENTIAL_CREATED_AT.pop(session_id, None)
+
+
+async def _wait_for_process_or_disconnect(
+    process: subprocess.Popen,
+    disconnect_event: asyncio.Event,
+    poll_interval: float = 0.2,
+) -> None:
+    """Wait for process exit, but stop waiting as soon as the socket disconnects."""
+    while process.poll() is None:
+        if disconnect_event.is_set():
+            return
+        await asyncio.sleep(poll_interval)
+
+
+async def _terminate_process_gracefully(
+    process: subprocess.Popen,
+    timeout_seconds: float = 5.0,
+) -> None:
+    """Terminate a subprocess and force-kill if it does not exit in time."""
+    if process.poll() is not None:
+        return
+
+    try:
+        process.terminate()
+    except Exception:
+        return
+
+    try:
+        await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=timeout_seconds)
+        return
+    except asyncio.TimeoutError:
+        pass
+    except Exception:
+        return
+
+    try:
+        process.kill()
+    except Exception:
+        return
+
+    try:
+        await asyncio.to_thread(process.wait)
+    except Exception:
+        pass
+
+
 @app.post("/api/hitl_reply/{user_id}")
 async def hitl_reply(user_id: str, request: Request):
     """REST endpoint the frontend can call to answer a clarification request."""
@@ -577,10 +639,16 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     await websocket.accept()
     print("DEBUG 1: Socket Accepted")
 
+    stream_disconnect_event = asyncio.Event()
+
     query_params = websocket.query_params
     prompt = query_params.get("prompt", "Default Prompt")
     session_id = query_params.get("session_id")
+
+    _prune_stale_session_credentials()
     credentials = CREDENTIALS_BY_SESSION.pop(session_id, {}) if session_id else {}
+    if session_id:
+        SESSION_CREDENTIAL_CREATED_AT.pop(session_id, None)
     credentials_json = json.dumps(credentials)
     print(f"[STREAM] session_id={session_id} credentials={credentials}")
 
@@ -688,8 +756,10 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                 try:
                     text_data = await websocket.receive_text()
                 except WebSocketDisconnect:
+                    stream_disconnect_event.set()
                     break
                 except Exception:
+                    stream_disconnect_event.set()
                     continue
                 try:
                     msg = _json.loads(text_data)
@@ -732,6 +802,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                         await reply_queue.put({"content": content})
                 # Other message types are ignored for HITL (no queue).
         except Exception:
+            stream_disconnect_event.set()
             pass
 
     reply_listener_task = asyncio.create_task(ws_reply_listener())
@@ -820,6 +891,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
             try:
                 await websocket.send_json({"type": "LOG", "source": log_type, "content": content})
             except Exception:
+                stream_disconnect_event.set()
                 break
 
     log_task = asyncio.create_task(log_consumer())
@@ -842,7 +914,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                             await websocket.send_json({"type": "FRAME", "data": payload['data']})
                             await cur_client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
                         except Exception:
-                            pass
+                            stream_disconnect_event.set()
 
                     async def start_screencast_on(target_page):
                         """Switch screencast + CDP input to a new page."""
@@ -864,13 +936,13 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                         _switch_to_new_page(new_page, start_screencast_on)
                     ))
 
-                    await loop.run_in_executor(None, process.wait)
+                    await _wait_for_process_or_disconnect(process, stream_disconnect_event)
             except NotImplementedError:
                 await websocket.send_json({
                     "type": "STATUS",
                     "content": "Video streaming not available on this platform; continuing with logs only.",
                 })
-                await loop.run_in_executor(None, process.wait)
+                await _wait_for_process_or_disconnect(process, stream_disconnect_event)
             except Exception as exc:
                 print(f"[STREAM] Browser/screencast error: {exc}")
                 try:
@@ -880,12 +952,13 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                     })
                 except Exception:
                     pass
-                await loop.run_in_executor(None, process.wait)
+                await _wait_for_process_or_disconnect(process, stream_disconnect_event)
         else:
             await websocket.send_json({"type": "STATUS", "content": "Browser failed to open."})
 
     finally:
         # 5. Cleanup
+        stream_disconnect_event.set()
         HITL_REPLY_QUEUES.pop(user_id, None)
         HITL_ACCEPTING.pop(user_id, None)
 
@@ -914,12 +987,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
         except Exception:
             pass
 
-        if process.returncode is None:
-            process.terminate()
-            if sys.platform == "win32":
-                await asyncio.to_thread(process.wait)
-            else:
-                await process.wait()
+        await _terminate_process_gracefully(process)
         await PORT_POOL.put(port)
 
 from typing import List
@@ -932,11 +1000,19 @@ class ConnectionManager:
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
+        stale_connections: List[WebSocket] = []
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_text(message)
+            except Exception:
+                stale_connections.append(connection)
+
+        for stale in stale_connections:
+            self.disconnect(stale)
 
 manager = ConnectionManager()
 
@@ -963,8 +1039,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: int):
 
             await manager.broadcast(f"Client #{client_id} says: {data}")
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
         await manager.broadcast(f"Client #{client_id} left the chat")
+    finally:
+        manager.disconnect(websocket)
 
 # todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)
 @app.get('/send_logs')
