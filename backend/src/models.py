@@ -33,7 +33,7 @@ MODELS = {
         api_key_env="GOOGLE_API_KEY"
     ),
     "gemini-pro": ModelConfig(
-        name="gemini-3.1-pro-preview",
+        name="gemini-2.5-pro",
         provider="google",
         api_key_env="GOOGLE_API_KEY"
     ),

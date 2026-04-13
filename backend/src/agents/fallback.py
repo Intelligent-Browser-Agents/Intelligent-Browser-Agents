@@ -35,6 +35,50 @@ class Fallback:
         last_dom_snapshot = (last_dom_snapshot or "").strip()[:6000]
         previous_dom_snapshot = dom_cache[-2] if len(dom_cache) >= 2 else ""
         previous_dom_snapshot = (previous_dom_snapshot or "").strip()[:4000]
+        popup_signal = self._detect_blocking_popup(
+            objective_task=objective_task,
+            user_intent=user_intent,
+            last_dom_snapshot=last_dom_snapshot,
+            previous_dom_snapshot=previous_dom_snapshot,
+            reasoning_log=reasoning_log,
+        )
+
+        if popup_signal.get("is_blocking", False):
+            popup_hint = self._build_popup_recovery_hint(popup_signal)
+            revised_task = self._compose_recovery_task(
+                objective_task=objective_task,
+                proposed_task=popup_hint,
+                update_type="revise_step",
+            )
+            fallback_log = (
+                "[Fallback] Update Type: revise_step\n"
+                "[Fallback] Diagnosis: Blocking popup/modal likely intercepting interactions.\n"
+                "[Fallback] Message to Orchestration: Dismiss the popup first, then continue objective.\n"
+                f"[Fallback] Proposed Step: {revised_task}\n"
+                f"[Fallback] Popup Signal: {popup_signal.get('reason', 'detected by DOM evidence')}"
+            )
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_task": revised_task,
+                "reasoning_log": [fallback_log],
+                "needs_fallback": False,
+            }
+
+        loop_signal = self._detect_repeat_loop(
+            reasoning_log=reasoning_log,
+            last_dom_snapshot=last_dom_snapshot,
+            previous_dom_snapshot=previous_dom_snapshot,
+        )
+
+        loop_analysis_block = (
+            "LOOP_ANALYSIS:\n"
+            f"- repeated_action: {loop_signal.get('action') or 'none'}\n"
+            f"- repeated_signature_count: {loop_signal.get('repeat_count', 0)}\n"
+            f"- dom_unchanged: {loop_signal.get('dom_unchanged', False)}\n"
+            f"- loop_detected: {loop_signal.get('is_loop', False)}\n"
+            "If loop_detected=true, do NOT propose repeating the same action/target again. "
+            "Use DOM evidence to steer to a different concrete tactic."
+        )
 
         last_verification = self._find_latest_log(reasoning_log, "[Verifier]") or "Verification failed."
         last_execution = (
@@ -67,6 +111,8 @@ PREVIOUS_DOM_SNAPSHOT (optional):
 MISSION_STATUS:
 {mission_status}
 
+{loop_analysis_block}
+
 Diagnose the failure and propose a recovery. Use update_type: revise_step with proposed_step for a single revised instruction; use insert_step_before with insert_step to add a prerequisite; use request_context if user input is needed; use abort only if the goal cannot be continued.
 """
 
@@ -91,12 +137,14 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             )
             needs_human = False
             requested_context = []
+            update_type = "revise_step"
         else:
             proposed = (
                 (strategy.proposed_step or "").strip()
                 or (strategy.insert_step or "").strip()
                 or objective_task
             )
+            update_type = strategy.update_type
 
             revised_task = self._compose_recovery_task(
                 objective_task=objective_task,
@@ -139,6 +187,15 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 f"[Fallback] Last Verification: {last_verification[:180]}"
             )
 
+        revised_task, steering_note = self._enforce_directional_recovery(
+            objective_task=objective_task,
+            revised_task=revised_task,
+            update_type=update_type,
+            loop_signal=loop_signal,
+        )
+        if steering_note:
+            fallback_log += f"\n[Fallback] Objective Steering: {steering_note}"
+
         out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_task": revised_task,
@@ -162,6 +219,220 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             if idx >= 0:
                 return text[:idx].strip()
         return text or "Unknown task"
+
+    @staticmethod
+    def _extract_executor_entries(reasoning_log: list) -> list[str]:
+        return [
+            entry for entry in (reasoning_log or [])
+            if isinstance(entry, str) and "[Executor] Action:" in entry
+        ]
+
+    @staticmethod
+    def _parse_executor_action_signature(entry: str) -> tuple[str, str]:
+        text = (entry or "").lower()
+        action_match = re.search(r"\[executor\]\s*action:\s*([^\n]+)", text)
+        args_match = re.search(r"\[executor\]\s*args:\s*([^\n]+)", text)
+        action = action_match.group(1).strip() if action_match else ""
+        args = args_match.group(1).strip() if args_match else ""
+        args = re.sub(r"\s+", " ", args)
+        return action, args
+
+    @staticmethod
+    def _dom_snapshots_unchanged(last_dom_snapshot: str, previous_dom_snapshot: str) -> bool:
+        last_norm = re.sub(r"\s+", " ", (last_dom_snapshot or "").strip().lower())
+        prev_norm = re.sub(r"\s+", " ", (previous_dom_snapshot or "").strip().lower())
+        if not last_norm or not prev_norm:
+            return False
+        if last_norm == prev_norm:
+            return True
+        last_tokens = set(last_norm.split())
+        prev_tokens = set(prev_norm.split())
+        if not last_tokens or not prev_tokens:
+            return False
+        overlap = len(last_tokens & prev_tokens)
+        baseline = max(min(len(last_tokens), len(prev_tokens)), 1)
+        return (overlap / baseline) >= 0.93
+
+    @classmethod
+    def _detect_repeat_loop(
+        cls,
+        reasoning_log: list,
+        last_dom_snapshot: str,
+        previous_dom_snapshot: str,
+    ) -> dict:
+        entries = cls._extract_executor_entries(reasoning_log)
+        recent = entries[-4:]
+        signatures: list[tuple[str, str]] = [
+            cls._parse_executor_action_signature(entry) for entry in recent
+        ]
+        repeat_count = 1
+        anchor = signatures[-1] if signatures else ("", "")
+        for signature in reversed(signatures[:-1]):
+            if signature == anchor and signature != ("", ""):
+                repeat_count += 1
+            else:
+                break
+
+        dom_unchanged = cls._dom_snapshots_unchanged(last_dom_snapshot, previous_dom_snapshot)
+        is_loop = bool(anchor[0]) and (repeat_count >= 3 or (repeat_count >= 2 and dom_unchanged))
+        return {
+            "is_loop": is_loop,
+            "action": anchor[0],
+            "args": anchor[1],
+            "repeat_count": repeat_count,
+            "dom_unchanged": dom_unchanged,
+        }
+
+    @staticmethod
+    def _task_has_recovery_directive(task: str) -> bool:
+        text = (task or "").lower()
+        return "[recovery hint:" in text or "[then continue objective:" in text
+
+    @staticmethod
+    def _looks_like_auth_goal(text: str) -> bool:
+        lowered = (text or "").lower()
+        tokens = (
+            "log in",
+            "login",
+            "sign in",
+            "sign-in",
+            "register",
+            "create account",
+            "authenticate",
+            "2fa",
+            "mfa",
+            "verify identity",
+        )
+        return any(token in lowered for token in tokens)
+
+    @classmethod
+    def _detect_blocking_popup(
+        cls,
+        objective_task: str,
+        user_intent: str,
+        last_dom_snapshot: str,
+        previous_dom_snapshot: str,
+        reasoning_log: list,
+    ) -> dict:
+        text = (last_dom_snapshot or "").lower()
+        if not text:
+            return {"is_blocking": False, "reason": ""}
+
+        # If authentication is the actual objective, auth surfaces are not a popup blocker.
+        if cls._looks_like_auth_goal(objective_task) or cls._looks_like_auth_goal(user_intent):
+            return {"is_blocking": False, "reason": "auth_goal"}
+
+        booking_genius_style = "sign in or register" in text and "save money" in text
+        cookie_wall_style = "cookie" in text and ("accept" in text or "reject" in text or "consent" in text)
+        popup_markers = (
+            "popup",
+            "modal",
+            "dialog",
+            "overlay",
+            "subscribe",
+            "newsletter",
+            "enable notifications",
+            "allow notifications",
+            "limited-time",
+            "special offer",
+        )
+        has_popup_marker = any(marker in text for marker in popup_markers)
+
+        loop_signal = cls._detect_repeat_loop(
+            reasoning_log=reasoning_log,
+            last_dom_snapshot=last_dom_snapshot,
+            previous_dom_snapshot=previous_dom_snapshot,
+        )
+        looping = bool(loop_signal.get("is_loop", False))
+
+        if booking_genius_style:
+            return {
+                "is_blocking": True,
+                "reason": "marketing_auth_modal_detected",
+                "looping": looping,
+            }
+        if cookie_wall_style:
+            return {
+                "is_blocking": True,
+                "reason": "cookie_consent_wall_detected",
+                "looping": looping,
+            }
+        if has_popup_marker and looping:
+            return {
+                "is_blocking": True,
+                "reason": "popup_marker_plus_action_loop",
+                "looping": looping,
+            }
+        return {"is_blocking": False, "reason": ""}
+
+    @staticmethod
+    def _build_popup_recovery_hint(popup_signal: dict) -> str:
+        reason = (popup_signal or {}).get("reason", "")
+        if reason == "cookie_consent_wall_detected":
+            return (
+                "Dismiss the cookie/consent wall first (accept or reject as needed) so the page is interactive again, "
+                "then continue the objective."
+            )
+        return (
+            "Close the blocking popup/modal using Close/X/Not now, then continue the objective on the underlying page."
+        )
+
+    @classmethod
+    def _enforce_directional_recovery(
+        cls,
+        objective_task: str,
+        revised_task: str,
+        update_type: str,
+        loop_signal: dict,
+    ) -> tuple[str, str]:
+        # Keep explicit human/context/abort decisions untouched.
+        if update_type in {"request_human_action", "request_context", "abort"}:
+            return revised_task, ""
+
+        if not loop_signal.get("is_loop", False):
+            return revised_task, ""
+
+        base_unchanged = cls._base_task(revised_task).lower() == cls._base_task(objective_task).lower()
+        has_directive = cls._task_has_recovery_directive(revised_task)
+        if not base_unchanged or has_directive:
+            return revised_task, ""
+
+        hint = cls._build_forced_recovery_hint(loop_signal)
+        forced = cls._compose_recovery_task(
+            objective_task=objective_task,
+            proposed_task=hint,
+            update_type="revise_step",
+        )
+        note = (
+            "Detected repeated executor action with little page-state change; "
+            "forcing a different tactical direction instead of repeating the same step."
+        )
+        return forced, note
+
+    @staticmethod
+    def _build_forced_recovery_hint(loop_signal: dict) -> str:
+        action = (loop_signal.get("action") or "").lower()
+        args = (loop_signal.get("args") or "").lower()
+        if action == "click":
+            return (
+                "Avoid repeating the same click target. Scroll to reveal alternative controls, "
+                "then click a different element that advances this objective."
+            )
+        if action == "press_key" and "key=tab" in args:
+            return (
+                "Stop focus-only Tab cycling. Click the intended editable field directly and enter the required value."
+            )
+        if action == "type":
+            return (
+                "Do not retype in the same lane. Re-locate the correct editable field and type once, then confirm the selection if required."
+            )
+        if action == "search":
+            return (
+                "Use an alternative query or result path from the current page instead of repeating the same search submission."
+            )
+        return (
+            "Avoid repeating the same action sequence. Use current DOM cues to choose an alternative actionable path toward this objective."
+        )
 
     @staticmethod
     def _compose_recovery_task(objective_task: str, proposed_task: str, update_type: str) -> str:
