@@ -10,7 +10,12 @@ from typing import Literal, Optional, Dict, Any
 
 
 class ActionArgs(BaseModel):
-    """Arguments for browser actions."""
+    """Arguments for browser actions (execution dispatch layer).
+
+    Mirrors schema.ExecutionArgs with stricter validation (extra="forbid").
+    schema.ExecutionArgs is the LLM-facing output schema (lenient);
+    this class is used by the internal execution dispatcher.
+    """
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     url: Optional[str] = None

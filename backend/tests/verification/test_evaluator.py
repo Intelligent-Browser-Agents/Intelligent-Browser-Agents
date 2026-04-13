@@ -11,7 +11,6 @@ from backend.verification.evaluator import evaluate
 from backend.verification.models import (
     ERROR_TYPE_CONFIDENCE,
     ERROR_TYPE_FIXES,
-    VerificationResult,
 )
 
 

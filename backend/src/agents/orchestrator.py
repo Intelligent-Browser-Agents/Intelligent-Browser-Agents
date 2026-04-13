@@ -6,7 +6,8 @@ execution outcomes to decide next action (advance / retry / plan_complete).
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from schema import OrchestratorPlan, OrchestratorDecision
+from capabilities import normalize_plan_steps
+from schema import OrchestratorPlan, OrchestratorDecision, infer_step_intent
 from state import ProjectState
 from models import Models
 from prompt_loader import get_orchestration_plan_prompt, get_orchestration_reasoning_prompt
@@ -29,7 +30,7 @@ class Orchestrator:
     def __call__(self, state: ProjectState) -> dict:
         abort_reason = self._get_abort_reason(state)
         if abort_reason:
-            return self._abort_mission(state, abort_reason)
+            return self._merge_orchestrator_out(state, self._abort_mission(state, abort_reason))
 
         user_intent = self._get_user_intent(state)
         current_plan = state.get("current_plan", [])
@@ -43,9 +44,28 @@ class Orchestrator:
         )
 
         if needs_new_plan:
-            return self._create_plan(user_intent, simulated_page, state)
+            return self._merge_orchestrator_out(
+                state, self._create_plan(user_intent, simulated_page, state)
+            )
 
-        return self._make_decision(current_plan, current_step, state)
+        return self._merge_orchestrator_out(
+            state, self._make_decision(current_plan, current_step, state)
+        )
+
+    @staticmethod
+    def _merge_orchestrator_out(_state: ProjectState, result: dict) -> dict:
+        """Attach step_intent and clear recovery_context when task text has no fallback markers."""
+        out = dict(result)
+        if "current_task" in out and out.get("current_task") is not None:
+            out["step_intent"] = infer_step_intent(str(out["current_task"]))
+            task = (out.get("current_task") or "").strip()
+            if (
+                task
+                and "[Recovery Hint:" not in task
+                and "[Then continue objective:" not in task
+            ):
+                out["recovery_context"] = None
+        return out
 
     def _create_plan(self, user_intent: str, page_state: str, state: ProjectState) -> dict:
         # Build a conversation recap so the planner sees any clarification replies
@@ -130,16 +150,19 @@ class Orchestrator:
                 "step_attempts": 0,
             }
 
+        normalized_steps, norm_notes = normalize_plan_steps(list(plan.steps or []))
         reasoning = f"[Planner] Goal: {plan.goal}\n"
-        reasoning += f"[Planner] Created plan with {len(plan.steps)} steps:\n"
-        for index, step in enumerate(plan.steps):
+        reasoning += f"[Planner] Created plan with {len(normalized_steps)} steps:\n"
+        for index, step in enumerate(normalized_steps):
             reasoning += f"  {index + 1}. {step}\n"
+        for note in norm_notes:
+            reasoning += f"[Planner] Capability note: {note}\n"
 
-        first_task = plan.steps[0] if plan.steps else "No steps generated"
+        first_task = normalized_steps[0] if normalized_steps else "No steps generated"
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-            "current_plan": plan.steps,
-            "plan_history": plan.steps,
+            "current_plan": normalized_steps,
+            "plan_history": normalized_steps,
             "current_step_index": 0,
             "plan_status": "MAINTAIN",
             "current_task": first_task,
@@ -270,7 +293,10 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
 
         if step_complete and safe_step >= total_steps - 1:
             original_step = current_plan[safe_step]
-            completed_fallback_prereq = self._is_explicit_prerequisite_variant(current_task, original_step)
+            rc = state.get("recovery_context")
+            completed_fallback_prereq = self._is_explicit_prerequisite_variant(
+                current_task, original_step, rc if isinstance(rc, dict) else None
+            )
             if completed_fallback_prereq:
                 reasoning = (
                     f"[Decision] Fallback prerequisite completed; "
@@ -322,7 +348,10 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             }
         if step_complete and safe_step < total_steps - 1:
             original_step = current_plan[safe_step]
-            if self._is_explicit_prerequisite_variant(current_task, original_step):
+            rc2 = state.get("recovery_context")
+            if self._is_explicit_prerequisite_variant(
+                current_task, original_step, rc2 if isinstance(rc2, dict) else None
+            ):
                 reasoning = (
                     f"[Decision] Fallback prerequisite completed; "
                     f"retrying original step {safe_step + 1}/{total_steps}."
@@ -510,12 +539,20 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
         return cls._has_reportable_content(state)
 
     @staticmethod
-    def _is_explicit_prerequisite_variant(current_task: str, original_step: str) -> bool:
+    def _is_explicit_prerequisite_variant(
+        current_task: str,
+        original_step: str,
+        recovery_context: dict | None = None,
+    ) -> bool:
         task = (current_task or "").strip()
         original = (original_step or "").strip()
         if task == original:
             return False
-        # Only treat as prerequisite when fallback explicitly marked it.
+        rc = recovery_context if isinstance(recovery_context, dict) else {}
+        co = (rc.get("continuation_objective") or "").strip()
+        if co and original and co.casefold() == original.casefold():
+            return True
+        # DEPRECATED: only when fallback used bracket marker in current_task
         return "[Then continue objective:" in task
 
     @staticmethod

@@ -132,6 +132,9 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
         "user_credentials": credentials or {},
         "mission_status": "",
         "status_signals": {},
+        "last_execution_event": None,
+        "step_intent": None,
+        "recovery_context": None,
     }
 
     print("INTELLIGENT BROWSER AGENT - SIMULATION", flush=True)

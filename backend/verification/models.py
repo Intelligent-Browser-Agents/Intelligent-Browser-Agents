@@ -13,13 +13,16 @@ from typing import Optional, Dict, Any, Literal
 from backend.execution.models import ExecutionOutput
 
 
-class VerificationResult(BaseModel):
+class EvaluationResult(BaseModel):
     """
-    Output from the verification system to orchestration.
-    
+    Output from the rule-based verification evaluator to orchestration.
+
     Orchestration uses these fields to decide:
-    - confidence_score > 0.9 → success, continue to next step
-    - confidence_score <= 0.9 → failure, pass problem/fix to Fallback
+    - confidence_score > 0.9 -> success, continue to next step
+    - confidence_score <= 0.9 -> failure, pass problem/fix to Fallback
+
+    Not to be confused with schema.VerificationResult which is the
+    LLM-based verifier's output used inside the LangGraph workflow.
     """
 
     confidence_score: float = Field(

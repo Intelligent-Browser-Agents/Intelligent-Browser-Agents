@@ -100,3 +100,8 @@ class ProjectState(TypedDict):
     # Mission status — living document accessible to all agents
     mission_status: Optional[str]          # Rendered markdown status page
     status_signals: Optional[Dict]         # Accumulated structured signals (HITL events, milestones, login phase, etc.)
+
+    # Structured control-plane fields (prefer these over parsing reasoning_log / task markers)
+    last_execution_event: Optional[Dict]   # Last executor action/args/status (see schema.LastExecutionEvent)
+    step_intent: Optional[str]             # schema.StepIntent value for current_task
+    recovery_context: Optional[Dict]       # base_task, recovery_hint, continuation_objective when fallback applies

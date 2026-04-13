@@ -6,6 +6,10 @@ from fastapi.testclient import TestClient
 import server
 
 
+def _hash_pw(plain: str) -> str:
+    return server.hash_password_bcrypt(plain)
+
+
 class MockCursor:
     def __init__(self, fetchone_results=None):
         # fetchone_results is a list of values to return for successive fetchone() calls
@@ -24,25 +28,12 @@ class MockCursor:
 
 @pytest.fixture(autouse=True)
 def env_and_db_monkeypatch(monkeypatch):
-    # Set environment variables used by server
-    monkeypatch.setenv('BCRYPT_SALT', '$2b$12$abcdefghijklmnopqrstuv')
     monkeypatch.setenv('TOKEN_SECRET', 'testsecret')
     monkeypatch.setenv('EMAIL_ACCOUNT', 'from@example.com')
     monkeypatch.setenv('EMAIL_PASSWORD', 'password')
 
-    # Patch bcrypt.hashpw to return a stable value for tests
-    import bcrypt as _bcrypt
-
-    def fake_hashpw(password, salt):
-        return b'hashed-' + password
-
-    # Replace bcrypt.hashpw used inside server module
-    monkeypatch.setattr(server.bcrypt, 'hashpw', fake_hashpw)
-
-    # Patch send_forgot_password so no email is sent during tests
     monkeypatch.setattr(server, 'send_forgot_password', lambda to_email, pw: None)
 
-    # Ensure server.cur is replaced per-test by individual tests when needed
     yield
 
 
@@ -131,8 +122,7 @@ def test_insert_user_existing(monkeypatch):
 
 
 def test_login_user_success(monkeypatch):
-    # login hashes password then SELECT should return a user row
-    user_row = (1, 'user1', 'First', 'Last', 'email', 'pw', False, False, False)
+    user_row = (1, 'user1', 'First', 'Last', _hash_pw('pass123'), False)
     mock_cur = MockCursor(fetchone_results=[user_row])
     monkeypatch.setattr(server, 'cur', mock_cur)
     client = TestClient(server.app)

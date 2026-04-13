@@ -2,7 +2,7 @@
 Verification Evaluator for Browser Automation.
 
 This module provides the main evaluation function that takes an ExecutionOutput
-and returns a VerificationResult with confidence_score, problem, and fix.
+and returns an EvaluationResult with confidence_score, problem, and fix.
 
 The evaluator uses rule-based logic to map execution status and error types
 to confidence scores and suggested fixes. It can be extended with LLM-based
@@ -13,7 +13,7 @@ from typing import Optional, Union, Dict, Any
 
 from backend.execution.models import ExecutionOutput
 from .models import (
-    VerificationResult,
+    EvaluationResult,
     ERROR_TYPE_CONFIDENCE,
     ERROR_TYPE_FIXES,
 )
@@ -23,7 +23,7 @@ def evaluate(
     execution_output: Union[ExecutionOutput, Dict[str, Any]],
     main_goal: str,
     plan_step: Optional[str] = None
-) -> VerificationResult:
+) -> EvaluationResult:
     """
     Evaluate an execution result and return confidence, problem, and fix.
     
@@ -37,7 +37,7 @@ def evaluate(
         plan_step: The specific plan step that was executed (optional, for context)
     
     Returns:
-        VerificationResult with:
+        EvaluationResult with:
         - confidence_score: float (0.0-1.0), >0.9 means success
         - problem: str describing what went wrong (empty if success)
         - fix: str with suggested fix (empty if success)
@@ -115,7 +115,7 @@ def evaluate(
     if 0.4 <= confidence_score <= 0.7:
         uncertainty = _build_uncertainty_message(action, error_type, message)
     
-    return VerificationResult(
+    return EvaluationResult(
         confidence_score=confidence_score,
         problem=problem,
         fix=fix,

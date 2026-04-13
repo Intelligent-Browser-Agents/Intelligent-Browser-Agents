@@ -14,7 +14,7 @@ from execution import Action, dispatch_action, ActionArgs
 from execution.langchain_tools import get_browser_tools
 from execution.models import ExecutionOutput
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from schema import ExecutionResult
+from schema import ExecutionResult, LastExecutionEvent
 from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt, get_execution_tools_prompt
@@ -33,6 +33,35 @@ class Executor:
         self.system_prompt_json = get_execution_prompt()
         self.system_prompt_tools = get_execution_tools_prompt()
         self.runtime = runtime
+
+    @staticmethod
+    def _last_execution_event_dict(
+        *,
+        action: str,
+        args,
+        status: str,
+        message: str,
+        error_type: str | None,
+        extracted_content_present: bool = False,
+    ) -> dict:
+        """Single source of truth for schema.LastExecutionEvent in state."""
+        args_dict: dict = {}
+        if isinstance(args, dict):
+            args_dict = {str(k): v for k, v in args.items() if v is not None}
+        elif args is not None and hasattr(args, "model_dump"):
+            args_dict = {
+                str(k): v
+                for k, v in args.model_dump(exclude_none=True).items()
+                if v is not None
+            }
+        return LastExecutionEvent(
+            action=action or "",
+            args=args_dict,
+            status=status or "unknown",
+            error_type=error_type,
+            message=message or "",
+            extracted_content_present=extracted_content_present,
+        ).model_dump()
 
     _SENSITIVE_TARGET_TOKENS = (
         "buy",
@@ -137,8 +166,11 @@ class Executor:
         llm_with_tools = self.llm_chat.bind_tools(tools)
         tool_map = {t.name: t for t in tools}
 
-        ctx_chars = sum(len(m.content) for m in tool_messages)
-        print(f"[executor] Calling LLM for tool selection... (context ~{ctx_chars} chars)", flush=True)
+        ctx_tokens = self.llm_chat.get_num_tokens_from_messages(tool_messages)
+        print(
+            f"[executor] Calling LLM for tool selection... (~{ctx_tokens} tokens, LangChain)",
+            flush=True,
+        )
         try:
             response = await asyncio.wait_for(
                 llm_with_tools.ainvoke(tool_messages),
@@ -307,6 +339,13 @@ class Executor:
                         error_type=validated.error_type,
                     )],
                     "current_url": current_url,
+                    "last_execution_event": self._last_execution_event_dict(
+                        action=validated.action,
+                        args=self._action_args_to_dict(validated.args),
+                        status=validated.status,
+                        message=validated.message,
+                        error_type=validated.error_type,
+                    ),
                 }
             tool_action = Action(
                 action=validated.action,
@@ -352,7 +391,11 @@ class Executor:
                 consume_sensitive_approval = True
 
             result = await dispatch_action(page, tool_action)
-            print(f"[executor - {result.action} result]: ", result)
+            print(
+                f"[executor - {result.action} result]: ",
+                Executor._execution_output_for_log(result),
+                flush=True,
+            )
             return await self._finish_from_result(
                 state,
                 page,
@@ -360,6 +403,21 @@ class Executor:
                 result,
                 clear_sensitive_approval=consume_sensitive_approval,
             )
+
+    @staticmethod
+    def _execution_output_for_log(result: ExecutionOutput) -> dict[str, Any]:
+        """Strip/redact values that must not appear in logs (typed secrets, extracted page text)."""
+        payload = result.model_dump()
+        args = dict(payload.get("args") or {})
+        for key in ("text", "query"):
+            val = args.get(key)
+            if isinstance(val, str) and val:
+                args[key] = f"<redacted len={len(val)}>"
+        payload["args"] = args
+        et = payload.get("extracted_text")
+        if isinstance(et, str) and et:
+            payload["extracted_text"] = f"<redacted len={len(et)}>"
+        return payload
 
     def _return_failure(
         self,
@@ -378,6 +436,13 @@ class Executor:
                 status="failure", message=message, error_type=error_type,
             )],
             "current_url": current_url,
+            "last_execution_event": Executor._last_execution_event_dict(
+                action=str(action or ""),
+                args=args if isinstance(args, dict) else {},
+                status="failure",
+                message=message,
+                error_type=error_type,
+            ),
         }
         if clear_sensitive_approval:
             out["sensitive_action_approval"] = None
@@ -412,6 +477,13 @@ class Executor:
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "reasoning_log": [blocked_log],
             "current_url": current_url,
+            "last_execution_event": self._last_execution_event_dict(
+                action=str(action or ""),
+                args=args if isinstance(args, dict) else {},
+                status="failure",
+                message="Sensitive action requires explicit user confirmation before execution.",
+                error_type="tool_limit",
+            ),
             "handoff_interaction": True,
             "pending_sensitive_action": {
                 "action": action,
@@ -1071,12 +1143,22 @@ class Executor:
             error_type=result_error_type,
             after_state=after_state,
         )
+        extracted_present = bool(
+            extracted and isinstance(extracted, str) and extracted.strip()
+        ) and result.action == "extract_content"
         out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "reasoning_log": [execution_log],
             "current_url": new_url,
+            "last_execution_event": self._last_execution_event_dict(
+                action=result.action,
+                args=result.args,
+                status=result_status,
+                message=result_message,
+                error_type=result_error_type,
+                extracted_content_present=extracted_present,
+            ),
         }
-        extracted = getattr(result, "extracted_text", None)
         if extracted and isinstance(extracted, str) and extracted.strip():
             out["extracted_content"] = [extracted.strip()]
         # Also keep a lightweight DOM/text snapshot in dom_cache for later navigation tools
@@ -1439,7 +1521,6 @@ class Executor:
         """Inject relevant credentials when the step involves login or form-filling."""
         creds = state.get("user_credentials") or {}
         if not creds:
-            print("[executor] No user_credentials in state", flush=True)
             return ""
 
         is_login_step = bool(self._LOGIN_KEYWORDS.search(current_task))
@@ -1448,13 +1529,11 @@ class Executor:
         if not is_login_step and not is_form_step:
             return ""
 
-        print(f"[executor] Credential injection: login={is_login_step} form={is_form_step}", flush=True)
         parts = []
 
         if is_login_step:
             match = self._find_matching_service(creds, current_task, current_url)
             if match:
-                print(f"[executor] Matched service: {match.get('serviceName', '?')}", flush=True)
                 username = match.get('username', '')
                 password = match.get('password', '')
                 parts.append(
@@ -1470,8 +1549,6 @@ class Executor:
                     f"  - If only ONE input field is visible (e.g. Microsoft login), fill it first, then click Next; "
                     f"the system will re-invoke you for the next field on the new page."
                 )
-            else:
-                print(f"[executor] No matching service found for task='{current_task[:60]}' url='{current_url[:60]}'", flush=True)
 
         if is_form_step:
             personal = []

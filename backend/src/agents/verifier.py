@@ -8,7 +8,7 @@ import re
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from state import ProjectState
-from schema import VerificationResult
+from schema import VerificationResult, last_execution_event_to_executor_log
 from models import Models
 from prompt_loader import get_verification_prompt
 
@@ -80,7 +80,12 @@ class Verifier:
         is_last_step = step_count > 0 and current_step >= step_count - 1
 
         reasoning_log = state.get("reasoning_log", [])
-        last_execution = reasoning_log[-1] if reasoning_log else "No execution log."
+        event = state.get("last_execution_event")
+        if isinstance(event, dict) and (event.get("action") or "").strip():
+            last_execution = last_execution_event_to_executor_log(event)
+        else:
+            # DEPRECATED: fall back to raw reasoning_log tail
+            last_execution = reasoning_log[-1] if reasoning_log else "No execution log."
         user_intent = self._get_user_intent(state)
 
         last_exec_lower = (last_execution or "").lower()
@@ -88,6 +93,12 @@ class Verifier:
             entry for entry in (reasoning_log or [])
             if isinstance(entry, str) and entry.startswith("[Executor]")
         ]
+        if isinstance(event, dict) and (event.get("action") or "").strip():
+            syn = last_execution_event_to_executor_log(event)
+            if recent_executor_logs:
+                recent_executor_logs = recent_executor_logs[:-1] + [syn]
+            else:
+                recent_executor_logs = [syn]
         recent_executor_history = "\n\n".join(recent_executor_logs[-2:]) if recent_executor_logs else ""
         recent_executor_history = self._clip_text(recent_executor_history, 6000)
 
@@ -252,6 +263,8 @@ class Verifier:
             recipient_done = bool(compose_fields.get("recipient", False))
             body_pending = not bool(compose_fields.get("body", False))
             action_name, args_line = self._extract_executor_action_and_args(last_exec_lower)
+            if isinstance(event, dict) and (event.get("action") or "").strip():
+                action_name, args_line = self._extract_executor_action_and_args_from_event(event)
             if requires_content and recipient_done and body_pending and self._compose_action_targets_recipient_lane(action_name, args_line):
                 verification_log = (
                     "[Verifier] Verdict: failure\n"
@@ -789,7 +802,12 @@ If this is the last step of the plan and the step is complete, set goal_complete
         }
 
     @staticmethod
-    def _normalize_task_signature(task: str) -> str:
+    def _normalize_task_signature(task: str, recovery_context: dict | None = None) -> str:
+        rc = recovery_context if isinstance(recovery_context, dict) else {}
+        base = (rc.get("base_task") or "").strip()
+        if base:
+            return base.lower()
+        # DEPRECATED: strip markers from current_task
         text = (task or "").strip()
         if not text:
             return ""
@@ -802,7 +820,10 @@ If this is the last step of the plan and the step is complete, set goal_complete
         progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
         if not progress:
             return False, 0, 0
-        task_sig = self._normalize_task_signature(current_task)
+        rc = state.get("recovery_context")
+        task_sig = self._normalize_task_signature(
+            current_task, rc if isinstance(rc, dict) else None
+        )
         if not task_sig or progress.get("task_signature") != task_sig:
             return False, 0, 0
         required = int(progress.get("required_count") or 0)
@@ -838,6 +859,20 @@ If this is the last step of the plan and the step is complete, set goal_complete
         action_name = action_match.group(1).strip().lower() if action_match else ""
         args_line = args_match.group(1).strip().lower() if args_match else ""
         return action_name, args_line
+
+    @staticmethod
+    def _extract_executor_action_and_args_from_event(event: dict) -> tuple[str, str]:
+        """Prefer structured last_execution_event over regex on log text."""
+        if not isinstance(event, dict):
+            return "", ""
+        action_name = (event.get("action") or "").strip().lower()
+        raw_args = event.get("args")
+        args = raw_args if isinstance(raw_args, dict) else {}
+        parts: list[str] = []
+        for k, v in sorted(args.items()):
+            if v is not None and str(v).strip() != "":
+                parts.append(f"{str(k).lower()}={str(v).lower()}")
+        return action_name, " ".join(parts)
 
     @staticmethod
     def _compose_action_targets_recipient_lane(action_name: str, args_line: str) -> bool:

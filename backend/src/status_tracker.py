@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
+from schema import last_execution_event_to_executor_log
+
 _LOGIN_KEYWORDS = (
     "log in", "login", "sign in", "sign-in", "authenticate",
     "credential", "password", "username",
@@ -276,7 +278,12 @@ def _update_orchestrator(signals: dict, state: dict, result: dict) -> None:
 
     # Start/reset generic field progress when the step objective changes.
     current_task = (result.get("current_task") or state.get("current_task") or "").strip()
-    task_signature = _normalize_task_signature(current_task)
+    rc = result.get("recovery_context")
+    if not isinstance(rc, dict):
+        rc = state.get("recovery_context")
+    task_signature = _normalize_task_signature(
+        current_task, rc if isinstance(rc, dict) else None
+    )
     existing = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else {}
     if _is_field_tracking_task(task_signature):
         required_count = _infer_required_field_count(task_signature)
@@ -297,7 +304,12 @@ def _update_orchestrator(signals: dict, state: dict, result: dict) -> None:
 
 def _update_executor(signals: dict, state: dict, result: dict) -> None:
     log_entries = result.get("reasoning_log") or []
-    last_entry = log_entries[-1] if log_entries else ""
+    event = result.get("last_execution_event")
+    if isinstance(event, dict) and (event.get("action") or "").strip():
+        last_entry = last_execution_event_to_executor_log(event)
+    else:
+        # DEPRECATED: parse last reasoning_log line; remove once all executor paths emit last_execution_event
+        last_entry = log_entries[-1] if log_entries else ""
 
     action_type = _extract(last_entry, r"\[Executor\] Action:\s*(\S+)")
     action_status = _extract(last_entry, r"\[Executor\] Status:\s*(\S+)")
@@ -380,7 +392,11 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
 
             # Generic field-progress tracking for any multi-field step.
             field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
-            task_signature = _normalize_task_signature((state.get("current_task") or "").strip())
+            _rc = state.get("recovery_context")
+            task_signature = _normalize_task_signature(
+                (state.get("current_task") or "").strip(),
+                _rc if isinstance(_rc, dict) else None,
+            )
             if field_progress and field_progress.get("task_signature") == task_signature:
                 completed = list(field_progress.get("completed_fields") or [])
                 field_id = _extract_field_identifier(last_entry or "")
@@ -507,7 +523,12 @@ def _extract(text: str, pattern: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
-def _normalize_task_signature(task: str) -> str:
+def _normalize_task_signature(task: str, recovery_context: dict | None = None) -> str:
+    rc = recovery_context if isinstance(recovery_context, dict) else {}
+    base = (rc.get("base_task") or "").strip()
+    if base:
+        return base.lower()
+    # DEPRECATED: strip recovery markers from current_task text
     text = (task or "").strip()
     if not text:
         return ""

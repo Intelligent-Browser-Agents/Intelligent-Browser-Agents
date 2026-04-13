@@ -8,7 +8,7 @@ import re
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from state import ProjectState
-from schema import FallbackStrategy
+from schema import FallbackStrategy, infer_step_intent
 from models import Models
 from prompt_loader import get_fallback_prompt
 
@@ -25,7 +25,10 @@ class Fallback:
 
     def __call__(self, state: ProjectState) -> dict:
         current_task = state.get("current_task", "Unknown task")
-        objective_task = self._base_task(current_task)
+        rc_in = state.get("recovery_context")
+        objective_task = self._base_task(
+            current_task, rc_in if isinstance(rc_in, dict) else None
+        )
         reasoning_log = state.get("reasoning_log", [])
         user_intent = self._get_user_intent(state)
         current_url = state.get("current_url", "")
@@ -50,6 +53,9 @@ class Fallback:
                 proposed_task=popup_hint,
                 update_type="revise_step",
             )
+            popup_rc = self._build_recovery_context(
+                objective_task, popup_hint, "revise_step"
+            )
             fallback_log = (
                 "[Fallback] Update Type: revise_step\n"
                 "[Fallback] Diagnosis: Blocking popup/modal likely intercepting interactions.\n"
@@ -62,6 +68,8 @@ class Fallback:
                 "current_task": revised_task,
                 "reasoning_log": [fallback_log],
                 "needs_fallback": False,
+                "recovery_context": popup_rc,
+                "step_intent": infer_step_intent(revised_task),
             }
 
         loop_signal = self._detect_repeat_loop(
@@ -128,6 +136,7 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             err = e
             strategy = None
 
+        proposed_for_context = ""
         if strategy is None:
             revised_task = objective_task
             fallback_log = (
@@ -144,6 +153,7 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 or (strategy.insert_step or "").strip()
                 or objective_task
             )
+            proposed_for_context = proposed
             update_type = strategy.update_type
 
             revised_task = self._compose_recovery_task(
@@ -177,6 +187,8 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                     "mission_failed": True,
                     "abort_reason": reason,
                     "current_task": objective_task,
+                    "recovery_context": None,
+                    "step_intent": infer_step_intent(objective_task),
                 }
 
             fallback_log = (
@@ -195,12 +207,22 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         )
         if steering_note:
             fallback_log += f"\n[Fallback] Objective Steering: {steering_note}"
+            proposed_for_context = self._build_forced_recovery_hint(loop_signal)
+            update_type_for_rc = "revise_step"
+        else:
+            update_type_for_rc = update_type
+
+        recovery_context = self._build_recovery_context(
+            objective_task, proposed_for_context, update_type_for_rc
+        )
 
         out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_task": revised_task,
             "reasoning_log": [fallback_log],
             "needs_fallback": False,
+            "recovery_context": recovery_context,
+            "step_intent": infer_step_intent(revised_task),
         }
         if needs_human:
             out["handoff_interaction"] = True
@@ -212,7 +234,12 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         return out
 
     @staticmethod
-    def _base_task(task: str) -> str:
+    def _base_task(task: str, recovery_context: dict | None = None) -> str:
+        rc = recovery_context if isinstance(recovery_context, dict) else {}
+        base = (rc.get("base_task") or "").strip()
+        if base:
+            return base
+        # DEPRECATED: parse bracket markers in current_task
         text = (task or "").strip()
         for marker in (" [Recovery Hint:", " [Then continue objective:"):
             idx = text.find(marker)
@@ -284,7 +311,11 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         }
 
     @staticmethod
-    def _task_has_recovery_directive(task: str) -> bool:
+    def _task_has_recovery_directive(task: str, recovery_context: dict | None = None) -> bool:
+        rc = recovery_context if isinstance(recovery_context, dict) else {}
+        if (rc.get("recovery_hint") or "").strip():
+            return True
+        # DEPRECATED: substring markers in task text
         text = (task or "").lower()
         return "[recovery hint:" in text or "[then continue objective:" in text
 
@@ -393,7 +424,7 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             return revised_task, ""
 
         base_unchanged = cls._base_task(revised_task).lower() == cls._base_task(objective_task).lower()
-        has_directive = cls._task_has_recovery_directive(revised_task)
+        has_directive = cls._task_has_recovery_directive(revised_task, None)
         if not base_unchanged or has_directive:
             return revised_task, ""
 
@@ -452,6 +483,41 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         if update_type in {"request_context", "request_human_action"}:
             return f"{obj} [Recovery Hint: {hint}]"
         return obj
+
+    @staticmethod
+    def _build_recovery_context(
+        objective_task: str, proposed_task: str, update_type: str
+    ) -> dict | None:
+        """Structured recovery metadata (dual-write alongside bracket markers in current_task)."""
+        obj = (objective_task or "Unknown task").strip()
+        hint = (proposed_task or "").strip()
+        if not hint or hint.lower() == obj.lower():
+            return None
+        if update_type == "insert_step_before":
+            return {
+                "base_task": obj,
+                "recovery_hint": hint,
+                "continuation_objective": obj,
+            }
+        if update_type == "revise_step":
+            if Fallback._looks_like_prerequisite_realign(hint, obj):
+                return {
+                    "base_task": obj,
+                    "recovery_hint": hint,
+                    "continuation_objective": obj,
+                }
+            return {
+                "base_task": obj,
+                "recovery_hint": hint,
+                "continuation_objective": None,
+            }
+        if update_type in {"request_context", "request_human_action"}:
+            return {
+                "base_task": obj,
+                "recovery_hint": hint,
+                "continuation_objective": None,
+            }
+        return None
 
     @staticmethod
     def _looks_like_prerequisite_realign(hint: str, objective: str) -> bool:

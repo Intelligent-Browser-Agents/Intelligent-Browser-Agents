@@ -4,8 +4,11 @@ These Pydantic models define the structured output format for each agent,
 aligned with the prompts in the prompts/ directory.
 """
 
+from __future__ import annotations
+
+from enum import Enum
 from pydantic import BaseModel, Field, AliasChoices, model_validator
-from typing import List, Optional, Literal
+from typing import Any, List, Optional, Literal, Union
 from urllib.parse import urlparse
 
 # =============================================================================
@@ -127,6 +130,120 @@ class ExecutionResult(BaseModel):
         return self
 
 
+class LastExecutionEvent(BaseModel):
+    """Structured record of the last executor action (control plane; avoid parsing reasoning_log)."""
+
+    action: str = ""
+    args: dict = Field(default_factory=dict)
+    status: str = "unknown"
+    error_type: Optional[str] = None
+    message: str = ""
+    extracted_content_present: bool = False
+
+
+class StepIntent(str, Enum):
+    """High-level intent for the current plan step (derived once per step)."""
+
+    retrieve_info = "retrieve_info"
+    navigate = "navigate"
+    authenticate = "authenticate"
+    compose = "compose"
+    interact = "interact"
+    finalize = "finalize"
+
+
+def infer_step_intent(task: str) -> str:
+    """Classify plan step text into a StepIntent value (best-effort heuristic)."""
+    text = (task or "").lower()
+    if any(
+        k in text
+        for k in (
+            "login",
+            "log in",
+            "sign in",
+            "sign-in",
+            "authenticate",
+            "mfa",
+            "2fa",
+            "password",
+            "otp",
+            "two-factor",
+        )
+    ):
+        return StepIntent.authenticate.value
+    if any(
+        k in text
+        for k in (
+            "compose",
+            "draft",
+            "new email",
+            "write email",
+            "email message",
+            "mail message",
+        )
+    ) or ("email" in text and "draft" in text):
+        return StepIntent.compose.value
+    if any(k in text for k in ("navigate", "go to ", "open ", "visit ", "go to the", "open the")):
+        return StepIntent.navigate.value
+    if any(
+        k in text
+        for k in (
+            "submit",
+            "finalize",
+            "confirm",
+            "complete checkout",
+            "place order",
+            "send the email",
+            "send email",
+        )
+    ):
+        return StepIntent.finalize.value
+    if any(k in text for k in ("click", "select ", "choose ", "press ", "check the box")):
+        return StepIntent.interact.value
+    if any(
+        k in text
+        for k in (
+            "extract",
+            "read ",
+            "find ",
+            "look up",
+            "gather",
+            "collect",
+            "search for",
+            "get the",
+        )
+    ):
+        return StepIntent.retrieve_info.value
+    return StepIntent.retrieve_info.value
+
+
+def last_execution_event_to_executor_log(event: Union[dict[str, Any], LastExecutionEvent]) -> str:
+    """Build multiline executor log text matching legacy format (for deprecated log-based parsers)."""
+    if isinstance(event, LastExecutionEvent):
+        d = event.model_dump()
+    else:
+        d = dict(event or {})
+    action = (d.get("action") or "unknown").strip()
+    raw_args = d.get("args")
+    args: dict[str, Any] = raw_args if isinstance(raw_args, dict) else {}
+    parts: list[str] = []
+    for k, v in sorted(args.items()):
+        if v is not None and str(v).strip() != "":
+            parts.append(f"{k}={v}")
+    args_str = ", ".join(parts)
+    status = (d.get("status") or "unknown").strip()
+    msg = (d.get("message") or "").strip()
+    err = d.get("error_type")
+    err_s = "none" if err is None else str(err).strip()
+    return (
+        f"[Executor] Action: {action}\n"
+        f"[Executor] Args: {args_str}\n"
+        f"[Executor] Status: {status}\n"
+        f"[Executor] Message: {msg}\n"
+        f"[Executor] Error Type: {err_s}"
+    )
+
+
 # =============================================================================
 # VERIFICATION LAYER
 # Aligned with: prompts/verification.prompt.md
@@ -225,53 +342,22 @@ class InteractionResponse(BaseModel):
 
 
 # =============================================================================
-# LEGACY SCHEMAS (kept for backwards compatibility)
+# INTERACTION SUPPORT
 # =============================================================================
-
-class OrchestratorDecision(BaseModel):
-    """
-    Legacy schema for orchestrator decision-making.
-    Used for step-by-step plan execution tracking.
-    """
-    chain_of_thought: str = Field(
-        description="Analysis of current progress, what just happened, and what should happen next."
-    )
-    plan_status: Literal["MAINTAIN", "UPDATE", "CREATE"] = Field(
-        description="MAINTAIN: continue with current plan. UPDATE: modify the plan. CREATE: make a new plan."
-    )
-    current_step_index: int = Field(
-        description="The index (0-based) of the step we're currently on or about to execute."
-    )
-    next_task_for_executor: str = Field(
-        description="The specific instruction for the Executor."
-    )
-    is_mission_complete: bool = Field(
-        description="True only if ALL planned steps are done and the user's goal is achieved."
-    )
-
 
 class HumanInterrupt(BaseModel):
     """Schema for when the agent needs to pause and ask the user for help."""
     interrupt_type: Literal[
-        "AUTH_BLOCK", 
-        "CLARIFY_INTENT", 
-        "TECHNICAL_RECOVERY", 
-        "SAFETY_CHECK", 
+        "AUTH_BLOCK",
+        "CLARIFY_INTENT",
+        "TECHNICAL_RECOVERY",
+        "SAFETY_CHECK",
         "STATUS_SYNC"
     ] = Field(description="The category of the interruption.")
-    
+
     internal_reasoning: str = Field(description="CoT: Why are we stopping?")
     user_facing_question: str = Field(description="The elevated prose to show the user.")
     suggested_options: Optional[List[str]] = Field(
         default=None,
         description="Pre-defined buttons for the user to click."
     )
-
-
-# =============================================================================
-# LEGACY ALIASES (for backwards compatibility)
-# =============================================================================
-
-# These aliases allow existing code to work while transitioning to new schemas
-BrowserAction = ExecutionResult  # Old name -> New name
-UserResponse = InteractionResponse  # Old name -> New name

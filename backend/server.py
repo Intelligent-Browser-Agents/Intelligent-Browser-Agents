@@ -18,7 +18,7 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 
-# For password hashing
+# Password hashing (import once at load time; native bcrypt + reload/re-import can misbehave)
 import bcrypt
 
 # Emailing
@@ -50,6 +50,7 @@ if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception as e:
         print(f"Warning: could not set Windows Proactor event loop policy: {e}")
+
 """
 To-DO List:
 -Create Verify Email endpoint, using app.get and token sent as query param
@@ -72,7 +73,8 @@ async def lifespan(app: FastAPI):
     # read connection parameters, for security setup a config file for db params
     #params = config()
     print('Loading environment variables...')
-    load_dotenv()
+    # Do not expand $... inside values (default dotenv treats $ as variable refs).
+    load_dotenv(interpolate=False)
     
     print("Getting Database Config File")
     try:
@@ -138,6 +140,52 @@ def user_exists_id(userId: int) -> bool:
     cur.execute(query, (str(userId),))
     results = cur.fetchone()
     return results is not None
+
+
+def hash_password_bcrypt(plain_password: str) -> str:
+    """Hash a password for DB storage using a fresh salt (standard bcrypt usage)."""
+    try:
+        rounds = int(os.getenv("BCRYPT_ROUNDS", "12"))
+    except ValueError:
+        rounds = 12
+    rounds = max(4, min(31, rounds))
+    salt = bcrypt.gensalt(rounds=rounds)
+    salt_b = salt.encode("utf-8") if isinstance(salt, str) else salt
+    pw_b = (
+        plain_password.encode("utf-8")
+        if isinstance(plain_password, str)
+        else plain_password
+    )
+    out = bcrypt.hashpw(pw_b, salt_b)
+    return out.decode("utf-8") if isinstance(out, bytes) else out
+
+
+def verify_password(plain_password: str, stored_hash: str | None) -> bool:
+    """True if ``plain_password`` matches ``stored_hash`` (bcrypt hash from DB).
+
+    Uses ``hashpw`` + constant-time compare only (no ``checkpw``). Some environments
+    ship a conflicting ``bcrypt`` module without ``checkpw``; ``hashpw`` with the
+    stored hash as the salt is standard and works across those builds.
+    """
+    if not plain_password or not stored_hash:
+        return False
+    try:
+        pw = (
+            plain_password.encode("utf-8")
+            if isinstance(plain_password, str)
+            else plain_password
+        )
+        sh = (
+            stored_hash.encode("utf-8")
+            if isinstance(stored_hash, str)
+            else stored_hash
+        )
+        out = bcrypt.hashpw(pw, sh)
+        out_b = out if isinstance(out, bytes) else out.encode("utf-8")
+        return secrets.compare_digest(out_b, sh)
+    except (ValueError, TypeError):
+        return False
+
 
 def send_forgot_password(to_email: str, new_password: str) -> None:
     from_email = os.getenv('EMAIL_ACCOUNT')
@@ -233,8 +281,7 @@ async def insert_user(request: Request):
     
     # Inserting the new user
     query = 'INSERT INTO users (username, firstname, lastname, email, isverified, chng_pass, password) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING user_id;'
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
-    hashed_password = hashed_password.decode('utf-8')
+    hashed_password = hash_password_bcrypt(password)
     cur.execute(query, (username, firstname, lastname, email, False, False, hashed_password))
     newUserId = cur.fetchone()[0]
     return {'userId': newUserId, 'error': error}
@@ -328,8 +375,7 @@ async def update_user(request: Request):
         cur.execute(query, (email, str(userId)))
     if password is not None:
         query = 'UPDATE users SET password = %s, chng_pass = false WHERE user_id = %s;'
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
-        hashed_password = hashed_password.decode('utf-8')
+        hashed_password = hash_password_bcrypt(password)
         cur.execute(query, (hashed_password, str(userId)))
         pass_updated = True
     
@@ -367,16 +413,20 @@ async def login_user(request: Request):
     if username == '' or password == '':
         error = 'Username or Password is Missing'
         return {'error' : error}
-    
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
-    hashed_password = hashed_password.decode('utf-8')
 
-    query = 'SELECT * FROM users WHERE username = %s AND password = %s;'
-    cur.execute(query, (username, hashed_password))
+    query = (
+        "SELECT user_id, username, firstname, lastname, password, chng_pass "
+        "FROM users WHERE username = %s;"
+    )
+    cur.execute(query, (username,))
     results = cur.fetchone()
-    
+
     if results is not None:
-        user_id, username, firstname, lastname, _, _, _, _, chng_pass = results
+        user_id, username, firstname, lastname, stored_hash, chng_pass = results
+        if not verify_password(password, stored_hash):
+            results = None
+
+    if results is not None:
         if chng_pass == True:
             error = 'Password Change Required'
         secret_key = os.getenv('TOKEN_SECRET')
@@ -416,14 +466,11 @@ async def verify_user(request: Request):
     if user_id is None:
         return {'verified': False, 'error': 'Invalid token payload'}
 
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
-    hashed_password = hashed_password.decode('utf-8')
-
-    query = 'SELECT user_id FROM users WHERE user_id = %s AND password = %s;'
-    cur.execute(query, (str(user_id), hashed_password))
+    query = "SELECT password FROM users WHERE user_id = %s;"
+    cur.execute(query, (str(user_id),))
     result = cur.fetchone()
 
-    if result is None:
+    if result is None or not verify_password(password, result[0]):
         return {'verified': False, 'error': 'Invalid password'}
 
     return {'verified': True, 'error': ''}
@@ -456,8 +503,7 @@ async def forgot_password(request: Request):
         email = results[0]
         userId = results[1]
         new_password = secrets.token_hex(6) # Generate a secure random password
-        hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), os.getenv('BCRYPT_SALT').encode('utf-8'))
-        hashed_password = hashed_password.decode('utf-8')
+        hashed_password = hash_password_bcrypt(new_password)
         query = 'UPDATE users SET password = %s, chng_pass = true WHERE user_id = %s;'
         cur.execute(query, (hashed_password, str(userId)))
         send_forgot_password(email, new_password)
