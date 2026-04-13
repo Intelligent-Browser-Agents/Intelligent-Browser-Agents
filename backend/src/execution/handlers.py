@@ -373,6 +373,42 @@ def _looks_like_password(text: str) -> bool:
     return has_upper and has_lower and has_digit and has_symbol and " " not in text
 
 
+def _redact_type_log(text: str, text_intent: str, target_description: str) -> bool:
+    """True when typed text must not appear in ExecutionOutput (logs / state)."""
+    if text_intent == "password":
+        return True
+    td = (target_description or "").lower()
+    return "type=password" in td
+
+
+def _type_args_for_log(raw_text: str, redact: bool, type_meta: dict[str, str]) -> dict[str, str]:
+    out = {
+        "text": (f"<redacted len={len(raw_text)}>" if redact else raw_text),
+        "target_description": type_meta["target_description"],
+        "target_role": type_meta["target_role"],
+        "target_name": type_meta["target_name"],
+    }
+    return {k: v for k, v in out.items() if v is not None and str(v).strip() != ""}
+
+
+def _infer_text_intent(value: str) -> str:
+    """Classify typed string for targeting (password vs contact vs body, etc.)."""
+    v = (value or "").strip()
+    if not v:
+        return "generic"
+    if _looks_like_password(v):
+        return "password"
+    if re.fullmatch(r"\d{4,8}", v):
+        return "code"
+    if "@" in v:
+        return "contact"
+    words = len(re.findall(r"\S+", v))
+    longish = len(v) >= 40 or words >= 8 or any(p in v for p in (".", "!", "?"))
+    if longish:
+        return "body"
+    return "title"
+
+
 async def handle_type(page: Page, text: str) -> ExecutionOutput:
     """
     Type text into the appropriate input field.
@@ -656,22 +692,6 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             compose_tokens = ("new mail", "compose", "subject", "message body", "recipient", "to:", "send")
             return any(tok in hint_text for tok in compose_tokens)
 
-        def _infer_text_intent(value: str) -> str:
-            v = (value or "").strip()
-            if not v:
-                return "generic"
-            if _looks_like_password(v):
-                return "password"
-            if re.fullmatch(r"\d{4,8}", v):
-                return "code"
-            if "@" in v:
-                return "contact"
-            words = len(re.findall(r"\S+", v))
-            longish = len(v) >= 40 or words >= 8 or any(p in v for p in (".", "!", "?"))
-            if longish:
-                return "body"
-            return "title"
-
         target = None
         page_hint = await _get_page_hint_text()
         auth_context = _looks_auth_context(page_hint)
@@ -843,9 +863,11 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                 except Exception:
                     await target.type(text, timeout=5000)
         else:
+            redact = _redact_type_log(text, text_intent, "")
+            safe_text = f"<redacted len={len(text)}>" if redact else text
             return ExecutionOutput(
                 action="type",
-                args={"text": text},
+                args={"text": safe_text},
                 status="failure",
                 error_type="element_not_found",
                 message="No visible text input field found to type into.",
@@ -860,25 +882,28 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
         await asyncio.sleep(0.4)
         elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
 
+        redact = _redact_type_log(text, text_intent, type_meta["target_description"])
+        msg = (
+            f"Typed into {target_desc}"
+            if redact
+            else f"Typed '{text}' into {target_desc}"
+        )
         return ExecutionOutput(
             action="type",
-            args={
-                "text": text,
-                "target_description": type_meta["target_description"],
-                "target_role": type_meta["target_role"],
-                "target_name": type_meta["target_name"],
-            },
+            args=_type_args_for_log(text, redact, type_meta),
             status="success",
             error_type="none",
-            message=f"Typed '{text}' into {target_desc}",
+            message=msg,
             execution_time_ms=elapsed,
         )
     except Exception as e:
         elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
 
+        redact = _redact_type_log(text, _infer_text_intent(text), "")
+        safe_text = f"<redacted len={len(text)}>" if redact else text
         return ExecutionOutput(
             action="type",
-            args={"text": text},
+            args={"text": safe_text},
             status="failure",
             error_type="tool_limit",
             message=f"Failed to type: {str(e)}",
