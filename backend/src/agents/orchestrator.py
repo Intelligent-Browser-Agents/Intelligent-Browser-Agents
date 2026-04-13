@@ -160,6 +160,21 @@ class Orchestrator:
         user_intent = self._get_user_intent(state)
         recent_log = [self._clip_text(str(entry), 600) for entry in (state.get("reasoning_log") or [])[-3:]]
 
+        if self._should_handoff_final_response(state, safe_step, total_steps, current_task):
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_step_index": safe_step,
+                "plan_status": "MAINTAIN",
+                "current_task": current_task,
+                "reasoning_log": [
+                    "[Decision] Final response step detected with reportable content; handing off to interaction."
+                ],
+                "is_complete": True,
+                "handoff_interaction": True,
+                "needs_fallback": False,
+                "mission_failed": False,
+            }
+
         # Post-HITL handling via status_signals.
         # When the user just completed a HITL (e.g. MFA) and the login_phase
         # signal confirms completion, advance past the current step.
@@ -325,6 +340,22 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 }
             next_step = min(safe_step + 1, total_steps - 1)
             next_task = current_plan[next_step]
+            if self._should_handoff_final_response(state, next_step, total_steps, next_task):
+                reasoning = (
+                    f"[Decision] Step {safe_step + 1}/{total_steps} complete; "
+                    "final response can be generated from extracted content. Handing off to interaction."
+                )
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": next_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": next_task,
+                    "reasoning_log": [reasoning],
+                    "is_complete": True,
+                    "handoff_interaction": True,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                }
             reasoning = f"[Decision] Step {safe_step + 1}/{total_steps} complete; advancing to next step."
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
@@ -392,6 +423,21 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 }
             next_step = min(safe_step + 1, total_steps - 1)
             next_task = current_plan[next_step]
+            if self._should_handoff_final_response(state, next_step, total_steps, next_task):
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": next_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": next_task,
+                    "reasoning_log": [
+                        reasoning
+                        + "\n[Decision] Final response step has reportable content; converting advance to interaction handoff."
+                    ],
+                    "is_complete": True,
+                    "handoff_interaction": True,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                }
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": next_step,
@@ -415,6 +461,53 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             "needs_fallback": False,
             "mission_failed": False,
         }
+
+    @staticmethod
+    def _is_user_response_step(task_text: str) -> bool:
+        text = (task_text or "").strip().lower()
+        if not text:
+            return False
+        explicit_patterns = (
+            "report the extracted",
+            "report to the user",
+            "report back to the user",
+            "answer the user",
+            "respond to the user",
+            "tell the user",
+            "final response",
+        )
+        if any(pattern in text for pattern in explicit_patterns):
+            return True
+        response_tokens = ("report", "answer", "respond", "summarize", "share", "provide", "tell")
+        return any(token in text for token in response_tokens) and "user" in text
+
+    @staticmethod
+    def _has_reportable_content(state: ProjectState) -> bool:
+        extracted = state.get("extracted_content") or []
+        if any(isinstance(item, str) and len(item.strip()) >= 80 for item in extracted):
+            return True
+
+        dom_cache = state.get("dom_cache") or []
+        if any(isinstance(item, str) and len(item.strip()) >= 180 for item in dom_cache[-2:]):
+            return True
+
+        logs = state.get("reasoning_log") or []
+        recent = "\n".join(str(entry) for entry in logs[-5:]).lower()
+        return "[executor] action: extract_content" in recent
+
+    @classmethod
+    def _should_handoff_final_response(
+        cls,
+        state: ProjectState,
+        step_index: int,
+        total_steps: int,
+        task_text: str,
+    ) -> bool:
+        if total_steps <= 0 or step_index != total_steps - 1:
+            return False
+        if not cls._is_user_response_step(task_text):
+            return False
+        return cls._has_reportable_content(state)
 
     @staticmethod
     def _is_explicit_prerequisite_variant(current_task: str, original_step: str) -> bool:
@@ -470,11 +563,26 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             }
         if step_complete:
             next_step = min(safe_step + 1, total_steps - 1)
+            next_task = current_plan[next_step]
+            if self._should_handoff_final_response(state, next_step, total_steps, next_task):
+                return {
+                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                    "current_step_index": next_step,
+                    "plan_status": "MAINTAIN",
+                    "current_task": next_task,
+                    "reasoning_log": [
+                        reasoning + "\n[Decision] Rule fallback handed off final response directly to interaction."
+                    ],
+                    "is_complete": True,
+                    "handoff_interaction": True,
+                    "needs_fallback": False,
+                    "mission_failed": False,
+                }
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": next_step,
                 "plan_status": "MAINTAIN",
-                "current_task": current_plan[next_step],
+                "current_task": next_task,
                 "reasoning_log": [reasoning],
                 "is_complete": False,
                 "needs_fallback": False,

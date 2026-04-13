@@ -195,6 +195,66 @@ def test_orchestrator_keeps_login_hitl_shortcut_for_auth_events():
     assert result["current_task"] == "Continue to inbox."
 
 
+def test_orchestrator_handoffs_final_report_step_when_content_exists():
+    orchestrator = Orchestrator.__new__(Orchestrator)
+
+    plan = [
+        "Navigate to https://duckduckgo.com.",
+        "Search for weather in Orlando.",
+        "Extract weather details from results.",
+        "Report the extracted weather information to the user.",
+    ]
+    state = {
+        "messages": [{"role": "user", "content": "USER REQUEST: tell me the weather in Orlando"}],
+        "current_task": "Report the extracted weather information to the user.",
+        "last_step_complete": False,
+        "current_step_index": 3,
+        "number_of_transactions": 12,
+        "extracted_content": ["Orlando weather: 78F and partly cloudy with light wind."],
+        "dom_cache": [],
+        "reasoning_log": [],
+    }
+
+    result = orchestrator._make_decision(plan, 3, state)
+
+    assert result["is_complete"] is True
+    assert result["handoff_interaction"] is True
+    assert result["current_step_index"] == 3
+
+
+def test_orchestrator_does_not_handoff_final_report_step_without_content():
+    orchestrator = Orchestrator.__new__(Orchestrator)
+
+    class _FailingDecisionMaker:
+        def invoke(self, _messages):
+            raise RuntimeError("force rule-based fallback")
+
+    orchestrator.decision_maker = _FailingDecisionMaker()
+    orchestrator.reasoning_prompt = "test"
+
+    plan = [
+        "Navigate to https://duckduckgo.com.",
+        "Search for weather in Orlando.",
+        "Extract weather details from results.",
+        "Report the extracted weather information to the user.",
+    ]
+    state = {
+        "messages": [{"role": "user", "content": "USER REQUEST: tell me the weather in Orlando"}],
+        "current_task": "Report the extracted weather information to the user.",
+        "last_step_complete": False,
+        "current_step_index": 3,
+        "number_of_transactions": 12,
+        "extracted_content": [],
+        "dom_cache": [],
+        "reasoning_log": [],
+    }
+
+    result = orchestrator._make_decision(plan, 3, state)
+
+    assert result["is_complete"] is False
+    assert result["current_step_index"] == 3
+
+
 def test_executor_anti_bot_ignores_oauth_pkce_challenge_params():
     executor = Executor.__new__(Executor)
     microsoft_oauth_url = (
