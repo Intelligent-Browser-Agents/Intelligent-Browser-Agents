@@ -52,6 +52,12 @@ class OrchestratorDecision(BaseModel):
         description="Next action: advance to next step, retry current step, or mark plan complete.",
         validation_alias=AliasChoices("action", "Action", "next_action"),
     )
+    task_refinement: Optional[str] = Field(
+        default=None,
+        description="When action is retry: optional narrower instruction for the executor (same plan step). "
+        "Use to focus on one sub-goal (e.g. fill subject only). Omit or null when not needed.",
+        validation_alias=AliasChoices("task_refinement", "taskRefinement", "current_task_override"),
+    )
 
 
 # =============================================================================

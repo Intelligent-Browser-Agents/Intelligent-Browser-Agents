@@ -479,12 +479,25 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "last_step_complete": False,
             }
 
-        # retry: keep same step and task
+        # retry: keep same step; optionally narrow current_task for the executor
+        refined = ""
+        try:
+            dump = decision.model_dump()
+            refined = str(dump.get("task_refinement") or "").strip()
+        except Exception:
+            refined = ""
+        if not refined:
+            refined = str(getattr(decision, "task_refinement", None) or "").strip()
+        refined = refined[:800] if refined else ""
+        retry_task = refined if refined else current_task
+        if refined:
+            reasoning = f"{reasoning}\n[Decision] Task refinement: {refined[:400]}{'…' if len(refined) > 400 else ''}"
+
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_step_index": safe_step,
             "plan_status": "MAINTAIN",
-            "current_task": current_task,
+            "current_task": retry_task,
             "reasoning_log": [reasoning],
             "is_complete": False,
             "needs_fallback": False,

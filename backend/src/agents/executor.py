@@ -132,7 +132,7 @@ class Executor:
             if self._should_include_dom_cache_context(state, current_task)
             else ""
         )
-        field_priority_block = self._build_field_priority_context(dom_snapshot, current_task)
+        field_priority_block = self._build_field_priority_context(dom_snapshot, current_task, state)
         status_context_block = self._build_execution_status_context(state, current_task, step_attempts)
 
         context = f"""
@@ -1037,9 +1037,35 @@ class Executor:
         return set(re.findall(r"[a-z0-9]{3,}", (name or "").lower()))
 
     @classmethod
-    def _build_field_priority_context(cls, dom_snapshot: str, current_task: str) -> str:
+    def _build_field_priority_context(
+        cls,
+        dom_snapshot: str,
+        current_task: str,
+        state: ProjectState | None = None,
+    ) -> str:
         if not cls._is_data_entry_task(current_task):
             return ""
+
+        recent_name = ""
+        last_type_ok = False
+        if isinstance(state, dict):
+            sig = state.get("status_signals") or {}
+            la = sig.get("last_action") if isinstance(sig.get("last_action"), dict) else {}
+            if (la.get("type") or "").lower() == "type" and (la.get("status") or "").lower() == "success":
+                last_type_ok = True
+                recent_name = (la.get("target_name") or "").strip().lower()
+
+        def _recent_target_penalty(role: str, name: str) -> int:
+            """Push recently typed-to controls down so the next action picks a different field."""
+            if not last_type_ok or not recent_name:
+                return 0
+            nm = name.strip().lower()
+            rn = recent_name
+            if not nm or not rn:
+                return 0
+            if rn == nm or (len(rn) >= 3 and rn in nm) or (len(nm) >= 3 and nm in rn):
+                return 40
+            return 0
 
         fields: list[tuple[str, str]] = []
         controls: list[tuple[str, str]] = []
@@ -1065,13 +1091,14 @@ class Executor:
             return ""
 
         task_keywords = cls._task_keywords(current_task)
-        scored_fields: list[tuple[int, str, str]] = []
+        scored_fields: list[tuple[int, int, str, str]] = []
         for role, name in fields:
             overlap = len(task_keywords & cls._name_keywords(name))
-            scored_fields.append((overlap, role, name))
-        scored_fields.sort(key=lambda item: (-item[0], item[2].lower()))
-        relevant_fields = [(r, n) for score, r, n in scored_fields if score > 0]
-        shown_fields = (relevant_fields or [(r, n) for _, r, n in scored_fields])[:8]
+            penalty = _recent_target_penalty(role, name)
+            scored_fields.append((overlap, penalty, role, name))
+        scored_fields.sort(key=lambda item: (-item[0], item[1], item[3].lower()))
+        relevant_fields = [(r, n) for score, pen, r, n in scored_fields if score > 0]
+        shown_fields = (relevant_fields or [(r, n) for _, _, r, n in scored_fields])[:8]
         shown_controls = controls[:6]
 
         field_lines = "\n".join(f"- {r}: {n}" for r, n in shown_fields) if shown_fields else "- none detected"
@@ -1087,7 +1114,12 @@ class Executor:
             "Visible actionable controls:\n"
             f"{control_lines}"
         )
-        return cls._clip_text(text, 1100)
+        if last_type_ok and recent_name:
+            text += (
+                f"\nLast successful `type` used a control whose accessible name/label resembles: «{recent_name}». "
+                "If PLAN_STEP now requires a different slot (e.g. title/subject vs address vs body), choose a different field from the list above.\n"
+            )
+        return cls._clip_text(text, 1200)
 
     @staticmethod
     def _clean_tool_string(value: str) -> str:
@@ -1862,7 +1894,18 @@ class Executor:
         after_state: str | None = None,
     ) -> str:
         args_str = []
-        for key in ["url", "role", "name", "text", "direction", "key", "seconds"]:
+        for key in [
+            "url",
+            "role",
+            "name",
+            "text",
+            "direction",
+            "key",
+            "seconds",
+            "target_description",
+            "target_role",
+            "target_name",
+        ]:
             value = args.get(key) if isinstance(args, dict) else None
             if value is not None and str(value).strip() != "":
                 args_str.append(f"{key}={value}")

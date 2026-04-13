@@ -185,7 +185,9 @@ class Verifier:
         # Deterministic compose-progress rule: email drafting is often multi-action
         # (recipient, subject, body). A single successful click/type should count as
         # progress, and recipient-confirm sequences should complete the recipient step.
-        if self._is_email_compose_step(current_task):
+        # Skip during review/send/finalize steps so we never treat "fields populated"
+        # as equivalent to Send clicked.
+        if self._is_email_compose_step(current_task) and not self._is_finalization_step(current_task):
             task_text = (current_task or "").lower()
             requires_content = any(tok in task_text for tok in ("subject", "message body", "body", "content"))
             target_email = self._extract_email(current_task)
@@ -551,7 +553,81 @@ If this is the last step of the plan and the step is complete, set goal_complete
         return has_retrieval_intent and not has_entry_intent
 
     @staticmethod
+    def _is_mailbox_or_sent_verification_step(task: str) -> bool:
+        """True when the step is about checking sent/mailbox state, not editing a draft."""
+        text = (task or "").lower().strip()
+        if not text:
+            return False
+
+        strong_mailbox_sent = (
+            "sent items",
+            "sent folder",
+            "open sent",
+            "in sent",
+            "was sent",
+            "successfully sent",
+            "after sending",
+            "confirm that the email",
+            "verify that the email",
+            "verify the sent",
+        )
+        if any(tok in text for tok in strong_mailbox_sent):
+            return True
+
+        draft_recipient_cues = (
+            "recipient",
+            "to field",
+            "to:",
+            "addressed to",
+            "add recipient",
+            " in to ",
+            " in the to ",
+        )
+        if any(tok in text for tok in draft_recipient_cues):
+            return False
+
+        verification_cues = (
+            "verify that",
+            "verify the sent",
+            "confirm that",
+            "check that",
+            "ensure ",
+        )
+        if text.startswith("verify ") and "verify your identity" not in text:
+            if not text.startswith("verify the recipient") and not text.startswith("verify the to "):
+                list_or_sent_cues = (
+                    "most recent",
+                    "top of",
+                    "sent items",
+                    "sent folder",
+                    "open sent",
+                    "in sent",
+                    "was sent",
+                    "successfully sent",
+                )
+                if any(c in text for c in list_or_sent_cues):
+                    return True
+
+        if any(v in text for v in verification_cues):
+            list_or_sent_cues = (
+                "most recent",
+                "top of",
+                "sent items",
+                "sent folder",
+                "open sent",
+                "in sent",
+                "was sent",
+                "successfully sent",
+            )
+            if any(c in text for c in list_or_sent_cues):
+                return True
+
+        return False
+
+    @staticmethod
     def _is_email_compose_step(task: str) -> bool:
+        if Verifier._is_mailbox_or_sent_verification_step(task):
+            return False
         text = (task or "").lower()
         has_mail_context = any(token in text for token in ("email", "mail", "draft", "compose", "recipient", "subject", "message body"))
         has_field_fill_intent = any(token in text for token in (
@@ -833,6 +909,37 @@ If this is the last step of the plan and the step is complete, set goal_complete
             return False, done, required
         return done >= required, done, required
 
+    @staticmethod
+    def _implicit_subject_required_for_compose_task(task: str) -> bool:
+        """
+        Require a subject slot for full-message draft steps when the task omits the
+        word 'subject', but not for explicit body-only / recovery sub-steps.
+        """
+        text = (task or "").lower().strip()
+        if not text:
+            return False
+        body_only_markers = (
+            "message body only",
+            "body only",
+            "into the message body only",
+            "do not edit subject",
+            "do not change the subject",
+            "do not modify the recipient or subject",
+            "do not modify the subject",
+            "recipient or subject",
+            "subject or body",
+        )
+        if any(m in text for m in body_only_markers):
+            return False
+        if "enter only" in text and "recipient" in text:
+            return False
+        if "only the to" in text or "only the recipient" in text:
+            return False
+
+        if not any(t in text for t in ("email", "mail", "compose")):
+            return False
+        return any(t in text for t in ("draft", "poem", "email content", "message content"))
+
     def _compose_step_fields_complete_from_status(self, state: ProjectState, task: str) -> bool:
         if not self._is_email_compose_step(task):
             return False
@@ -842,9 +949,9 @@ If this is the last step of the plan and the step is complete, set goal_complete
         required: list[str] = []
         if any(tok in text for tok in ("recipient", "to field", "to:")):
             required.append("recipient")
-        if "subject" in text:
+        if "subject" in text or self._implicit_subject_required_for_compose_task(task):
             required.append("subject")
-        if any(tok in text for tok in ("message body", "email body", " body", "content", "message")):
+        if any(tok in text for tok in ("message body", "email body", "email message", " body", "content")):
             required.append("body")
 
         if not required:

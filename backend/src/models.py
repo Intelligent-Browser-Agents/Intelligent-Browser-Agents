@@ -65,12 +65,12 @@ MODELS = {
 
 # Assign specific models to each agent based on their needs
 AGENT_MODELS = {
-    "planner": "gemini-pro",  # Smart reasoning for plan creation (1 call)
-    "decision": "gemini-pro",  # Routing decisions (N calls)
-    "executor": "gemini-pro",  # Translating tasks to actions
-    "verifier": "gemini-pro",  # Checking results
-    "fallback": "gemini-pro",  # Recovery strategies
-    "interaction": "gemini-pro",  # User-facing polish
+    "planner": "gpt-5.4",  # Smart reasoning for plan creation (1 call)
+    "decision": "gpt-5.4",  # Routing decisions (N calls)
+    "executor": "gpt-5.4",  # Translating tasks to actions
+    "verifier": "gpt-5.4",  # Checking results
+    "fallback": "gpt-5.4",  # Recovery strategies
+    "interaction": "gpt-5.4",  # User-facing polish
 }
 
 # Temperature presets for different agent behaviors

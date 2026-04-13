@@ -38,6 +38,84 @@ _FINALIZATION_KEYWORDS = (
 _MAX_HITL_EVENTS = 10
 
 
+def _type_event_haystack(event: dict[str, Any]) -> str:
+    """Lowercase string from structured type() target metadata + args (for slot matching)."""
+    args = event.get("args") if isinstance(event.get("args"), dict) else {}
+    parts = [
+        str(args.get("target_description") or ""),
+        str(args.get("target_name") or ""),
+        str(args.get("target_role") or ""),
+        str(args.get("text") or ""),
+    ]
+    return " ".join(parts).lower()
+
+
+def _classify_compose_slot_from_type_event(event: dict[str, Any]) -> str | None:
+    """
+    Map a successful type event to a generic compose slot using target metadata.
+    Returns None if the event is not a typed success or lacks target metadata (use legacy log heuristics).
+    """
+    if (event.get("action") or "").strip().lower() != "type":
+        return None
+    if str(event.get("status") or "").lower() != "success":
+        return None
+    args = event.get("args") if isinstance(event.get("args"), dict) else {}
+    if not any(
+        str(args.get(k) or "").strip()
+        for k in ("target_description", "target_name", "target_role")
+    ):
+        return None
+
+    h = _type_event_haystack(event)
+    text = (args.get("text") or "").strip()
+    has_at = "@" in text
+
+    def hits(markers: tuple[str, ...]) -> bool:
+        return any(m in h for m in markers)
+
+    # Generic markers (not provider-specific URLs).
+    recipient_markers = (
+        "label=to",
+        ", to,",
+        "name=to",
+        "recipient",
+        "add recipients",
+        "search my contacts",
+        "search for email",
+        "placeholder=to",
+    )
+    subject_markers = (
+        "subject",
+        "title",
+        "add a subject",
+        "heading",
+    )
+    body_markers = (
+        "message body",
+        "messagebody",
+        "label=message",
+        "placeholder=message",
+    )
+
+    rec = hits(recipient_markers)
+    sub = hits(subject_markers)
+    bod = hits(body_markers)
+
+    if rec:
+        return "recipient"
+    if sub:
+        return "subject"
+    if bod:
+        return "body"
+    if "contenteditable=true" in h and not rec and not sub:
+        return "body"
+    if has_at:
+        return "recipient"
+    if len(text) >= 50:
+        return "body"
+    return None
+
+
 # ── public helpers ─────────────────────────────────────────────────────
 
 
@@ -323,12 +401,20 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
     if action_msg and "AFTER_STATE" in action_msg:
         action_msg = action_msg[: action_msg.index("AFTER_STATE")].strip()
 
-    signals["last_action"] = {
+    last_action: dict[str, Any] = {
         "type": action_type or "unknown",
         "target": target[:120],
         "status": action_status or "unknown",
         "message": (action_msg or "")[:200],
     }
+    if isinstance(event, dict):
+        ev_args = event.get("args")
+        if isinstance(ev_args, dict):
+            for k in ("target_name", "target_role", "target_description"):
+                v = ev_args.get(k)
+                if v is not None and str(v).strip():
+                    last_action[k] = str(v)[:300]
+    signals["last_action"] = last_action
 
     if (
         (action_status or "").lower() == "failure"
@@ -354,41 +440,56 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
         if action_type == "type":
             typed_text = _extract_typed_text(last_entry or "")
             normalized_typed = (typed_text or "").strip()
-            if "@" in typed_text and any(tok in entry_l for tok in (
-                "label=to",
-                "name=to",
-                "label=recipient",
-                "placeholder=recipient",
-                "search my contacts",
-                "add recipients",
-                "search for email",
-            )):
+            structured_slot = (
+                _classify_compose_slot_from_type_event(event)
+                if isinstance(event, dict)
+                else None
+            )
+
+            if structured_slot == "recipient":
                 compose_fields["recipient"] = True
-
-            if any(tok in entry_l for tok in ("label=subject", "placeholder=add a subject", "name=subject")):
-                if len(typed_text) >= 3:
-                    compose_fields["subject"] = True
-                    if normalized_typed and not compose_draft.get("subject"):
-                        compose_draft["subject"] = normalized_typed[:200]
-
-            words = len(re.findall(r"\S+", typed_text or ""))
-            recipient_context = any(tok in entry_l for tok in (
-                "label=to",
-                "name=to",
-                "label=recipient",
-                "search my contacts",
-                "add recipients",
-                "search for email",
-            ))
-            body_context = any(tok in entry_l for tok in (
-                "label=message body",
-                "placeholder=message",
-            )) or ("contenteditable=true" in entry_l and not recipient_context)
-            # Field completion should be field-dependent, not content-length dependent.
-            if body_context and bool((typed_text or "").strip()):
+            elif structured_slot == "subject" and len(normalized_typed) >= 3:
+                compose_fields["subject"] = True
+                if normalized_typed and not compose_draft.get("subject"):
+                    compose_draft["subject"] = normalized_typed[:200]
+            elif structured_slot == "body" and normalized_typed:
                 compose_fields["body"] = True
                 if normalized_typed and not compose_draft.get("body"):
                     compose_draft["body"] = normalized_typed[:1400]
+            elif structured_slot is None:
+                if "@" in typed_text and any(tok in entry_l for tok in (
+                    "label=to",
+                    "name=to",
+                    "label=recipient",
+                    "placeholder=recipient",
+                    "search my contacts",
+                    "add recipients",
+                    "search for email",
+                )):
+                    compose_fields["recipient"] = True
+
+                if any(tok in entry_l for tok in ("label=subject", "placeholder=add a subject", "name=subject")):
+                    if len(typed_text) >= 3:
+                        compose_fields["subject"] = True
+                        if normalized_typed and not compose_draft.get("subject"):
+                            compose_draft["subject"] = normalized_typed[:200]
+
+                recipient_context = any(tok in entry_l for tok in (
+                    "label=to",
+                    "name=to",
+                    "label=recipient",
+                    "search my contacts",
+                    "add recipients",
+                    "search for email",
+                ))
+                body_context = any(tok in entry_l for tok in (
+                    "label=message body",
+                    "placeholder=message",
+                )) or ("contenteditable=true" in entry_l and not recipient_context)
+                if body_context and bool((typed_text or "").strip()):
+                    compose_fields["body"] = True
+                    if normalized_typed and not compose_draft.get("body"):
+                        compose_draft["body"] = normalized_typed[:1400]
 
             # Generic field-progress tracking for any multi-field step.
             field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None

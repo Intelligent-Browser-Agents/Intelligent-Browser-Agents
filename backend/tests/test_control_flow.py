@@ -714,6 +714,39 @@ def test_verifier_keeps_compose_content_step_in_progress_when_only_subject_typed
     assert result["last_step_complete"] is False
 
 
+def test_verifier_mailbox_sent_verification_step_classification():
+    task = (
+        "In Sent Items, verify the most recent message shows the poem lines in the subject "
+        "and body as sent to inesculent@gmail.com."
+    )
+    assert Verifier._is_mailbox_or_sent_verification_step(task) is True
+    assert Verifier._is_email_compose_step(task) is False
+
+
+def test_verifier_recipient_field_verify_stays_compose_step():
+    task = "Verify the recipient appears in the To field for inesculent@gmail.com."
+    assert Verifier._is_mailbox_or_sent_verification_step(task) is False
+    assert Verifier._is_email_compose_step(task) is True
+
+
+def test_verifier_compose_fields_shortcut_skipped_for_sent_verification_task():
+    verifier = Verifier()
+    task = (
+        "Open Sent Items and confirm the email was sent with the correct subject and body."
+    )
+    state = {
+        "status_signals": {
+            "compose_fields": {
+                "recipient": True,
+                "subject": True,
+                "body": True,
+            }
+        },
+    }
+    assert Verifier._is_email_compose_step(task) is False
+    assert verifier._compose_step_fields_complete_from_status(state, task) is False
+
+
 def test_verifier_does_not_count_recipient_contenteditable_text_as_body_completion():
     verifier = Verifier()
     state = {

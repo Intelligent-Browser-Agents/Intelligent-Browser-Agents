@@ -65,6 +65,9 @@ async def test_dispatch_type(page):
     assert result.status == "success"
     assert result.error_type == "none"
     assert "test input" in result.message
+    assert result.args.get("target_description")
+    assert "target_role" in result.args
+    assert "target_name" in result.args
 
 
 @pytest.mark.asyncio

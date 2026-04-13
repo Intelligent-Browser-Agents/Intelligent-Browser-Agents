@@ -586,33 +586,60 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             except Exception:
                 return {"tag": "", "type": "", "meta": "", "isContentEditable": False}
 
-        async def _describe_target(locator) -> str:
+        async def _target_type_metadata(locator) -> dict[str, str]:
+            """Stable metadata for which control received text (for logs / state tracking)."""
             try:
-                return await locator.evaluate(
+                d = await locator.evaluate(
                     """el => {
                         const tag = (el.tagName || '').toLowerCase();
-                        const role = (el.getAttribute && el.getAttribute('role')) || '';
+                        let role = (el.getAttribute && el.getAttribute('role')) || '';
                         const label = (el.getAttribute && el.getAttribute('aria-label')) || '';
                         const placeholder = (el.getAttribute && el.getAttribute('placeholder')) || '';
-                        const name = (el.getAttribute && el.getAttribute('name')) || '';
+                        const nameAttr = (el.getAttribute && el.getAttribute('name')) || '';
                         const id = el.id || '';
                         const t = (el.type || '').toLowerCase();
                         const contentEditable = !!el.isContentEditable;
+                        if (!role) {
+                            if (tag === 'textarea') role = 'textarea';
+                            else if (tag === 'input' && (t === 'text' || t === 'email' || t === 'search' || !t)) role = 'textbox';
+                            else if (contentEditable) role = 'textbox';
+                        }
                         const bits = [
                             tag && `tag=${tag}`,
                             role && `role=${role}`,
                             label && `label=${label}`,
                             placeholder && `placeholder=${placeholder}`,
-                            name && `name=${name}`,
+                            nameAttr && `name=${nameAttr}`,
                             id && `id=${id}`,
                             t && `type=${t}`,
                             contentEditable && 'contenteditable=true',
                         ].filter(Boolean);
-                        return bits.join(', ') || 'unknown target';
+                        const target_description = bits.join(', ') || 'unknown target';
+                        const target_name = (label || placeholder || nameAttr || '').trim();
+                        return { target_description, target_role: role || '', target_name };
                     }"""
                 )
+                if not isinstance(d, dict):
+                    return {
+                        "target_description": "unknown target",
+                        "target_role": "",
+                        "target_name": "",
+                    }
+                return {
+                    "target_description": str(d.get("target_description") or "unknown target"),
+                    "target_role": str(d.get("target_role") or ""),
+                    "target_name": str(d.get("target_name") or ""),
+                }
             except Exception:
-                return "unknown target"
+                return {
+                    "target_description": "unknown target",
+                    "target_role": "",
+                    "target_name": "",
+                }
+
+        async def _describe_target(locator) -> str:
+            meta = await _target_type_metadata(locator)
+            return meta["target_description"]
 
         def _looks_auth_context(hint_text: str) -> bool:
             if not hint_text:
@@ -786,7 +813,8 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
                     break
 
         if target is not None:
-            target_desc = await _describe_target(target)
+            type_meta = await _target_type_metadata(target)
+            target_desc = type_meta["target_description"]
             try:
                 await target.scroll_into_view_if_needed(timeout=3000)
             except Exception:
@@ -834,11 +862,16 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
 
         return ExecutionOutput(
             action="type",
-            args={"text": text},
+            args={
+                "text": text,
+                "target_description": type_meta["target_description"],
+                "target_role": type_meta["target_role"],
+                "target_name": type_meta["target_name"],
+            },
             status="success",
             error_type="none",
             message=f"Typed '{text}' into {target_desc}",
-            execution_time_ms=elapsed
+            execution_time_ms=elapsed,
         )
     except Exception as e:
         elapsed = int((asyncio.get_event_loop().time() - start) * 1000)
