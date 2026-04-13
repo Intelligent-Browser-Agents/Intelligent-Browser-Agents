@@ -663,6 +663,10 @@
   letter-spacing: 0.08em;
 }
 
+.thought-line-body {
+  min-width: 0;
+}
+
 .thought-line-text {
   color: #35576a;
   font-size: 0.8rem;
@@ -671,10 +675,15 @@
   word-break: break-word;
 }
 
-.thought-line-text-with-icon {
-  display: inline-flex;
+.thought-line-group {
+  display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.thought-line-group-header {
+  flex: 0 0 auto;
 }
 
 .thought-line-icon {
@@ -683,6 +692,16 @@
   flex: 0 0 16px;
   margin-top: 2px;
   object-fit: contain;
+}
+
+.thought-line-list {
+  margin: 0;
+  padding-left: 18px;
+  min-width: 0;
+}
+
+.thought-line-list .thought-line-text + .thought-line-text {
+  margin-top: 4px;
 }
 
 .thoughts-empty-state {

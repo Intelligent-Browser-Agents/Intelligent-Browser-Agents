@@ -3,8 +3,14 @@ import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import userNotificationSound from "../../assets/audio/user-notification.mp3";
 import agentLogIcon from "../../assets/icons/agent.png";
+import executionAgentIcon from "../../assets/icons/agents/execution.png";
+import fallbackAgentIcon from "../../assets/icons/agents/fallback.png";
+import interactionAgentIcon from "../../assets/icons/agents/interaction.png";
 import stdoutLogIcon from "../../assets/icons/log.png";
+import orchestrationAgentIcon from "../../assets/icons/agents/orchestration.png";
 import statusLogIcon from "../../assets/icons/status.png";
+import userLogIcon from "../../assets/icons/agents/user.png";
+import verificationAgentIcon from "../../assets/icons/agents/verification.png";
 import "./Dashboard.css";
 
 // === COMPONENTS ===
@@ -470,28 +476,97 @@ export default function Dashboard() {
     }));
   };
 
-  const renderAgentLogLine = (line) => {
+  const getAgentLogPresentation = (line) => {
     const prefixes = {
-      AGENT: { icon: agentLogIcon, alt: "Agent" },
-      STATUS: { icon: statusLogIcon, alt: "Status" },
-      STDOUT: { icon: stdoutLogIcon, alt: "Stdout" },
+      AGENT: { key: "agent", icon: agentLogIcon, alt: "Agent" },
+      STATUS: { key: "status", icon: statusLogIcon, alt: "Status" },
+      STDOUT: { key: "stdout", icon: stdoutLogIcon, alt: "Stdout" },
     };
+    const iconGroups = [
+      { pattern: /^User Request:/i, key: "user", icon: userLogIcon, alt: "User" },
+      { pattern: /\[NODE\]:\s*ORCHESTRATOR\b|\[Decision\]/i, key: "orchestration", icon: orchestrationAgentIcon, alt: "Orchestration" },
+      { pattern: /\[NODE\]:\s*EXECUTION\b|\[executor\b|\[Executor\b/i, key: "execution", icon: executionAgentIcon, alt: "Execution" },
+      { pattern: /\[NODE\]:\s*VERIFICATION\b|\[Verifier\]/i, key: "verification", icon: verificationAgentIcon, alt: "Verification" },
+      { pattern: /\[NODE\]:\s*FALLBACK\b|\[Fallback\]/i, key: "fallback", icon: fallbackAgentIcon, alt: "Fallback" },
+      { pattern: /\[NODE\]:\s*INTERACTION\b|\[Interaction\]/i, key: "interaction", icon: interactionAgentIcon, alt: "Interaction" },
+    ];
 
-    const match = String(line ?? "").match(/^(AGENT|STATUS|STDOUT):\s*(.*)$/);
+    const rawLine = String(line ?? "");
+    const match = rawLine.match(/^(AGENT|STATUS|STDOUT):\s*(.*)$/);
     if (!match) {
-      return <span className="thought-line-text">{line}</span>;
+      return {
+        groupKey: null,
+        content: rawLine,
+        icon: null,
+        alt: null,
+      };
     }
 
     const [, source, content] = match;
-    const prefix = prefixes[source];
+    const matchedGroup = iconGroups.find(({ pattern }) => pattern.test(content));
+    const presentation = matchedGroup ?? prefixes[source];
 
-    return (
-      <span className="thought-line-text thought-line-text-with-icon">
-        <img className="thought-line-icon" src={prefix.icon} alt={prefix.alt} />
-        <span>{content}</span>
-      </span>
-    );
+    return {
+      groupKey: presentation.key,
+      content,
+      icon: presentation.icon,
+      alt: presentation.alt,
+    };
   };
+
+  const trimRepeatedGroupLabel = (groupKey, content, itemIndex) => {
+    if (itemIndex === 0) {
+      return content;
+    }
+
+    const labelPatterns = {
+      orchestration: [/^\[NODE\]:\s*ORCHESTRATOR\s*/i, /^\[Decision\]\s*/i],
+      execution: [/^\[NODE\]:\s*EXECUTION\s*/i, /^\[executor\]\s*/i, /^\[Executor\]\s*/],
+      verification: [/^\[NODE\]:\s*VERIFICATION\s*/i, /^\[Verifier\]\s*/i],
+      fallback: [/^\[NODE\]:\s*FALLBACK\s*/i, /^\[Fallback\]\s*/i],
+      interaction: [/^\[NODE\]:\s*INTERACTION\s*/i, /^\[Interaction\]\s*/i],
+    };
+
+    const patterns = labelPatterns[groupKey];
+    if (!patterns) {
+      return content;
+    }
+
+    const trimmed = patterns.reduce((value, pattern) => value.replace(pattern, ""), content).trim();
+    return trimmed || content;
+  };
+
+  const groupAgentLogs = (logs) => logs.reduce((groups, line, lineIndex) => {
+    const presentation = getAgentLogPresentation(line);
+    const previousGroup = groups[groups.length - 1];
+
+    if (presentation.groupKey && previousGroup?.groupKey === presentation.groupKey) {
+      previousGroup.items.push(
+        trimRepeatedGroupLabel(
+          presentation.groupKey,
+          presentation.content,
+          previousGroup.items.length
+        )
+      );
+      previousGroup.endLineIndex = lineIndex;
+      return groups;
+    }
+
+    groups.push({
+      groupKey: presentation.groupKey,
+      icon: presentation.icon,
+      alt: presentation.alt,
+      items: [
+        presentation.groupKey
+          ? trimRepeatedGroupLabel(presentation.groupKey, presentation.content, 0)
+          : presentation.content
+      ],
+      startLineIndex: lineIndex,
+      endLineIndex: lineIndex,
+    });
+
+    return groups;
+  }, []);
 
   const appendSessionChatMessage = (chatId, sessionId, text, isUser) => {
     setAgentSessionsByChat((prev) => ({
@@ -1432,10 +1507,34 @@ export default function Dashboard() {
             <div className="thoughts-stream" ref={thoughtsStreamRef}>
               {thoughtSession ? (
                 thoughtSession.logs.length > 0 ? (
-                  thoughtSession.logs.map((line, lineIndex) => (
-                    <div key={`${thoughtSession.id}-thought-${lineIndex}`} className="thought-line">
-                      <span className="thought-line-number">{String(lineIndex + 1).padStart(2, "0")}</span>
-                      {renderAgentLogLine(line)}
+                  groupAgentLogs(thoughtSession.logs).map((group, groupIndex) => (
+                    <div key={`${thoughtSession.id}-thought-group-${groupIndex}`} className="thought-line">
+                      <span className="thought-line-number">{String(group.startLineIndex + 1).padStart(2, "0")}</span>
+                      <div className="thought-line-body">
+                        {group.icon ? (
+                          <div className="thought-line-group">
+                            <div className="thought-line-group-header">
+                              <img className="thought-line-icon" src={group.icon} alt={group.alt} />
+                            </div>
+                            <ul className="thought-line-list">
+                              {group.items.map((item, itemIndex) => (
+                                <li key={`${thoughtSession.id}-thought-group-${groupIndex}-item-${itemIndex}`} className="thought-line-text">
+                                  {item}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : (
+                          group.items.map((item, itemIndex) => (
+                            <span
+                              key={`${thoughtSession.id}-thought-group-${groupIndex}-item-${itemIndex}`}
+                              className="thought-line-text"
+                            >
+                              {item}
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </div>
                   ))
                 ) : (
