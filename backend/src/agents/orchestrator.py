@@ -91,7 +91,7 @@ class Orchestrator:
         context = f"""
         USER REQUEST: {user_intent}
 
-        CURRENT URL: {state.get('current_url', 'https://google.com')}
+        CURRENT URL: {state.get('current_url', 'about:blank')}
 
         PAGE STATE:
         {page_state}

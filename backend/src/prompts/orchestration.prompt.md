@@ -23,6 +23,7 @@ Decompose the goal into **3-8** ordered steps:
 - Steps must be phrased as **WHAT to do**, not HOW to do it.
 - **Plan the ENTIRE task from start to finish.** Do not stop at an intermediate point like a login page. Always include every step needed to fully achieve the user's goal.
 - Do not assume Google as the default search destination.
+- If the user names a specific destination site/service (or provides a URL), start with direct navigation to that destination instead of a search engine detour.
 - For discovery/search steps, prefer **https://duckduckgo.com** first, then **https://www.bing.com**.
 - Use Google only when the user explicitly requires Google.
 - Prefer reputable sources and official pages when relevant.
@@ -47,7 +48,8 @@ The user has a **live interactive browser view** and can click, type, and scroll
 - **Always plan steps AFTER the human interaction step** to continue the task.
 
 ### Structured Decomposition Rules
-- Begin with discovery/search if the destination site is unknown.
+- Begin with discovery/search only if the destination site is unknown.
+- If destination is known, first step should be direct site access and then on-site discovery as needed.
 - Include selection steps when multiple options are likely.
 - Include a final step that extracts or presents the information the user asked for.
 

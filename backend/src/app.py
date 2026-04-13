@@ -106,7 +106,7 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
     user_request = prompt
     graph_input = {
         "messages": [{"role": "user", "content": f"USER REQUEST: {user_request}"}],
-        "current_url": "https://google.com",
+        "current_url": "about:blank",
         "plan_history": [],
         "current_plan": [],
         "current_step_index": 0,

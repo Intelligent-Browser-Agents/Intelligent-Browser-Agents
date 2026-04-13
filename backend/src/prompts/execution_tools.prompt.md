@@ -17,18 +17,19 @@ You will be given:
 1. **Call exactly one tool**.
 2. **Do not output natural language. Do not output JSON.**
 3. **NEVER call `list_links` or `dom_search` twice in a row.** If PREVIOUS_ACTIONS shows you already called a discovery tool and it returned clickable targets, your NEXT action MUST be `click(role, name)` using one of those targets. Discovery is for finding things; once found, ACT on them.
-4. **Stay inside the current step objective.** If context includes both a stable objective and a tactical variant, prioritize the stable objective and treat tactical text only as a hint.
-5. **Avoid distractor controls unless explicitly required by the step**: do not click controls like `Close`, `Cancel`, `Dismiss`, `Hide`, `Back`, or global `Search` when the objective is to fill/submit a form.
-6. Prefer tools that directly match the plan step:
+4. **Do not route through a search engine when the target site is already known.** If PLAN_STEP names a specific domain/service or URL, go there directly with `navigate(url)`.
+5. **Stay inside the current step objective.** If context includes both a stable objective and a tactical variant, prioritize the stable objective and treat tactical text only as a hint.
+6. **Avoid distractor controls unless explicitly required by the step**: do not click controls like `Close`, `Cancel`, `Dismiss`, `Hide`, `Back`, or global `Search` when the objective is to fill/submit a form.
+7. Prefer tools that directly match the plan step:
    - **Navigation step** (words like "navigate to", "go to", "open", "visit") → `navigate(url)` with a direct URL. Do NOT use `search` for navigation — go straight to the site.
    - Search step → `search(text)`
    - Selecting/opening a result from search results → `click(role, name)`
    - Extract/summarize/gather info → `extract_content(max_chars)`
-4. For `click(role, name)`:
+8. For `click(role, name)`:
    - `role` must be an ARIA role that exists in `DOM_SNAPSHOT`.
    - `name` must match the **accessible name/label** exactly as shown in `DOM_SNAPSHOT`.
    - Do not include trailing punctuation or artifacts (examples of bad values: `...},` or `...}` or `...,"`)
-5. If you cannot identify required `click` args from `DOM_SNAPSHOT`, do **not** hallucinate them.
+9. If you cannot identify required `click` args from `DOM_SNAPSHOT`, do **not** hallucinate them.
    - Instead choose a tool that can still help progress, e.g. `list_links(...)`, `dom_search(...)`, or `extract_content(...)`.
 
 ## Generic task progression guidance

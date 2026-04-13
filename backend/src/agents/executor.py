@@ -156,7 +156,7 @@ class Executor:
         {compose_checklist_block}
         {status_context_block}
 
-        Use exactly one of the available tools to perform this plan step. Prefer duckduckgo.com or bing.com over google.com unless explicitly required.
+        Use exactly one of the available tools to perform this plan step. If the step names a specific site/domain, navigate there directly instead of going through a search engine first. For open-web discovery when no target site is known, prefer duckduckgo.com or bing.com over google.com unless explicitly required.
         """
 
         tool_messages = [
