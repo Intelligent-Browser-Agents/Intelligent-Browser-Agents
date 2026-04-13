@@ -474,7 +474,8 @@ If this is the last step of the plan and the step is complete, set goal_complete
         )
 
     def _get_user_intent(self, state: ProjectState) -> str:
-        user_message = state["messages"][0] if state["messages"] else None
+        messages = state.get("messages") or []
+        user_message = messages[0] if messages else None
         if isinstance(user_message, dict):
             return user_message.get("content", "Unknown intent")
         if hasattr(user_message, "content"):
