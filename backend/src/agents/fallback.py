@@ -35,9 +35,9 @@ class Fallback:
         dom_cache = state.get("dom_cache") or []
         last_dom_snapshot = dom_cache[-1] if dom_cache else ""
         # Keep the context bounded; dom_cache entries can be large.
-        last_dom_snapshot = (last_dom_snapshot or "").strip()[:6000]
+        last_dom_snapshot = (last_dom_snapshot or "").strip()[:4500]
         previous_dom_snapshot = dom_cache[-2] if len(dom_cache) >= 2 else ""
-        previous_dom_snapshot = (previous_dom_snapshot or "").strip()[:4000]
+        previous_dom_snapshot = (previous_dom_snapshot or "").strip()[:2500]
         popup_signal = self._detect_blocking_popup(
             objective_task=objective_task,
             user_intent=user_intent,
@@ -95,7 +95,7 @@ class Fallback:
             or "No execution log."
         )
 
-        mission_status = self._clip_text(state.get("mission_status") or "", 4000)
+        mission_status = self._clip_text(state.get("mission_status") or "", 2000)
         context = f"""
 MAIN_GOAL: {user_intent}
 

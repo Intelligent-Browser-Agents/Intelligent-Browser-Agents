@@ -226,7 +226,7 @@ class InteractionAgent:
         else:
             compose_draft_block = "(No compose draft captured.)"
 
-        mission_status = self._clip_text(state.get("mission_status") or "", 4000)
+        mission_status = self._clip_text(state.get("mission_status") or "", 2200)
         context = f"""
             MAIN_GOAL: {user_intent}
 

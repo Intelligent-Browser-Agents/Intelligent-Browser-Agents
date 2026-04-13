@@ -243,7 +243,7 @@ class Orchestrator:
                     "last_step_complete": False,
                 }
 
-        mission_status = self._clip_text(state.get("mission_status") or "", 4000)
+        mission_status = self._clip_text(state.get("mission_status") or "", 1800)
         recent_context_block = self._clip_text(chr(10).join(recent_log) if recent_log else "  (none yet)", 1500)
 
         # Extract the verifier's verdict and message so the decision-maker

@@ -100,7 +100,7 @@ class Verifier:
             else:
                 recent_executor_logs = [syn]
         recent_executor_history = "\n\n".join(recent_executor_logs[-2:]) if recent_executor_logs else ""
-        recent_executor_history = self._clip_text(recent_executor_history, 6000)
+        recent_executor_history = self._clip_text(recent_executor_history, 2600)
 
         # Deterministic guardrail: do not allow failed executor actions to be
         # marked as successful just because page content looks plausible.
@@ -386,7 +386,7 @@ class Verifier:
                     },
                 )
 
-        mission_status = self._clip_text(state.get("mission_status") or "", 5000)
+        mission_status = self._clip_text(state.get("mission_status") or "", 2200)
 
         # Build an HITL-resolved note so the LLM knows old MFA/login
         # mentions in the history are stale and shouldn't influence the
@@ -413,7 +413,7 @@ MAIN_GOAL: {user_intent}
 PLAN_STEP (current): {current_task}
 {hitl_note}
 EXECUTION_OUTPUT (action, args, status, message) and AFTER_STATE (page content after the action) from the Execution Agent:
-{self._clip_text(last_execution, 2600)}
+{self._clip_text(last_execution, 2200)}
 
 RECENT_EXECUTION_HISTORY (last few executor logs):
 {recent_executor_history}

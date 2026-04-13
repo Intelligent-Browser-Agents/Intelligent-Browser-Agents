@@ -111,6 +111,7 @@ class Executor:
         user_intent = self._get_user_intent(state)
         current_plan = state.get("current_plan", []) or []
         current_step = int(state.get("current_step_index", 0) or 0)
+        step_attempts = int(state.get("step_attempts", 0) or 0)
         canonical_step = current_task
         if current_plan:
             safe_idx = min(max(current_step, 0), len(current_plan) - 1)
@@ -122,10 +123,14 @@ class Executor:
         recent_actions_block = self._build_recent_actions(state)
         adaptive_guidance_block = self._build_adaptive_guidance(state, current_task)
         compose_checklist_block = self._build_compose_checklist(state, current_task)
-        dom_cache_block = self._build_dom_cache_context(state)
+        dom_cache_block = (
+            self._build_dom_cache_context(state)
+            if self._should_include_dom_cache_context(state, current_task)
+            else ""
+        )
         field_priority_block = self._build_field_priority_context(dom_snapshot, current_task)
+        status_context_block = self._build_execution_status_context(state, current_task, step_attempts)
 
-        mission_status = self._clip_text(state.get("mission_status") or "", 5000)
         context = f"""
         MAIN_GOAL: {user_intent}
 
@@ -145,9 +150,7 @@ class Executor:
         {recent_actions_block}
         {adaptive_guidance_block}
         {compose_checklist_block}
-
-        MISSION_STATUS:
-        {mission_status}
+        {status_context_block}
 
         Use exactly one of the available tools to perform this plan step. Prefer duckduckgo.com or bing.com over google.com unless explicitly required.
         """
@@ -946,8 +949,8 @@ class Executor:
             "fill", "form", "login", "sign in", "password", "username",
         )
         if any(tok in task for tok in listing_tokens):
-            return 5500
-        return 6000 if any(tok in task for tok in data_entry_tokens) else 4000
+            return 5000
+        return 5200 if any(tok in task for tok in data_entry_tokens) else 3500
 
     @staticmethod
     def _split_dom_cache_snapshot(snapshot: str) -> tuple[str, list[str]]:
@@ -977,8 +980,8 @@ class Executor:
         if not latest:
             return ""
         if len(cache) == 1:
-            clipped = latest[:900]
-            if len(latest) > 900:
+            clipped = latest[:650]
+            if len(latest) > 650:
                 clipped += "\n... [truncated]"
             return f"\n\nDOM_TEXT_CONTEXT (latest page text snapshot):\n{clipped}"
 
@@ -1002,7 +1005,7 @@ class Executor:
             "Removed text highlights:\n"
             f"{removed_block}"
         )
-        return Executor._clip_text(delta, 1500)
+        return Executor._clip_text(delta, 900)
 
     @staticmethod
     def _is_data_entry_task(current_task: str) -> bool:
@@ -1078,7 +1081,7 @@ class Executor:
             "Visible actionable controls:\n"
             f"{control_lines}"
         )
-        return cls._clip_text(text, 1500)
+        return cls._clip_text(text, 1100)
 
     @staticmethod
     def _clean_tool_string(value: str) -> str:
@@ -1396,7 +1399,7 @@ class Executor:
         ]
         if not executor_logs:
             return ""
-        recent = executor_logs[-6:]
+        recent = executor_logs[-4:]
         summaries = []
         for i, log in enumerate(recent, 1):
             action_line = ""
@@ -1424,7 +1427,7 @@ class Executor:
             "\n\nPREVIOUS_ACTIONS (already executed — do NOT repeat; if discovery found items, CLICK one):\n"
             + "\n".join(summaries)
         )
-        return Executor._clip_text(text, 1800)
+        return Executor._clip_text(text, 1200)
 
     @staticmethod
     def _build_adaptive_guidance(state: ProjectState, current_task: str) -> str:
@@ -1488,7 +1491,77 @@ class Executor:
         if not hints:
             return ""
         text = "\n\nADAPTIVE_GUIDANCE (from recent outcomes):\n- " + "\n- ".join(hints)
-        return Executor._clip_text(text, 500)
+        return Executor._clip_text(text, 420)
+
+    @staticmethod
+    def _is_navigation_or_retrieval_task(current_task: str) -> bool:
+        text = (current_task or "").lower()
+        return any(tok in text for tok in (
+            "navigate",
+            "open",
+            "visit",
+            "go to",
+            "search",
+            "find",
+            "look up",
+            "extract",
+            "gather",
+            "collect",
+            "summarize",
+            "result",
+            "listing",
+        ))
+
+    @classmethod
+    def _should_include_dom_cache_context(cls, state: ProjectState, current_task: str) -> bool:
+        attempts = int(state.get("step_attempts", 0) or 0)
+        signals = state.get("status_signals") or {}
+        blocking_issue = (signals.get("blocking_issue") or "").strip()
+        if attempts >= 2 or blocking_issue:
+            return True
+        if cls._is_navigation_or_retrieval_task(current_task):
+            return True
+        if cls._is_data_entry_task(current_task):
+            return False
+        return attempts >= 1
+
+    def _build_execution_status_context(
+        self,
+        state: ProjectState,
+        current_task: str,
+        step_attempts: int,
+    ) -> str:
+        signals = state.get("status_signals") or {}
+        login_phase = (signals.get("login_phase") or "not_started").strip()
+        blocking_issue = (signals.get("blocking_issue") or "").strip()
+        step_intent = (state.get("step_intent") or "").strip()
+        lines = [
+            "\n\nEXECUTION_STATUS_SIGNALS:",
+            f"- step_attempts: {step_attempts}",
+            f"- step_intent: {step_intent or 'unknown'}",
+            f"- login_phase: {login_phase}",
+            f"- blocking_issue: {blocking_issue or 'none'}",
+        ]
+
+        if self._is_compose_task(current_task):
+            compose_fields = signals.get("compose_fields") or {}
+            lines.extend([
+                "- compose_fields:",
+                f"  - recipient: {'done' if compose_fields.get('recipient') else 'pending'}",
+                f"  - subject: {'done' if compose_fields.get('subject') else 'pending'}",
+                f"  - body: {'done' if compose_fields.get('body') else 'pending'}",
+            ])
+
+        # Include mission status only when retries/blockers suggest it is needed.
+        if step_attempts >= 2 or blocking_issue:
+            mission_excerpt = self._clip_text(state.get("mission_status") or "", 900)
+            if mission_excerpt:
+                lines.extend([
+                    "MISSION_STATUS_EXCERPT:",
+                    mission_excerpt,
+                ])
+
+        return self._clip_text("\n".join(lines), 1400)
 
     _LOGIN_KEYWORDS = re.compile(
         r"\blog\s*in\b|\bsign\s*in\b|\bcredential|\busername\b|\bpassword\b"
@@ -1580,7 +1653,7 @@ class Executor:
         if not parts:
             return ""
         text = "\n\nUSER_CREDENTIALS (available for auto-fill — use `type` to enter these values):\n" + "\n".join(parts)
-        return self._clip_text(text, 1500)
+        return self._clip_text(text, 1300)
 
     @staticmethod
     def _find_matching_service(creds: dict, task: str, url: str) -> dict | None:
