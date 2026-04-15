@@ -1,9 +1,11 @@
 :root {
-  font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: "Trebuchet MS", "Segoe UI", Tahoma, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: #244b61;
+  background: #b4e8fb;
 }
 
 *,
@@ -23,4 +25,5 @@ body,
 
 body {
   min-width: 320px;
+  font-family: "Trebuchet MS", "Segoe UI", Tahoma, sans-serif;
 }
