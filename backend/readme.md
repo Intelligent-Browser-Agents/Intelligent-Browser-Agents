@@ -70,16 +70,6 @@ To run uvicorn
     uvicorn server:app --host 127.0.0.1 --port 8000 --reload 
 ```
 
-For deployment with HITL/WebSocket interaction flows, run a single worker:
-
-```bash
-uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1
-```
-
-This backend keeps active HITL/session routing in process-local memory. Using
-multiple workers (or aggressive worker recycling such as `--limit-max-requests`)
-can break interaction handoffs.
-
 You may get Bcrypt errors. If so, you do not have the right values in your `.env` file. Let one of us know to help you with this. 
 
 Testing 

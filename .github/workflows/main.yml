@@ -85,4 +85,4 @@ jobs:
             # 4. Start Uvicorn in a detached screen
             # -d -m starts it detached immediately
             # Use 'python3 -m uvicorn' to ensure it uses the correct path
-            screen -d -m -S uvicorn-backend python3 -m uvicorn server:app --host 0.0.0.0 --port 8000 --workers 2 --limit-max-requests 20
+            screen -d -m -S uvicorn-backend python3 -m uvicorn server:app --host 0.0.0.0 --port 8000
