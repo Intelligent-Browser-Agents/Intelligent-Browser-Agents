@@ -184,6 +184,18 @@ From `backend/`:
 uvicorn server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+Production/staging recommendation for HITL reliability:
+
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+Important runtime note:
+
+- The backend keeps active HITL/session routing in process-local memory.
+- Do not run multiple workers unless you externalize shared state (for example Redis).
+- Avoid request-count worker recycling for long-lived WebSocket runs (for example `--limit-max-requests`) because it can interrupt interaction handoffs.
+
 ## Frontend Setup
 
 From `frontend/`:

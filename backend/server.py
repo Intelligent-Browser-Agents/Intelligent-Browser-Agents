@@ -38,6 +38,7 @@ import threading
 import asyncio
 import json
 import time
+import tempfile
 
 # credential storage 
 CREDENTIALS_BY_SESSION = {}
@@ -63,6 +64,94 @@ cur = None #postgres terminal cursor
 userdb_config_path = 'configs/user_db_config.yaml'
 userdb_config = None
 PORT_POOL = asyncio.Queue()
+SINGLE_WORKER_LOCK_FD = None
+SINGLE_WORKER_LOCK_PATH = os.path.join(tempfile.gettempdir(), "iba_backend_single_worker.lock")
+
+
+def _pid_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_single_worker_lock() -> None:
+    """Ensure only one backend worker process runs at a time.
+
+    This server keeps HITL/session routing in process-local memory. Running multiple
+    workers can route related requests to different processes and break interaction
+    handoffs. Set ALLOW_UNSAFE_MULTIWORKER=1 to bypass this guard intentionally.
+    """
+    global SINGLE_WORKER_LOCK_FD
+
+    if os.getenv("ALLOW_UNSAFE_MULTIWORKER", "").lower() in {"1", "true", "yes"}:
+        print("[startup] ALLOW_UNSAFE_MULTIWORKER is enabled; skipping single-worker guard.")
+        return
+
+    lock_message = (
+        "Detected multiple backend worker processes. This backend uses in-memory "
+        "HITL/session state and must run with a single worker for reliable "
+        "interaction handoff. Use '--workers 1' and avoid request-based worker "
+        "recycling for long-lived WebSocket sessions. Set ALLOW_UNSAFE_MULTIWORKER=1 "
+        "only if you fully externalize shared state (e.g., Redis)."
+    )
+
+    for _ in range(2):
+        try:
+            fd = os.open(SINGLE_WORKER_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+            SINGLE_WORKER_LOCK_FD = fd
+            return
+        except FileExistsError:
+            existing_pid = -1
+            try:
+                with open(SINGLE_WORKER_LOCK_PATH, "r", encoding="ascii", errors="ignore") as handle:
+                    existing_pid = int((handle.read() or "-1").strip())
+            except Exception:
+                existing_pid = -1
+
+            if not _pid_is_running(existing_pid):
+                try:
+                    os.remove(SINGLE_WORKER_LOCK_PATH)
+                    continue
+                except OSError:
+                    pass
+            raise RuntimeError(lock_message)
+
+    raise RuntimeError(lock_message)
+
+
+def _release_single_worker_lock() -> None:
+    global SINGLE_WORKER_LOCK_FD
+
+    fd = SINGLE_WORKER_LOCK_FD
+    if fd is None:
+        return
+
+    SINGLE_WORKER_LOCK_FD = None
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+    try:
+        with open(SINGLE_WORKER_LOCK_PATH, "r", encoding="ascii", errors="ignore") as handle:
+            holder_pid = int((handle.read() or "-1").strip())
+    except Exception:
+        holder_pid = -1
+
+    if holder_pid == os.getpid():
+        try:
+            os.remove(SINGLE_WORKER_LOCK_PATH)
+        except OSError:
+            pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -75,6 +164,7 @@ async def lifespan(app: FastAPI):
     print('Loading environment variables...')
     # Do not expand $... inside values (default dotenv treats $ as variable refs).
     load_dotenv(interpolate=False)
+    _acquire_single_worker_lock()
     
     print("Getting Database Config File")
     try:
@@ -115,6 +205,7 @@ async def lifespan(app: FastAPI):
     if conn is not None:
         conn.close()
         print('Database connection closed.')
+    _release_single_worker_lock()
 
 app = FastAPI(lifespan=lifespan)
 
