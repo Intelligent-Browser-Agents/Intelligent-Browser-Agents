@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Login.css";
 
@@ -39,6 +39,14 @@ export default function Login() {
 
   return (
     <div className="login-page">
+      <button
+        type="button"
+        className="about-link-button"
+        onClick={() => navigate("/about")}
+      >
+        About
+      </button>
+
       <div className="login-container">
         <h1 className="login-title">
           Intelligent Browser Agents
