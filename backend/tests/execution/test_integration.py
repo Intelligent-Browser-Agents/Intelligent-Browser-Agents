@@ -8,7 +8,9 @@ BI orchestration creates Action objects and calls dispatch_action to execute the
 """
 
 import pytest
-from backend.execution import dispatch_action, Action, ActionArgs
+from execution import dispatch_action, Action, ActionArgs
+
+pytestmark = pytest.mark.browser
 
 
 @pytest.mark.asyncio
@@ -238,7 +240,7 @@ async def test_tool_can_be_imported(page):
     This is what BI team's orchestration code would look like.
     """
     # This is how BI team imports the tool
-    from backend.execution import dispatch_action, Action, ActionArgs
+    from execution import dispatch_action, Action, ActionArgs
 
     # BI team creates an action
     action = Action(

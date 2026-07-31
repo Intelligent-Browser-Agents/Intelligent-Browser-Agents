@@ -7,11 +7,9 @@ Runs the LangGraph workflow and communicates with the server via:
   stdin   ← user replies  (one JSON line per reply: {"user_input": "..."})
 """
 
-from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
-from execution import Action, dispatch_action, ActionArgs
+from playwright.async_api import async_playwright
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
-from agents.verifier import Verifier
 from main import build_workflow
 import argparse
 import asyncio
@@ -42,8 +40,6 @@ try:
     sys.stdin.reconfigure(encoding="utf-8", errors="replace")
 except (AttributeError, OSError):
     pass
-
-Verifier.reset_simulation()
 
 HITL_PREFIX = "@@HITL@@"
 

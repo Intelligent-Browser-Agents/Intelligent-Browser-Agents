@@ -1,16 +1,58 @@
-# React + Vite
+# Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite UI for Intelligent Browser Agents. Users log in, submit a task
+prompt, watch the agent's live browser feed and logs, and answer
+human-in-the-loop (HITL) questions.
 
-Currently, two official plugins are available:
+See the root [README.md](../README.md) for full-system setup and
+[docs/IMPROVEMENT_PLAN.md](../docs/IMPROVEMENT_PLAN.md) for known defects.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Running
 
-## React Compiler
+```bash
+npm install
+npm run dev
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The dev server proxies to a backend expected on port 8000 (see `vite.config.js`):
 
-## Expanding the ESLint configuration
+- `/api` to `http://localhost:8000`
+- `/ws` to `ws://localhost:8000`
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Start the backend first, then open the URL Vite prints (usually
+`http://localhost:5173`).
+
+## Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Dev server with HMR |
+| `npm run build` | Production build to `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm run lint` | ESLint over `src/` |
+
+## Layout
+
+- `src/pages/` - `Login`, `Register`, `ForgotPassword`, `Dashboard`, `About`, each with a sibling CSS file.
+- `src/components/` - `ProtectedRoute` (route guard) and `UserCredentialsCard`.
+- `src/App.jsx` - route table.
+- `assets/` - agent icons and the HITL notification sound, imported directly by `Dashboard.jsx`.
+
+Note that `assets/` sits beside `src/`, not inside it. The ten PNGs under
+`assets/icons/` are required build inputs; a blanket `*.png` gitignore rule used
+to exclude them.
+
+## Dashboard streaming
+
+`Dashboard.jsx` opens `WS /ws/stream/{user_id}` per run and handles five message
+types: `FRAME` (base64 JPEG browser frame), `STATUS`, `LOG`, `CLARIFICATION`
+(HITL prompt), and `RESPONSE`.
+
+There is currently no reconnect logic, no stop button, and no run persistence
+across a page refresh. Phases 6 and 7 of the improvement plan cover these.
+
+## Known gaps
+
+The build toolchain aliases `vite` to `rolldown-vite` via `overrides` in
+`package.json`. There is no test script and no TypeScript, despite
+`@types/react` being installed.

@@ -1,35 +1,44 @@
-# stuff the program makes currently
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+backend/configs/user_db_config.yaml
+
+# Agent run artifacts.
+# Scoped to the directories that actually collect generated output. A blanket
+# `*.png` rule previously ignored the ten agent icons under
+# frontend/assets/icons/ that Dashboard.jsx imports.
 output/
+DOM_output/
 chrome_profile/
 screenshots/
-*.png
-*.pyc
+*.pdf
 
-# dotenv
-.env
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 
-# virtual environments
+# Virtual environments
 env/
-.venv/
 venv/
+.venv/
 
-# IDE stuff
-.vscode/
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDE and editor
 .idea/
+.vscode/
 
-# chrome profile 
-chrome_profile/
+# Claude Code local settings
+.claude/settings.local.json
 
-# DOM Output
-DOM_output/
-
-back/*
-backend/__pycache__
-backend/credentials/user_db_config.yaml
-
-# screenshots
-*.png
-
-# pychache 
-*.pyc
-
+# OS
+.DS_Store
+Thumbs.db

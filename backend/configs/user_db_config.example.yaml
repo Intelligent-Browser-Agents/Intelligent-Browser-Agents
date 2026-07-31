@@ -1,0 +1,18 @@
+# Optional local Postgres override for development.
+#
+# Copy to user_db_config.yaml and edit. That path is gitignored, so real
+# credentials never enter version control.
+#
+# Environment variables take precedence over this file and are the intended
+# mechanism for anything other than local development:
+#
+#   DB_NAME, DB_USER, DB_PASSWORD, DB_PORT, DB_HOST
+#
+# With neither the file nor the variables set, the server falls back to
+# postgres@127.0.0.1:5432/postgres with an empty password.
+
+dbname : "postgres"
+user : "postgres"
+password : "replace-me"
+port : "5432"
+host : "127.0.0.1"

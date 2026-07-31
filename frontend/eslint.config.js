@@ -23,6 +23,11 @@ export default defineConfig([
       },
     },
     rules: {
+      // PascalCase is exempt because `no-unused-vars` is not JSX-aware: without
+      // eslint-plugin-react's `jsx-uses-vars`, every component referenced only as
+      // `<Dashboard />` is reported unused. The tradeoff is that a genuinely
+      // unused PascalCase binding is not caught. Adding eslint-plugin-react would
+      // let this be narrowed to '^[A-Z][A-Z0-9_]*$'.
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },

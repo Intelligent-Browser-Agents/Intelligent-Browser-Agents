@@ -69,15 +69,16 @@ Top-level structure:
 - `backend/`
 	- `server.py`: FastAPI app, auth endpoints, websocket orchestration, process management.
 	- `src/`: LangGraph agent pipeline and Playwright execution modules.
-	- `configs/user_db_config.yaml`: PostgreSQL connection config.
-	- `tests/`: Unit and integration tests.
+	- `configs/user_db_config.example.yaml`: template for the optional local PostgreSQL override.
+	- `tests/`: Unit and integration tests, plus shared fixtures in `conftest.py`.
 	- `Makefile`: common setup/test/run shortcuts.
-	- `verification/`: verification model/evaluator docs and logic.
 - `frontend/`
 	- `src/pages/`: login/register/forgot-password/dashboard pages.
 	- `src/components/`: route protection and credential components.
 	- `vite.config.js`: dev proxy for `/api` and `/ws` to backend.
-- `requirements.txt`: Python dependencies.
+- `pyproject.toml`: pytest configuration (import mode, path, markers).
+- `requirements.txt` / `requirements-dev.txt`: Python runtime and test dependencies.
+- `docs/IMPROVEMENT_PLAN.md`: audited defect list and phased plan of work.
 - `README.md`: this repository guide.
 
 ## Prerequisites
@@ -95,9 +96,12 @@ From repository root:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python -m playwright install chromium
 ```
+
+`requirements-dev.txt` includes `requirements.txt` plus the test dependencies. For
+a runtime-only install use `pip install -r requirements.txt`.
 
 Then complete backend and frontend setup below.
 
@@ -112,7 +116,11 @@ docker pull postgres
 docker run --name some-postgres -e POSTGRES_PASSWORD=mysecretpassword -p 5432:5432 -d postgres
 ```
 
-Update `backend/configs/user_db_config.yaml` to match your DB settings:
+Configure the connection with the `DB_*` environment variables described below.
+
+For local development you may instead copy `backend/configs/user_db_config.example.yaml`
+to `backend/configs/user_db_config.yaml` and edit it. That path is gitignored, and
+environment variables take precedence over it:
 
 ```yaml
 dbname: "postgres"
@@ -148,24 +156,33 @@ CREATE TABLE users (
 
 ### 3. Set environment variables
 
-Create `backend/.env` with at least these keys:
+Create `.env` in the **repository root** with at least these keys:
 
 ```env
-GOOGLE_API_KEY=
 OPENAI_API_KEY=
 TOKEN_SECRET=
-BCRYPT_SALT=
 EMAIL_ACCOUNT=
 EMAIL_PASSWORD=
+
+# Optional: only needed if you switch AGENT_MODELS to a gemini-* key
+GOOGLE_API_KEY=
+
+# Optional: database connection. Defaults to postgres@127.0.0.1:5432/postgres.
+DB_NAME=
+DB_USER=
+DB_PASSWORD=
+DB_HOST=
+DB_PORT=
 ```
 
 Notes:
 
-- Default model assignments currently use Google models, so `GOOGLE_API_KEY` is required for out-of-the-box agent runs.
-- `OPENAI_API_KEY` is optional unless you switch model assignments in `backend/src/models.py`.
+- All six agents are assigned OpenAI models in `backend/src/models.py`, so `OPENAI_API_KEY` is required for out-of-the-box agent runs.
+- `GOOGLE_API_KEY` is only needed if you change `AGENT_MODELS` to a `gemini-*` key.
 - `TOKEN_SECRET` should be long/random in non-dev environments.
-- `BCRYPT_SALT` must be a valid bcrypt salt.
 - `EMAIL_ACCOUNT` and `EMAIL_PASSWORD` are needed for forgot-password email sending.
+- `BCRYPT_ROUNDS` optionally sets the bcrypt cost factor (default 12). Passwords are hashed with a fresh `bcrypt.gensalt()`, so no salt variable is needed.
+- `load_dotenv()` searches upward from the working directory, so a root `.env` is picked up whether you run from the repository root or from `backend/`.
 
 ### 4. Optional Chroma service
 
@@ -239,10 +256,17 @@ Execution actions are implemented in `backend/src/execution/` and exposed throug
 - `POST /api/users/login/`
 - `POST /api/users/verify/`
 - `GET /api/users/forgot-password/`
-- `POST /api/start_agent`
 - `POST /api/users/store-credentials`
 - `POST /api/hitl_reply/{user_id}`
-- `GET /send_logs` (placeholder)
+
+Present but not usable, and slated for removal in Phase 1 of `docs/IMPROVEMENT_PLAN.md`:
+
+- `POST /api/start_agent` - broken. It launches `src/app.py` with `--video_port`, which the script does not accept, and it uses a blocking `subprocess.run` inside an async endpoint. The frontend does not call it; runs start over `WS /ws/stream/{user_id}`.
+- `GET /send_logs` - stub, body is `pass`.
+- `GET /api/nuke` - unauthenticated `gc.collect()` debugging leftover.
+
+Note: no endpoint currently requires authentication. Phase 1 of the improvement
+plan adds a token dependency across the board.
 
 ### WebSocket endpoints
 
@@ -253,38 +277,53 @@ Execution actions are implemented in `backend/src/execution/` and exposed throug
 
 ## Testing
 
-Primary backend tests are in `backend/tests/`.
-
-From `backend/`:
+Backend tests are in `backend/tests/`. Pytest configuration lives in the root
+`pyproject.toml`, so **run pytest from the repository root**:
 
 ```powershell
-pytest tests -v
+pytest -q
+```
+
+This runs the offline suite: no network, no browser, and no model API key. Agent
+LLM calls are replaced with deterministic stubs by `backend/tests/conftest.py`.
+
+Two marker groups are deselected by default:
+
+- `browser` needs a real Chromium instance and outbound network access.
+- `llm` makes billable model API calls.
+
+Run them explicitly:
+
+```powershell
+pytest -m browser -v
+pytest -m llm -v
+pytest -m "" -v
 ```
 
 Targeted suites:
 
 ```powershell
-pytest tests/test_server.py -v
-pytest tests/execution -v
-pytest tests/verification -v
+pytest backend/tests/test_server.py -v
+pytest -m browser backend/tests/execution -v
 ```
 
-Systematic action script (long-running, browser-based):
-
-```powershell
-python tests/test_action_system.py
-```
-
-Using Makefile shortcuts (if your shell supports `make`):
+Using Makefile shortcuts from `backend/` (if your shell supports `make`):
 
 ```bash
-make install
 make install-dev
 make playwright
 make test
+make test-browser
 make test-server
-make test-execution
 ```
+
+### Known failing expectations
+
+Some tests are marked `xfail` with a reason pointing at the phase of
+`docs/IMPROVEMENT_PLAN.md` that fixes them. They assert intended behaviour that
+the code does not yet have, so they are documentation rather than dead weight.
+They are `strict`, meaning they fail loudly once the underlying defect is fixed,
+which is the prompt to remove the marker.
 
 ## Troubleshooting
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Register.css"; // optional, you can style separately
 
@@ -12,10 +12,10 @@ export default function Register() {
   const [LastName, setLastName] = useState("");
   const [message, setMessage] = useState("");
 
-  useEffect (() => {
-    setMessage('');
-  })
-
+  // A `useEffect(() => setMessage(''))` with no dependency array used to live here.
+  // It ran after *every* render, so it wiped the failure message set below before
+  // the error banner could ever display. `message` already initialises to "",
+  // so there is nothing for a mount-time reset to do.
 
   const handleRegister = async (e) => {
     e.preventDefault();

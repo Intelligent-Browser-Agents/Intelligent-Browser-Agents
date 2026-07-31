@@ -5,16 +5,8 @@ Tests actual browser actions with Playwright.
 """
 
 import pytest
-import sys
-from pathlib import Path
 
-# Add backend to path
-backend_path = Path(__file__).parent.parent.parent
-execution_agent_path = backend_path / "Prototype" / "agents" / "execution-agent"
-sys.path.insert(0, str(backend_path))
-sys.path.insert(0, str(execution_agent_path))
-
-from handlers import (
+from execution.handlers import (
     handle_navigate,
     handle_click,
     handle_type,
@@ -23,6 +15,8 @@ from handlers import (
     handle_press_key,
     handle_wait,
 )
+
+pytestmark = pytest.mark.browser
 
 
 @pytest.mark.asyncio

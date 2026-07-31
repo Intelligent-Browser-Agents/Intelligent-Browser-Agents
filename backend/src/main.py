@@ -5,38 +5,11 @@ from agents.executor import Executor
 from agents.fallback import Fallback
 from agents.interaction import InteractionAgent
 from state import ProjectState
-from google import genai
-import asyncio
-from playwright.async_api import async_playwright, Browser, Error as PlaywrightError
-import json
-from dom_extraction import dom_extractor
-from execution import Action, dispatch_action, ActionArgs
 import status_tracker
-# from app_prototype import runtime
 
-    
-# setting agent client
-client = genai.Client()
+# Agents load their own prompts through prompt_loader, which resolves paths
+# relative to this package rather than the process working directory.
 
-# helper to grab text from the md files in the prompts folder
-def read_markdown_file(file_path): 
-    try: 
-        with open(file_path, 'r', encoding='utf-8') as f: 
-            markdown_text = f.read()
-        return markdown_text
-    except FileNotFoundError:
-        return f"Error: {file_path} was not found."
-
-# prompts
-orchestration_prompt = read_markdown_file('backend\\src\\prompts\\orchestration.prompt.md')
-execution_prompt = read_markdown_file('backend\\src\\prompts\\execution.prompt.md')
-verification_prompt = read_markdown_file('backend\\src\\prompts\\verification.prompt.md')
-fallback_prompt = read_markdown_file('backend\\src\\prompts\\fallback.prompt.md')
-interaction_prompt = read_markdown_file('backend\\src\\prompts\\interaction.prompt.md')
-
-
-# grab user input from frontend
-user_input = "example text"
 
 def build_workflow(runtime):
     # Initialize the graph

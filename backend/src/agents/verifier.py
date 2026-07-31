@@ -1044,7 +1044,3 @@ If this is the last step of the plan and the step is complete, set goal_complete
             "name=exit",
         )
         return any(token in text for token in dismissive_tokens)
-
-    @classmethod
-    def reset_simulation(cls):
-        pass

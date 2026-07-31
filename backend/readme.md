@@ -1,9 +1,14 @@
 # Database Readme
-To get and run a chromadb instance use 
+
+To get and run a chromadb instance use
 ```bash
 docker pull chromadb/chroma
-docker run -d -p 8000:8000 chromadb/chroma
+docker run -d -p 8001:8000 chromadb/chroma
 ```
+
+Host port 8001 is deliberate: the API server below binds 8000, so mapping Chroma
+to 8000 as well would collide. Chroma is optional and nothing in the agent
+pipeline currently imports it.
 
 To get and run a postgress docker
 ```bash
@@ -72,7 +77,14 @@ To run uvicorn
 
 You may get Bcrypt errors. If so, you do not have the right values in your `.env` file. Let one of us know to help you with this. 
 
-Testing 
+Testing
+
+Run from the repository root, where `pyproject.toml` holds the pytest config:
 ```bash
-pytest -q testing.py
+pytest -q
+```
+
+Server tests only:
+```bash
+pytest backend/tests/test_server.py -v
 ```

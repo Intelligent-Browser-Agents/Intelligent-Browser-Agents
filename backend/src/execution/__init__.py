@@ -13,7 +13,7 @@ Components:
 - dispatcher: Routes actions to handlers
 
 Example usage:
-    >>> from backend.execution import dispatch_action, Action, ActionArgs
+    >>> from execution import dispatch_action, Action, ActionArgs
     >>>
     >>> # BI orchestration creates the action
     >>> action = Action(

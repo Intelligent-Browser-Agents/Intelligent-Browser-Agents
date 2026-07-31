@@ -1,0 +1,16 @@
+[tool.pytest.ini_options]
+# `importlib` import mode does not mutate sys.path during collection. The previous
+# default (`prepend`) inserted each test file's directory at sys.path[0], which let
+# backend/tests/execution/ shadow the real `execution` package and aborted the whole
+# suite with a collection error.
+addopts = ["--import-mode=importlib", "-m", "not browser and not llm"]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+consider_namespace_packages = false
+pythonpath = ["backend", "backend/src"]
+testpaths = ["backend/tests"]
+
+markers = [
+    "browser: needs a real Chromium instance and outbound network access",
+    "llm: needs a live model provider and makes billable API calls",
+]

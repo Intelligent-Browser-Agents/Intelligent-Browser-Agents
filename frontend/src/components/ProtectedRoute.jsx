@@ -1,31 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
-const check_login = async () => {
-    const token = localStorage.getItem('token');
-    const headers = {
-      'Content-Type': 'application/json' // Include the token in the Authorization header
-    };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const response = await fetch('/api/users/login/', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({ username, password }), // Sending raw JSON
-    });
-
-    const data = await response.json();
-    console.log("check_login: response data =", data);
-    if (data.error === '') {
-        return true;
-    } else {
-        return false;
-    }
-}
-
 const ProtectedRoute = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(null); // null = loading, true/false = loaded
   const [loading, setLoading] = useState(true);
@@ -55,7 +30,7 @@ const ProtectedRoute = () => {
                 setIsAuthenticated(false);
             }
         }
-        catch (error) {
+        catch {
             setIsAuthenticated(false);
         } finally {
         setLoading(false);

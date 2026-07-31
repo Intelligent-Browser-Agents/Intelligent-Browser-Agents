@@ -6,8 +6,10 @@ corresponding handlers and handles unknown actions appropriately.
 """
 
 import pytest
-from backend.execution.models import Action, ActionArgs
-from backend.execution.dispatcher import dispatch_action
+from execution.models import Action, ActionArgs
+from execution.dispatcher import dispatch_action
+
+pytestmark = pytest.mark.browser
 
 
 @pytest.mark.asyncio

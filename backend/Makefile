@@ -1,9 +1,13 @@
 # Makefile for Intelligent Browser Agents Backend
+#
+# Pytest configuration lives in ../pyproject.toml, so test targets run from the
+# repository root. Targets here are thin wrappers; nothing duplicates the
+# dependency list, which is requirements.txt.
 
-# Variables
-PYTHON = python3
+PYTHON = python
 PIP = $(PYTHON) -m pip
 PYTEST = $(PYTHON) -m pytest
+ROOT = ..
 
 # Default target
 .PHONY: help
@@ -11,39 +15,32 @@ help:
 	@echo "Intelligent Browser Agents - Backend Makefile"
 	@echo ""
 	@echo "Available commands:"
-	@echo "  make install          - Install all dependencies"
-	@echo "  make install-dev      - Install dev dependencies (pytest, etc.)"
-	@echo "  make test             - Run all tests"
-	@echo "  make test-actions     - Run action execution tests only"
+	@echo "  make install          - Install runtime dependencies"
+	@echo "  make install-dev      - Install runtime + test dependencies"
+	@echo "  make playwright       - Install the Chromium browser binary"
+	@echo "  make test             - Run the offline test suite"
+	@echo "  make test-browser     - Run tests that need a real browser + network"
+	@echo "  make test-llm         - Run tests that make billable model calls"
+	@echo "  make test-all         - Run every test, including browser and llm"
 	@echo "  make test-server      - Run server tests only"
-	@echo "  make run              - Run the main application"
+	@echo "  make test-execution   - Run execution handler tests only"
+	@echo "  make serve            - Run the API server with reload"
+	@echo "  make lint-frontend    - Run eslint in ../frontend"
 	@echo "  make clean            - Clean up cache files"
-	@echo "  make playwright       - Install Playwright browsers"
-	@echo ""
 
 # Install dependencies
 .PHONY: install
 install:
-	@echo "Installing dependencies..."
+	@echo "Installing runtime dependencies..."
 	$(PIP) install --upgrade pip
-	$(PIP) install playwright
-	$(PIP) install langchain
-	$(PIP) install langchain-core
-	$(PIP) install langgraph
-	$(PIP) install google-generativeai
-	$(PIP) install beautifulsoup4
-	$(PIP) install pympler
-	$(PIP) install pydantic
-	$(PIP) install fastapi
-	$(PIP) install uvicorn
+	$(PIP) install -r $(ROOT)/requirements.txt
 	@echo "Dependencies installed successfully!"
 
-# Install development dependencies
 .PHONY: install-dev
-install-dev: install
-	@echo "Installing dev dependencies..."
-	$(PIP) install pytest
-	$(PIP) install pytest-asyncio
+install-dev:
+	@echo "Installing runtime + test dependencies..."
+	$(PIP) install --upgrade pip
+	$(PIP) install -r $(ROOT)/requirements-dev.txt
 	@echo "Dev dependencies installed successfully!"
 
 # Install Playwright browsers
@@ -53,35 +50,39 @@ playwright:
 	$(PYTHON) -m playwright install chromium
 	@echo "Playwright browsers installed successfully!"
 
-# Run all tests
+# Offline suite. Browser and llm tests are deselected by default via addopts.
 .PHONY: test
 test:
-	@echo "Running all tests..."
-	$(PYTEST) tests/ -v
+	cd $(ROOT) && $(PYTEST) -q
 
-# Run action execution tests only
-.PHONY: test-actions
-test-actions:
-	@echo "Running action execution tests..."
-	$(PYTHON) -m tests.test_action_system
+.PHONY: test-browser
+test-browser:
+	cd $(ROOT) && $(PYTEST) -m browser -v
 
-# Run server tests only
+.PHONY: test-llm
+test-llm:
+	cd $(ROOT) && $(PYTEST) -m llm -v
+
+.PHONY: test-all
+test-all:
+	cd $(ROOT) && $(PYTEST) -m "" -v
+
 .PHONY: test-server
 test-server:
-	@echo "Running server tests..."
-	$(PYTEST) tests/test_server.py -v
+	cd $(ROOT) && $(PYTEST) backend/tests/test_server.py -v
 
-# Run execution handler unit tests
 .PHONY: test-execution
 test-execution:
-	@echo "Running execution handler tests..."
-	$(PYTEST) tests/execution/ -v
+	cd $(ROOT) && $(PYTEST) -m browser backend/tests/execution/ -v
 
-# Run the main application
-.PHONY: run
-run:
-	@echo "Starting application..."
-	$(PYTHON) -m src.app
+# Run the API server
+.PHONY: serve
+serve:
+	$(PYTHON) -m uvicorn server:app --host 127.0.0.1 --port 8000 --reload
+
+.PHONY: lint-frontend
+lint-frontend:
+	cd $(ROOT)/frontend && npx eslint .
 
 # Clean up cache files
 .PHONY: clean
@@ -91,11 +92,5 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type f -name "*.pyo" -delete
 	find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	@echo "Cache files cleaned!"
-
-# Full setup (install everything)
-.PHONY: setup
-setup: install install-dev playwright
-	@echo ""
-	@echo "Setup complete! Run 'make test' to verify everything works."
+	rm -rf $(ROOT)/.pytest_cache
+	@echo "Clean complete!"

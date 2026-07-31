@@ -14,7 +14,7 @@ This tool **executes browser actions** you specify. You decide WHAT to do, we ex
 
 ### Import
 ```python
-from backend.execution import dispatch_action, Action, ActionArgs
+from execution import dispatch_action, Action, ActionArgs
 ```
 
 ### Basic Usage
@@ -160,7 +160,7 @@ ExecutionOutput(
 ## Complete Example
 
 ```python
-from backend.execution import dispatch_action, Action, ActionArgs
+from execution import dispatch_action, Action, ActionArgs
 from playwright.async_api import async_playwright
 
 async def orchestration_example():
@@ -367,7 +367,7 @@ ActionArgs(seconds=2.0)  # Required: float
 
 ## Integration Checklist
 
-- [ ] Import: `from backend.execution import dispatch_action, Action, ActionArgs`
+- [ ] Import: `from execution import dispatch_action, Action, ActionArgs`
 - [ ] Create and manage your browser/page instances
 - [ ] Get DOM from IG team's extraction tool
 - [ ] Analyze DOM to decide actions

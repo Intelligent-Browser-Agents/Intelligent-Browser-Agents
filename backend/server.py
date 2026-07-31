@@ -64,6 +64,56 @@ userdb_config_path = 'configs/user_db_config.yaml'
 userdb_config = None
 PORT_POOL = asyncio.Queue()
 
+_DB_ENV_KEYS = {
+    "dbname": "DB_NAME",
+    "user": "DB_USER",
+    "password": "DB_PASSWORD",
+    "port": "DB_PORT",
+    "host": "DB_HOST",
+}
+
+_DB_DEFAULTS = {
+    "dbname": "postgres",
+    "user": "postgres",
+    "password": "",
+    "port": "5432",
+    "host": "127.0.0.1",
+}
+
+
+def load_db_config() -> dict:
+    """Resolve Postgres settings from the environment, with a local file override.
+
+    Precedence, highest first:
+      1. DB_NAME / DB_USER / DB_PASSWORD / DB_PORT / DB_HOST environment variables
+      2. configs/user_db_config.yaml, if present (gitignored; local dev convenience)
+      3. localhost defaults
+
+    The YAML file used to be committed with a real password and a private VPC
+    address in it. It is now gitignored, and the environment is the source of
+    truth so deployments never need it on disk.
+    """
+    config = dict(_DB_DEFAULTS)
+
+    try:
+        with open(userdb_config_path, 'r') as file:
+            from_file = yaml.safe_load(file) or {}
+        if isinstance(from_file, dict):
+            for key in _DB_ENV_KEYS:
+                if from_file.get(key) is not None:
+                    config[key] = from_file[key]
+    except FileNotFoundError:
+        pass
+    except yaml.YAMLError as e:
+        print(f"Warning: could not parse '{userdb_config_path}': {e}")
+
+    for key, env_name in _DB_ENV_KEYS.items():
+        value = os.getenv(env_name)
+        if value is not None and value != "":
+            config[key] = value
+
+    return {key: str(value) for key, value in config.items()}
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic: initialize the database connection
@@ -76,17 +126,14 @@ async def lifespan(app: FastAPI):
     # Do not expand $... inside values (default dotenv treats $ as variable refs).
     load_dotenv(interpolate=False)
     
-    print("Getting Database Config File")
-    try:
-        with open(userdb_config_path, 'r') as file:
-            userdb_config = yaml.safe_load(file)
-    except FileNotFoundError:
-        print(f"Error: The file '{userdb_config_path}' was not found.")
-    except yaml.YAMLError as e:
-        print(f"Error parsing YAML file: {e}")
+    print("Resolving database configuration")
+    userdb_config = load_db_config()
 
     # connect to the PostgreSQL server
-    print('Connecting to the PostgreSQL database...')
+    print(
+        "Connecting to the PostgreSQL database at "
+        f"{userdb_config['host']}:{userdb_config['port']}/{userdb_config['dbname']}..."
+    )
     conn = psycopg2.connect(
         dbname = userdb_config['dbname'],
         user = userdb_config['user'],

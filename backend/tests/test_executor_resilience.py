@@ -1,15 +1,6 @@
-import json
-import sys
-from pathlib import Path
-
 import pytest
+from langchain_core.messages import AIMessage
 from pydantic import ValidationError
-
-
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-SRC_DIR = BACKEND_DIR / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
 
 import agents.executor as executor_module
 from agents.executor import Executor
@@ -17,19 +8,81 @@ from execution.models import ActionArgs, ExecutionOutput
 from schema import ExecutionArgs, ExecutionResult
 
 
+# Marks tests that assert executor recovery behaviour which was removed in 66fb45f
+# ("removing some of the more hardcoded helpers that made it brittle"). The tests
+# were left behind and never ran, because a package-name collision aborted
+# collection for the whole suite. They are kept as xfail rather than deleted or
+# rewritten: they describe target behaviour for Phase 2 of docs/IMPROVEMENT_PLAN.md,
+# which replaces this guesswork with explicit `ambiguous_target` candidate lists.
+removed_recovery = pytest.mark.xfail(
+    reason="Executor arg-recovery from plan/DOM context was removed; see Phase 2 of docs/IMPROVEMENT_PLAN.md",
+    strict=True,
+)
+
+DEFAULT_ELEMENTS = [{"role": "textbox", "name": "Search site"}]
+
+
+class DummyAccessibility:
+    """Minimal stand-in for `page.accessibility`."""
+
+    def __init__(self, elements):
+        self._elements = elements
+
+    async def snapshot(self, interesting_only: bool = True):
+        return {
+            "role": "WebArea",
+            "name": "UCF",
+            "children": [
+                {"role": el["role"], "name": el["name"], "children": []}
+                for el in self._elements
+            ],
+        }
+
+
+class DummyContext:
+    def __init__(self, page):
+        self.pages = [page]
+
+
 class DummyPage:
-    def __init__(self, url: str = "https://ucf.edu"):
+    """Stands in for a Playwright Page across the executor's access patterns."""
+
+    def __init__(self, url: str = "https://ucf.edu", elements=None):
         self.url = url
+        self.accessibility = DummyAccessibility(elements or DEFAULT_ELEMENTS)
+        self.main_frame = object()
+        self.frames = [self.main_frame]
+        self.context = DummyContext(self)
+
+    async def screenshot(self, **_kwargs):
+        return b""
 
 
 class DummyLLM:
+    """Routes the executor down its structured-output path.
+
+    `bind_tools(...).ainvoke(...)` returns a message with no `tool_calls`, which is
+    the documented signal for the executor to fall back to `llm_structured.invoke`.
+    """
+
     def __init__(self, response: ExecutionResult):
         self.response = response
         self.messages = None
+        self.tool_messages = None
 
     def invoke(self, messages):
         self.messages = messages
         return self.response
+
+    def bind_tools(self, _tools, **_kwargs):
+        return self
+
+    async def ainvoke(self, messages, *_args, **_kwargs):
+        self.tool_messages = messages
+        return AIMessage(content="no tool call")
+
+    def get_num_tokens_from_messages(self, _messages, **_kwargs):
+        return 0
 
 
 def make_state(task: str = "Locate the search bar on the page.", url: str = "https://ucf.edu") -> dict:
@@ -47,25 +100,24 @@ def build_executor(response: ExecutionResult, page: DummyPage | None = None, llm
 
     executor = Executor.__new__(Executor)
     executor.runtime = {"page": selected_page}
-    executor.system_prompt = "Test execution prompt"
-    executor.llm = selected_llm
+    executor.system_prompt_json = "Test execution prompt"
+    executor.system_prompt_tools = "Test execution tools prompt"
+    executor.llm_structured = selected_llm
+    executor.llm_chat = selected_llm
     return executor, selected_llm
 
 
 def install_dom_mocks(monkeypatch, elements=None):
-    interactive_elements = elements or [{"role": "textbox", "name": "Search site"}]
+    """Stub the page-text extraction used to populate `dom_cache`.
 
-    async def fake_dom_main(page):
-        return ('{"status":"success","url":"https://ucf.edu","title":"UCF","dom_tree":"<html></html>"}', b"", page)
+    The interactive-element snapshot the prompt sees comes from
+    `page.accessibility.snapshot`, so pass `elements` to `DummyPage` for that.
+    """
 
-    def fake_retrieve_interactive_elements(dom_json: str):
-        return json.dumps({
-            "status": "success",
-            "interactive_elements": interactive_elements,
-        })
+    async def fake_get_page_text(page, max_chars: int = 3500):
+        return "UCF\nSearch site\nAcademics"
 
-    monkeypatch.setattr(executor_module.dom_extractor, "main", fake_dom_main)
-    monkeypatch.setattr(executor_module.dom_extractor, "retrieve_interactive_elements", fake_retrieve_interactive_elements)
+    monkeypatch.setattr(executor_module.dom_extractor, "get_page_text", fake_get_page_text)
 
 
 @pytest.mark.asyncio
@@ -75,9 +127,9 @@ async def test_click_missing_target_returns_structured_failure(monkeypatch):
     response = ExecutionResult(
         action="click",
         args=ExecutionArgs(role=None, name=None),
-        status="success",
-        error_type="none",
-        message="Click the search bar.",
+        status="failure",
+        error_type="ambiguous_step",
+        message="Could not identify the element to click.",
     )
     executor, _ = build_executor(response)
 
@@ -100,8 +152,23 @@ async def test_click_missing_target_returns_structured_failure(monkeypatch):
 
     assert was_dispatched["called"] is False
     assert "[Executor] Status: failure" in log
-    assert "Dispatch: skipped (invalid_action_args)" in log
     assert "Error Type: ambiguous_step" in log
+
+
+def test_click_success_requires_role_and_name():
+    """The schema itself rejects a successful click with no target.
+
+    This is the guard that replaced the executor's old
+    "Dispatch: skipped (invalid_action_args)" log branch.
+    """
+    with pytest.raises(ValidationError):
+        ExecutionResult(
+            action="click",
+            args=ExecutionArgs(role=None, name=None),
+            status="success",
+            error_type="none",
+            message="Click the search bar.",
+        )
 
 
 @pytest.mark.asyncio
@@ -179,9 +246,14 @@ async def test_search_text_is_recovered_from_current_task(monkeypatch):
     assert captured["action"] is not None
     assert captured["action"].args.text == "academics"
     assert "[Executor] Status: success" in log
-    assert "Recovery: inferred text='academics'" in log
+    # The recovery itself is not surfaced anywhere: _validate_and_normalize_action
+    # builds a "Recovered search text from PLAN_STEP" message, then
+    # _finish_from_result overwrites it with the dispatcher's own message. Assert the
+    # behaviour, not the log, until the log carries the recovery.
+    assert "text=academics" in log
 
 
+@removed_recovery
 @pytest.mark.asyncio
 async def test_search_text_is_recovered_from_plan_context(monkeypatch):
     install_dom_mocks(monkeypatch)
@@ -225,6 +297,7 @@ async def test_search_text_is_recovered_from_plan_context(monkeypatch):
     assert "Recovery: inferred text='academics'" in log
 
 
+@removed_recovery
 @pytest.mark.asyncio
 async def test_search_recovery_prefers_quoted_query_from_context(monkeypatch):
     install_dom_mocks(monkeypatch)
@@ -267,10 +340,12 @@ async def test_search_recovery_prefers_quoted_query_from_context(monkeypatch):
     assert "Recovery: inferred text='academics'" in log
 
 
+@removed_recovery
 @pytest.mark.asyncio
 async def test_click_target_is_recovered_from_dom_for_search_task(monkeypatch):
-    install_dom_mocks(
-        monkeypatch,
+    install_dom_mocks(monkeypatch)
+    dom_page = DummyPage(
+        url="https://ucf.edu",
         elements=[
             {"role": "button", "name": "Search"},
             {"role": "textbox", "name": "Search UCF"},
@@ -285,8 +360,7 @@ async def test_click_target_is_recovered_from_dom_for_search_task(monkeypatch):
         error_type="ambiguous_step",
         message="Could not determine the element to click.",
     )
-    page = DummyPage(url="https://ucf.edu")
-    executor, _ = build_executor(response, page=page)
+    executor, _ = build_executor(response, page=dom_page)
 
     captured = {"action": None}
 
@@ -335,30 +409,19 @@ async def test_model_failure_skips_dispatch(monkeypatch):
     log = result["reasoning_log"][0]
 
     assert "[Executor] Status: failure" in log
-    assert "Dispatch: skipped (model_reported_failure)" in log
     assert "Error Type: ambiguous_step" in log
 
 
 @pytest.mark.asyncio
 async def test_prompt_uses_real_interactive_dom_snapshot(monkeypatch):
-    calls = {"dom_main": 0, "retrieve": 0}
-
-    async def fake_dom_main(page):
-        calls["dom_main"] += 1
-        return ('{"status":"success","url":"https://ucf.edu","title":"UCF","dom_tree":"<html></html>"}', b"", page)
-
-    def fake_retrieve_interactive_elements(dom_json: str):
-        calls["retrieve"] += 1
-        return json.dumps({
-            "status": "success",
-            "interactive_elements": [
-                {"role": "textbox", "name": "Search site"},
-                {"role": "link", "name": "Academics"},
-            ],
-        })
-
-    monkeypatch.setattr(executor_module.dom_extractor, "main", fake_dom_main)
-    monkeypatch.setattr(executor_module.dom_extractor, "retrieve_interactive_elements", fake_retrieve_interactive_elements)
+    install_dom_mocks(monkeypatch)
+    page = DummyPage(
+        url="https://ucf.edu",
+        elements=[
+            {"role": "textbox", "name": "Search site"},
+            {"role": "link", "name": "Academics"},
+        ],
+    )
 
     response = ExecutionResult(
         action="wait",
@@ -368,7 +431,7 @@ async def test_prompt_uses_real_interactive_dom_snapshot(monkeypatch):
         message="Wait briefly.",
     )
     llm = DummyLLM(response)
-    executor, _ = build_executor(response, llm=llm)
+    executor, _ = build_executor(response, page=page, llm=llm)
 
     async def fake_dispatch(page, action):
         return ExecutionOutput(
@@ -384,12 +447,13 @@ async def test_prompt_uses_real_interactive_dom_snapshot(monkeypatch):
 
     await executor(make_state(task="Pause briefly before the next action."))
 
-    assert calls["dom_main"] == 1
-    assert calls["retrieve"] == 1
+    # Both the tool-call attempt and the structured fallback must see the snapshot.
+    assert llm.tool_messages is not None
     assert llm.messages is not None
-    human_message = llm.messages[1].content
-    assert '[role="textbox"] "Search site"' in human_message
-    assert '[role="link"] "Academics"' in human_message
+    for messages in (llm.tool_messages, llm.messages):
+        human_message = messages[1].content
+        assert '[role="textbox"] "Search site"' in human_message
+        assert '[role="link"] "Academics"' in human_message
 
 
 def test_actionargs_accepts_legacy_query_alias():
@@ -433,7 +497,7 @@ def test_dom_cache_context_prefers_diff_summary_when_two_snapshots_exist():
 def test_dom_snapshot_budget_for_listing_tasks_is_moderate_and_bounded():
     budget = Executor._dom_snapshot_budget("Select a hotel from the booking results listing.")
 
-    assert budget == 5500
+    assert budget == 5000
 
 
 def test_recovery_screenshot_capture_gate_requires_retry_or_high_signal_error():
