@@ -870,7 +870,11 @@ async def handle_type(page: Page, text: str) -> ExecutionOutput:
             },
             status="success",
             error_type="none",
-            message=f"Typed '{text}' into {target_desc}",
+            # Never echo the typed value. `args["text"]` is redacted downstream by
+            # Executor._execution_output_for_log, but `message` was not, so a typed
+            # password reached reasoning_log and was fed back into the LLM prompt on
+            # every subsequent turn via _build_recent_actions.
+            message=f"Typed {len(text)} character(s) into {target_desc}",
             execution_time_ms=elapsed,
         )
     except Exception as e:

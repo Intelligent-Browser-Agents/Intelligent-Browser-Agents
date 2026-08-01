@@ -817,6 +817,18 @@
   text-transform: uppercase;
 }
 
+/* Explanatory note inside a credential form, e.g. why no CVV is collected. */
+.creds-note {
+  margin: 2px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid #b8dff2;
+  border-radius: 0 8px 8px 0;
+  background: #f2fafd;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .modal-textarea,
 .creds-textarea,
 .creds-field input:not([type="checkbox"]),
@@ -1227,4 +1239,16 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Credential vault error banner (server-side vault load/save failures). */
+.creds-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(200, 60, 60, 0.35);
+  background: rgba(200, 60, 60, 0.08);
+  color: #a32222;
+  font-size: 0.9rem;
+  line-height: 1.4;
 }

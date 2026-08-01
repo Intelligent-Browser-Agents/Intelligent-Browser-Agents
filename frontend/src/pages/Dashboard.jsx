@@ -13,6 +13,8 @@ import userLogIcon from "../../assets/icons/agents/user.png";
 import verificationAgentIcon from "../../assets/icons/agents/verification.png";
 import "./Dashboard.css";
 
+import { api, buildWebSocketUrl, clearToken, getToken } from "../lib/api";
+
 // === COMPONENTS ===
 function UserCredentials({ 
   fullName, setFullName,
@@ -174,8 +176,15 @@ function UserCredentials({
               <div className="creds-field"><label htmlFor="cardNumber">Card Number</label><input id="cardNumber" type="text" inputMode="numeric" placeholder="4111111111111111" value={paymentForm.cardNumber} onChange={(e) => onPaymentFormChange("cardNumber", e.target.value)} /></div>
               <div className="creds-field"><label htmlFor="expiryMonth">Expiry Month</label><input id="expiryMonth" type="text" inputMode="numeric" placeholder="MM" value={paymentForm.expiryMonth} onChange={(e) => onPaymentFormChange("expiryMonth", e.target.value)} /></div>
               <div className="creds-field"><label htmlFor="expiryYear">Expiry Year</label><input id="expiryYear" type="text" inputMode="numeric" placeholder="YYYY" value={paymentForm.expiryYear} onChange={(e) => onPaymentFormChange("expiryYear", e.target.value)} /></div>
-              <div className="creds-field"><label htmlFor="cvv">CVV</label><input id="cvv" type="password" inputMode="numeric" placeholder="123" value={paymentForm.cvv} onChange={(e) => onPaymentFormChange("cvv", e.target.value)} /></div>
               <div className="creds-field"><label htmlFor="billingZip">Billing ZIP</label><input id="billingZip" type="text" placeholder="32816" value={paymentForm.billingZip} onChange={(e) => onPaymentFormChange("billingZip", e.target.value)} /></div>
+              {/* No CVV field. Retaining a card verification value is prohibited by
+                  PCI-DSS regardless of storage medium, so the server strips it and
+                  nothing here can persist it. The input that used to sit here was
+                  dead: it was never saved and never reached the agent. */}
+              <p className="creds-note">
+                For security, the CVV is never saved. You will be asked for it at the moment
+                a payment is made.
+              </p>
               <div className="service-detail-actions">
                 <button className="setting-btn" onClick={onSavePayment}>{isPaymentCreateMode ? "Add Card" : "Save Card"}</button>
                 {!isPaymentCreateMode && (<button className="setting-btn delete-service-btn" onClick={onDeletePayment}>Delete</button>)}
@@ -247,7 +256,7 @@ export default function Dashboard() {
     cardNumber: "",
     expiryMonth: "",
     expiryYear: "",
-    cvv: "",
+    // No `cvv`: it is never stored, so there is no form state to hold it.
     billingZip: "",
   };
   const defaultExperienceForm = {
@@ -270,12 +279,18 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [firstname, setFirstname] = useState("");
-  const [fullName, setFullName] = useState(localStorage.getItem("fullName") || "");
+
+  // Credential-vault state is loaded from the server, not localStorage. Storing
+  // third-party passwords, full card numbers, and CVVs in localStorage put them
+  // within reach of any script on the page; the CVV in particular must never be
+  // persisted at all.
+  const [fullName, setFullName] = useState("");
 
   const [input, setInput] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState(localStorage.getItem("phoneNumber") || "");
-  const [address, setAddress] = useState(localStorage.getItem("address") || "");
-  const [email, setEmail] = useState(localStorage.getItem("email") || "");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [address, setAddress] = useState("");
+  const [email, setEmail] = useState("");
+  const [credentialsError, setCredentialsError] = useState("");
 
   // verify user values
   const [password, setPassword] = useState("");
@@ -303,69 +318,23 @@ export default function Dashboard() {
   const [currentRunSessionId, setCurrentRunSessionId] = useState(null);
   const currentRunSessionIdRef = useRef(null);
 
-  const [userCredentialsList, setUserCredentialsList] = useState(() => {
-    const raw = localStorage.getItem("userCredentialsList");
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
-  const [paymentMethods, setPaymentMethods] = useState(() => {
-    const raw = localStorage.getItem("userPaymentMethods");
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [userCredentialsList, setUserCredentialsList] = useState([]);
+  const [paymentMethods, setPaymentMethods] = useState([]);
   const [serviceForm, setServiceForm] = useState({ ...defaultServiceForm });
   const [serviceView, setServiceView] = useState({ mode: "list", selectedId: null });
   const [paymentForm, setPaymentForm] = useState({ ...defaultPaymentForm });
   const [paymentView, setPaymentView] = useState({ mode: "list", selectedId: null });
-  const [experienceEntries, setExperienceEntries] = useState(() => {
-    const raw = localStorage.getItem("userExperienceEntries");
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  });
+  const [experienceEntries, setExperienceEntries] = useState([]);
   const [experienceView, setExperienceView] = useState({ mode: "list", selectedId: null });
   const [experienceForm, setExperienceForm] = useState(defaultExperienceForm);
 
 
-  const buildWebSocketUrl = (path, queryParams = {}) => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const baseUrl = `${protocol}://${window.location.host}`;
-    const url = new URL(path, baseUrl);
+  // buildWebSocketUrl now lives in lib/api.js. `chatIdToStableInt` is gone with
+  // it: hashing a browser-generated chat UUID into a fake "user_id" for the
+  // backend's HITL map collided across users and reset on every page reload. The
+  // server keys HITL by the authenticated user id from the token instead.
 
-    Object.entries(queryParams).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        url.searchParams.set(key, String(value));
-      }
-    });
 
-    return url.toString();
-  };
-
-  const chatIdToStableInt = (chatId) => {
-    // Deterministic 31-bit positive hash so UUID chat IDs map to a stable integer.
-    let hash = 0;
-    for (let i = 0; i < chatId.length; i += 1) {
-      hash = (hash * 31 + chatId.charCodeAt(i)) | 0;
-    }
-
-    return (Math.abs(hash) % 2147483646) + 1;
-  };
-
-  
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
@@ -441,8 +410,33 @@ export default function Dashboard() {
     userExperienceEntries: Array.isArray(experienceEntries) ? experienceEntries : [],
   });
 
-  const startAgentSession = (chatId, prompt, userCredentials) => {
+  /** Hydrate the credential form from the server-side encrypted vault. */
+  const loadCredentialsFromServer = async () => {
+    setCredentialsError("");
+    try {
+      const { credentials } = await api.readCredentials();
+      const vault = credentials || {};
+      setFullName(vault.fullName || "");
+      setAddress(vault.address || "");
+      setPhoneNumber(vault.phoneNumber || "");
+      setEmail(vault.email || "");
+      setUserCredentialsList(Array.isArray(vault.userCredentialsList) ? vault.userCredentialsList : []);
+      setPaymentMethods(Array.isArray(vault.userPaymentMethods) ? vault.userPaymentMethods : []);
+      setExperienceEntries(Array.isArray(vault.userExperienceEntries) ? vault.userExperienceEntries : []);
+    } catch (err) {
+      setCredentialsError(
+        err.status === 503
+          ? "Credential storage is not configured on the server (CREDENTIALS_KEY is unset)."
+          : err.detail || "Could not load your saved details."
+      );
+    }
+  };
+
+  const startAgentSession = (chatId, prompt) => {
     const sessionId = crypto.randomUUID();
+    // The credential blob is deliberately not kept on the session object. It was
+    // held in React state for the life of the page, which put saved passwords and
+    // card numbers where any component (and React DevTools) could read them.
     setAgentSessionsByChat((prev) => ({
       ...prev,
       [chatId]: [
@@ -453,7 +447,6 @@ export default function Dashboard() {
           logs: [],
           chatMessages: [],
           status: "running",
-          userCredentials,
         },
       ],
     }));
@@ -702,50 +695,6 @@ export default function Dashboard() {
     }
   };
 
-  {/*}
-  const handleSend = async() => {
-    if (!input.trim()) return;
-
-    // handle user chat
-    setConversations((prev) =>
-      prev.map((chat) =>
-        chat.id === activeChatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, { text: input, isUser: true }],
-              title:
-                chat.messages.length === 0
-                  ? input.slice(0, 20) || "New Chat"
-                  : chat.title,
-            }
-          : chat
-      )
-    );
-    setInput("");
-
-    // send input to server to start app.py using this prompt
-    var response = await axios.post("/api/start_agent", {
-      user_input: input
-    });
-
-    //! TEST
-    console.log(response);
-
-    // make a agent chat bubble with output  
-    setConversations((prev) =>
-      prev.map((chat) =>
-        chat.id === activeChatId ? {
-            ...chat,
-            messages: [...chat.messages, { text: response.data?.STDOUT, isUser: false }],
-            title:
-              chat.messages.length === 0
-                ? response.data?.STDOUT.slice(0, 20) || "New Chat"
-                : chat.title,
-        }: chat
-      )
-    );
-  };
-  */}
   const handleSend = async () => {
     if (!input.trim()) return;
 
@@ -772,75 +721,55 @@ export default function Dashboard() {
 
     // Agent is NOT running: close any existing ghost stream connection first
     if (socketRef.current) {
-      console.log("Closing existing socket...");
       socketRef.current.close();
     }
 
-    // Build fresh credentials at send time so the run always uses latest values.
-    const userCredentials = buildAgentCredentialsPayload();
-
-    // 2. Agent is not running: start a new run session
-    const sessionId = startAgentSession(selectedChatId, currentInput, userCredentials);
-
-    // 3. Start a read-only live video run
-    if (socketRef.current) socketRef.current.close();
-
-    try {
-      const token = localStorage.getItem("token") || "";
-      await fetch("/api/users/store-credentials", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          credentials: userCredentials,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to store credentials for session:", err);
-    }
-
-
-/*
-
-    
-    const wsVideoUrl = `ws://localhost:8000/ws/stream/${selectedChatId}?prompt=${encodedPrompt}&session_id=${encodedSessionId}`;
-*/
-    // const token = localStorage.getItem('token');
-    // const response = await fetch('/api/users/', {
-    //   method: 'GET',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //     'Authorization': `Bearer ${token}`,
-    //   }
-    // });
+    // Credentials are NOT pushed here. The agent reads them from the caller's own
+    // encrypted vault row on the server, so there is nothing to send.
+    //
+    // Uploading the form state at send time would be actively harmful now that the
+    // vault is server-side: the credential fields are only populated after the user
+    // opens the modal and confirms their password, so a run started before that
+    // would overwrite the saved vault with blanks.
+    const sessionId = startAgentSession(selectedChatId, currentInput);
 
     // const data = response.data;
     // setFirstname(data.firstname);
 
-    const encodedPrompt = encodeURIComponent(currentInput);
-    const encodedSessionId = encodeURIComponent(sessionId);
-    
-    const wsVideoUrl = buildWebSocketUrl(`/ws/stream/${chatIdToStableInt(selectedChatId)}?prompt=${encodedPrompt}&session_id=${encodedSessionId}`, {
-      prompt: currentInput,
-    });
-    socketRef.current = new WebSocket(wsVideoUrl);
-    
+    // The prompt and the bearer token used to travel as query parameters, which
+    // put the task text and the credential into every access log on the path. Both
+    // now go in the first frame, and the run is keyed to the authenticated user.
+    const socket = new WebSocket(buildWebSocketUrl("/ws/stream"));
+    socketRef.current = socket;
+
     setIsAgentRunning(true);
     setCurrentRunSessionId(sessionId);
 
-    socketRef.current.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        type: "start",
+        token: getToken(),
+        prompt: currentInput,
+      }));
+    };
+
+    socket.onerror = () => {
+      appendAgentLogLine(selectedChatId, sessionId, "STDERR: Connection to the agent failed.");
+    };
+
+    socket.onmessage = (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        // A partial or non-JSON frame must not take down the handler.
+        return;
+      }
+
       if (msg.type === "FRAME") {
         setLiveFrame(`data:image/jpeg;base64,${msg.data}`);
       } else if (msg.type === "STATUS") {
         appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
-        if (msg.content === "Agent finished task." && socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.close();
-        }
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
         if (msg.content && msg.content.includes("[NODE]: __INTERRUPT__")) {
@@ -864,13 +793,17 @@ export default function Dashboard() {
       }
     };
 
-    socketRef.current.onclose = () => {
+    socket.onclose = () => {
+      // Identity guard: a previous run's close event can land after a new run has
+      // started, and without this check it reset the live view and flipped the new
+      // run back to "Idle".
+      markSessionFinished(selectedChatId, sessionId);
+      if (socketRef.current !== socket) return;
+
       setLiveFrame(null);
       setHitlState(false);
-      markSessionFinished(selectedChatId, sessionId);
       setIsAgentRunning(false);
       setCurrentRunSessionId(null);
-      console.log("Agent stream closed.");
     };
   };
 
@@ -903,20 +836,11 @@ export default function Dashboard() {
   };
 
   const handleGetUserInfo = async () => {
-    const token = localStorage.getItem('token');
-    const response = await fetch('/api/users/', {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      }
-    });
-
-    const data = await response.json();
-    if (data.error === '') {
+    try {
+      const data = await api.me();
       setFirstname(data.firstname);
-    } else {
-      console.log(data.error);
+    } catch {
+      // apiFetch redirects to the login page on a 401; nothing to do here.
     }
   };
 
@@ -925,29 +849,34 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem('token') || '';
-    const wsChatUrl = buildWebSocketUrl(`/ws/chat/${chatIdToStableInt(activeChatIdRef.current)}`, { token });
-    const chatSocket = new WebSocket(wsChatUrl);
+    // The chat socket is a HITL fallback. It authenticates with a first frame; the
+    // `token` query parameter it used to send was never validated by the server.
+    const chatSocket = new WebSocket(buildWebSocketUrl("/ws/chat"));
     chatSocketRef.current = chatSocket;
 
-    chatSocket.onmessage = (event) => {
-      const chatId = activeChatIdRef.current;
-      const runningSessionId = currentRunSessionIdRef.current;
+    chatSocket.onopen = () => {
+      chatSocket.send(JSON.stringify({ type: "auth", token: getToken() }));
+    };
 
-      if (isAgentRunningRef.current && runningSessionId) {
-        appendSessionChatMessage(chatId, runningSessionId, event.data, false);
+    chatSocket.onmessage = (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
         return;
       }
+      // Only structured status replies are expected now. The server no longer
+      // broadcasts other clients' text here.
+      if (msg.type === "AUTH_OK") return;
+      if (msg.type !== "STATUS" || !msg.content) return;
 
-      appendMessageToChat(chatId, event.data, false, "chat-socket");
-    };
-
-    chatSocket.onerror = (error) => {
-      console.error('Chat socket error:', error);
-    };
-
-    chatSocket.onclose = () => {
-      console.log('Chat socket closed.');
+      const chatId = activeChatIdRef.current;
+      const runningSessionId = currentRunSessionIdRef.current;
+      if (isAgentRunningRef.current && runningSessionId) {
+        appendSessionChatMessage(chatId, runningSessionId, msg.content, false);
+        return;
+      }
+      appendMessageToChat(chatId, msg.content, false, "chat-socket");
     };
 
     return () => {
@@ -964,42 +893,30 @@ export default function Dashboard() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    clearToken();
+    setFirstname("");
+    setDidUserVerifyIdentity(false);
+    setPassword("");
     navigate("/");
   }
 
   // verify user identity to show credentials
   const verifyUser = async () => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token || token === 'undefined' || token === 'null') {
-        alert('Your session expired. Please log in again.');
-        navigate('/');
-        return;
-      }
-      const response = await fetch('/api/users/verify/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ password }),
-      });
-      const data = await response.json();
+      const data = await api.verifyPassword(password);
 
-      if (data.verified === true && data.error === '') {
-        // show user credentials on page
+      if (data.verified === true) {
         setDidUserVerifyIdentity(true);
-        console.log(didUserVerifyIdentity);
+        // The password is not needed after this point; holding it keeps the
+        // account password in component state for the life of the page.
+        setPassword("");
+        await loadCredentialsFromServer();
       } else {
-        // unsuccessful - try again
         setDidUserVerifyIdentity(false);
         alert(data.error || 'Verification failed.');
-
       }
     } catch (err) {
-      console.error(err);
-      alert('Verification failed. Try again.');       
+      alert(err.detail || 'Verification failed. Try again.');
     }
   };
 
@@ -1090,7 +1007,6 @@ export default function Dashboard() {
       cardNumber: payment.cardNumber || "",
       expiryMonth: payment.expiryMonth || "",
       expiryYear: payment.expiryYear || "",
-      cvv: payment.cvv || "",
       billingZip: payment.billingZip || "",
     });
     setPaymentView({ mode: "edit", selectedId: paymentId });
@@ -1120,6 +1036,9 @@ export default function Dashboard() {
       return;
     }
 
+    // The CVV is deliberately not included. Retaining a card verification value is
+    // prohibited by PCI-DSS whatever the storage medium, and the server strips the
+    // field too. It stays in the form field for the current page only.
     const payload = {
       id: paymentForm.id || crypto.randomUUID(),
       cardNickname: paymentForm.cardNickname.trim(),
@@ -1128,7 +1047,6 @@ export default function Dashboard() {
       maskedCardNumber: `**** **** **** ${cardDigits.slice(-4)}`,
       expiryMonth: paymentForm.expiryMonth.trim(),
       expiryYear: paymentForm.expiryYear.trim(),
-      cvv: paymentForm.cvv.trim(),
       billingZip: paymentForm.billingZip.trim(),
       updatedAt: new Date().toISOString(),
     };
@@ -1226,29 +1144,21 @@ export default function Dashboard() {
     handleBackToExperience();
   };
 
+  // Persist the whole vault to the server, encrypted at rest and keyed to the
+  // authenticated user. Nothing sensitive is written to localStorage: it used to
+  // hold third-party passwords, full card numbers, and CVVs in plaintext, and the
+  // per-keystroke effects below wrote them out on every edit.
   const handleSaveGeneralUserData = async () => {
-    localStorage.setItem("fullName", fullName); // persistence
-    localStorage.setItem("address", address); // persistence
-    localStorage.setItem("phoneNumber", phoneNumber); // persistence
-    localStorage.setItem("email", email); // persistence
-    localStorage.setItem("userCredentialsList", JSON.stringify(userCredentialsList)); // persistence
-    localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods)); // persistence
-    localStorage.setItem("userExperienceEntries", JSON.stringify(experienceEntries)); // persistence
-
-    setShowUserCredentials(false)
+    setCredentialsError("");
+    try {
+      await api.storeCredentials(buildAgentCredentialsPayload());
+      setShowUserCredentials(false);
+    } catch (err) {
+      setCredentialsError(
+        err.detail || "Could not save your details. They have not been stored."
+      );
+    }
   };
-
-  useEffect(() => {
-    localStorage.setItem("userCredentialsList", JSON.stringify(userCredentialsList));
-  }, [userCredentialsList]);
-
-  useEffect(() => {
-    localStorage.setItem("userPaymentMethods", JSON.stringify(paymentMethods));
-  }, [paymentMethods]);
-
-  useEffect(() => {
-    localStorage.setItem("userExperienceEntries", JSON.stringify(experienceEntries));
-  }, [experienceEntries]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1583,9 +1493,13 @@ export default function Dashboard() {
       {showUserCredentials && (
         <div className="modal-overlay">
           <div className="modal-content user-credentials-modal">
-            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Close user credentials">X</button>
+            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Save and close user credentials">X</button>
             <h2 className="modal-title">User Credentials</h2>
             <hr className="modal-title-divider"/>
+
+            {credentialsError && (
+              <p className="creds-error" role="alert">{credentialsError}</p>
+            )}
 
             {/* VERIFY USER'S IDENTITY BEFORE REVELAING CREDENTIALS */}
             {didUserVerifyIdentity ? (

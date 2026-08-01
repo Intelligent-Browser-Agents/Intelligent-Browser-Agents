@@ -56,8 +56,8 @@ The system is split into two main apps plus supporting modules:
 High-level flow:
 
 1. User submits a task from the dashboard.
-2. Frontend opens `/ws/stream/{user_id}`.
-3. Backend starts `src/app.py` as a subprocess.
+2. Frontend opens `/ws/stream` and sends `{"type": "start", "token", "prompt"}` as the first frame.
+3. Backend validates the token, loads that user's encrypted credential vault, and starts `src/app.py` as a subprocess, handing the credentials over on stdin.
 4. LangGraph agents iterate: orchestrator -> executor -> verifier -> fallback/interaction.
 5. Browser frames/logs and HITL messages stream back through WebSocket.
 6. User replies (if requested) are forwarded to the running agent.
@@ -161,8 +161,12 @@ Create `.env` in the **repository root** with at least these keys:
 ```env
 OPENAI_API_KEY=
 TOKEN_SECRET=
+CREDENTIALS_KEY=
 EMAIL_ACCOUNT=
 EMAIL_PASSWORD=
+
+# Comma-separated. Defaults to the Vite dev server on 5173.
+ALLOWED_ORIGINS=http://localhost:5173
 
 # Optional: only needed if you switch AGENT_MODELS to a gemini-* key
 GOOGLE_API_KEY=
@@ -175,11 +179,20 @@ DB_HOST=
 DB_PORT=
 ```
 
+Generate `CREDENTIALS_KEY` once and keep it stable, or previously saved
+credentials become unreadable:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
 Notes:
 
 - All six agents are assigned OpenAI models in `backend/src/models.py`, so `OPENAI_API_KEY` is required for out-of-the-box agent runs.
 - `GOOGLE_API_KEY` is only needed if you change `AGENT_MODELS` to a `gemini-*` key.
-- `TOKEN_SECRET` should be long/random in non-dev environments.
+- `TOKEN_SECRET` should be long/random in non-dev environments. It signs both access tokens and the short-lived password-reset tokens.
+- `CREDENTIALS_KEY` is a Fernet key encrypting the saved-credential vault at rest. Without it, the credential endpoints return 503 rather than storing anything in plaintext.
+- `ALLOWED_ORIGINS` sets the CORS allowlist. A wildcard is not accepted, because `allow_origins=["*"]` with `allow_credentials=True` is not a valid combination.
 - `EMAIL_ACCOUNT` and `EMAIL_PASSWORD` are needed for forgot-password email sending.
 - `BCRYPT_ROUNDS` optionally sets the bcrypt cost factor (default 12). Passwords are hashed with a fresh `bcrypt.gensalt()`, so no salt variable is needed.
 - `load_dotenv()` searches upward from the working directory, so a root `.env` is picked up whether you run from the repository root or from `backend/`.
@@ -247,33 +260,52 @@ Execution actions are implemented in `backend/src/execution/` and exposed throug
 
 ## API and WebSocket Endpoints
 
-### REST endpoints
+Authenticated endpoints expect `Authorization: Bearer <access token>` and return
+`401` with a `detail` field when the token is missing, expired, or wrongly scoped.
+The acting user is always the token subject; no endpoint accepts a caller-supplied
+user id.
 
-- `GET /api/users/`
-- `POST /api/users/insert/`
-- `DELETE /api/users/delete/`
+### Public REST endpoints
+
+- `POST /api/users/insert/` - register.
+- `POST /api/users/login/` - returns `{token}`, or `{resetRequired, resetToken}` when the account is flagged for a password change.
+- `POST /api/users/forgot-password` - body `{username}` or `{email}`.
+  Always returns the same response so it cannot be used to test whether an account exists.
+  Rate limited per client.
+- `POST /api/users/change-password` - requires the **reset-scoped** token from login, not an access token.
+  Returns a normal access token.
+
+### Authenticated REST endpoints
+
+- `GET /api/users/` - the authenticated user's profile.
 - `POST /api/users/update/`
-- `POST /api/users/login/`
-- `POST /api/users/verify/`
-- `GET /api/users/forgot-password/`
-- `POST /api/users/store-credentials`
-- `POST /api/hitl_reply/{user_id}`
-
-Present but not usable, and slated for removal in Phase 1 of `docs/IMPROVEMENT_PLAN.md`:
-
-- `POST /api/start_agent` - broken. It launches `src/app.py` with `--video_port`, which the script does not accept, and it uses a blocking `subprocess.run` inside an async endpoint. The frontend does not call it; runs start over `WS /ws/stream/{user_id}`.
-- `GET /send_logs` - stub, body is `pass`.
-- `GET /api/nuke` - unauthenticated `gc.collect()` debugging leftover.
-
-Note: no endpoint currently requires authentication. Phase 1 of the improvement
-plan adds a token dependency across the board.
+- `DELETE /api/users/delete/` - also removes the credential vault row.
+- `POST /api/users/verify/` - confirm the caller's own password.
+- `GET /api/users/credentials` - read the decrypted vault.
+- `POST /api/users/store-credentials` - encrypt and upsert the vault.
+  CVV-like fields are stripped before storage.
+- `DELETE /api/users/credentials`
+- `POST /api/hitl_reply` - answer the caller's active clarification prompt.
 
 ### WebSocket endpoints
 
-- `WS /ws/stream/{user_id}`
-	- Streams agent logs, status updates, HITL requests, and browser frames.
-- `WS /ws/chat/{client_id}`
-	- Chat channel and HITL reply forwarding.
+Both authenticate with a first frame. Tokens are never query parameters, so they
+do not appear in access logs. An unauthenticated socket is closed with code 1008
+before any agent process starts.
+
+- `WS /ws/stream`
+	- First frame: `{"type": "start", "token": "<access token>", "prompt": "<task>"}`.
+	- Streams `FRAME`, `STATUS`, `LOG`, `CLARIFICATION`, and `RESPONSE` messages.
+	- Accepts `{"type": "user_hitl_reply", "content": ...}`, `{"type": "abort_run", ...}`, and `{"type": "INPUT", ...}` browser input events.
+- `WS /ws/chat`
+	- First frame: `{"type": "auth", "token": "<access token>"}`, answered with `{"type": "AUTH_OK"}`.
+	- Fallback path for delivering a HITL reply. It does not broadcast.
+
+### Removed in Phase 1
+
+- `POST /api/start_agent` - was broken (launched `src/app.py` with an unsupported `--video_port`, and blocked the event loop with a synchronous `subprocess.run`). Runs start over `WS /ws/stream`.
+- `GET /send_logs` - stub whose body was `pass`.
+- `GET /api/nuke` - unauthenticated `gc.collect()` debugging leftover.
 
 ## Testing
 
@@ -343,8 +375,22 @@ which is the prompt to remove the marker.
 
 - Do not commit real API keys or secrets.
 - Keep production secrets outside source control.
-- Use a strong `TOKEN_SECRET` and rotate if exposed.
-- Consider storing sensitive user credential payloads in encrypted storage rather than local browser storage for production deployments.
+- Use a strong `TOKEN_SECRET` and rotate it if exposed.
+- Saved user credentials are encrypted at rest with `CREDENTIALS_KEY` and keyed to the authenticated user.
+  Losing or rotating that key makes existing vault rows unreadable.
+- Card verification values (CVV) are never persisted, by either the browser or the server.
+- `backend/configs/user_db_config.yaml` is gitignored.
+  It was previously committed with a real password and a private VPC address, so that credential should be treated as compromised and rotated.
+
+### Still outstanding
+
+These are known gaps, tracked in `docs/IMPROVEMENT_PLAN.md`:
+
+- The access token lives in `localStorage`, so it is reachable by any XSS.
+  Moving to an httpOnly cookie needs a CSRF strategy and is not yet done.
+- Database calls are synchronous inside async endpoints, so they block the event loop under load.
+  Phase 1 fixed the correctness problem (a single shared cursor) with a connection pool; the throughput problem remains.
+- The forgot-password rate limit is per-process and in-memory, so it does not hold across multiple workers.
 
 ## Contributors
 

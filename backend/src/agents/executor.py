@@ -109,7 +109,10 @@ class Executor:
         page = self.runtime.get("page")
         if page is None:
             raise RuntimeError("[ERROR]: Executor called without a Playwright page!")
-        
+
+        # Refreshed each turn so redaction covers whatever is in the vault now.
+        self._secret_values = self._collect_secret_values(state)
+
         current_task = state.get("current_task", "No task specified")
         current_url = state.get("current_url", "unknown")
         user_intent = self._get_user_intent(state)
@@ -400,7 +403,7 @@ class Executor:
             result = await dispatch_action(page, tool_action)
             print(
                 f"[executor - {result.action} result]: ",
-                Executor._execution_output_for_log(result),
+                self._execution_output_for_log(result),
                 flush=True,
             )
             return await self._finish_from_result(
@@ -412,7 +415,45 @@ class Executor:
             )
 
     @staticmethod
-    def _execution_output_for_log(result: ExecutionOutput) -> dict[str, Any]:
+    def _collect_secret_values(state: ProjectState) -> tuple[str, ...]:
+        """Exact secret strings from the user's vault, for redaction.
+
+        Redacting by value rather than by field name means a password is scrubbed
+        wherever it appears, while functionally necessary text (a search query, a
+        cover letter) is left intact.
+        """
+        creds = state.get("user_credentials") or {}
+        if not isinstance(creds, dict):
+            return ()
+
+        secrets: set[str] = set()
+
+        for service in creds.get("userCredentialsList") or []:
+            if isinstance(service, dict):
+                value = service.get("password")
+                if isinstance(value, str) and len(value.strip()) >= 4:
+                    secrets.add(value.strip())
+
+        for payment in creds.get("userPaymentMethods") or []:
+            if isinstance(payment, dict):
+                for key in ("cardNumber", "cvv", "cvc", "securityCode"):
+                    value = payment.get(key)
+                    if isinstance(value, str) and len(value.strip()) >= 4:
+                        secrets.add(value.strip())
+
+        # Longest first so a secret containing another is masked whole.
+        return tuple(sorted(secrets, key=len, reverse=True))
+
+    def _redact(self, text: str) -> str:
+        """Replace any known secret value inside ``text`` with a placeholder."""
+        if not isinstance(text, str) or not text:
+            return text
+        for secret in getattr(self, "_secret_values", ()) or ():
+            if secret and secret in text:
+                text = text.replace(secret, f"<redacted len={len(secret)}>")
+        return text
+
+    def _execution_output_for_log(self, result: ExecutionOutput) -> dict[str, Any]:
         """Strip/redact values that must not appear in logs (typed secrets, extracted page text)."""
         payload = result.model_dump()
         args = dict(payload.get("args") or {})
@@ -424,6 +465,9 @@ class Executor:
         et = payload.get("extracted_text")
         if isinstance(et, str) and et:
             payload["extracted_text"] = f"<redacted len={len(et)}>"
+        message = payload.get("message")
+        if isinstance(message, str) and message:
+            payload["message"] = self._redact(message)
         return payload
 
     def _return_failure(
@@ -1908,13 +1952,15 @@ class Executor:
         ]:
             value = args.get(key) if isinstance(args, dict) else None
             if value is not None and str(value).strip() != "":
-                args_str.append(f"{key}={value}")
+                args_str.append(f"{key}={self._redact(str(value))}")
 
+        # reasoning_log is re-fed to the model by _build_recent_actions, so a secret
+        # left here would re-enter the prompt on every subsequent turn.
         log = (
             f"[Executor] Action: {action}\n"
             f"[Executor] Args: {', '.join(args_str) or 'None'}\n"
             f"[Executor] Status: {status}\n"
-            f"[Executor] Message: {message}"
+            f"[Executor] Message: {self._redact(str(message))}"
         )
         if error_type and error_type != "none":
             log += f"\n[Executor] Error Type: {error_type}"

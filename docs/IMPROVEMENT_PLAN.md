@@ -241,6 +241,44 @@ Nothing else can be trusted until the tests run and the tree is clean.
 
 ## Phase 1: security and tenancy
 
+**Status: complete.** Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Endpoints requiring auth | 0 of 12 | **all except register, login, forgot-password, change-password** |
+| WebSockets requiring auth | 0 of 2 | **2 of 2, via first-frame handshake** |
+| Credentials at rest | plaintext in `localStorage` | **Fernet-encrypted in Postgres, keyed to the token subject** |
+| CVV storage | plaintext in `localStorage` | **never persisted, stripped client and server side** |
+| Credentials to subprocess | command-line argument | **stdin** |
+| Secrets in server logs | full blob printed | **key names only** |
+| Typed secrets in LLM context | present every turn | **redacted by value** |
+| DB concurrency | one shared cursor | **connection pool, one connection per request** |
+| Tests passing offline | 88 | **149, plus 49 opt-in** |
+| `eslint` | 0 errors | **0 errors** |
+
+Each fixed vulnerability has a `test_regression_*` test pinning it.
+The `xfail` on `GET /api/users/` is gone because that defect is now fixed, which is the marker working as intended.
+
+Deliberate contract changes, which the frontend was updated to match:
+
+- Auth failures return `401` with a `detail` field instead of `200` with an `error` string.
+- `GET /api/users/` no longer accepts `?userId=`; it returns the token subject.
+- `forgot-password` is a `POST` at `/api/users/forgot-password`, with no trailing slash and a single generic response.
+- `/ws/stream/{user_id}` and `/ws/chat/{client_id}` lost their path parameters and became `/ws/stream` and `/ws/chat`.
+- `POST /api/hitl_reply/{user_id}` became `POST /api/hitl_reply`.
+- JWTs now carry a `scope` claim, so tokens issued before this change are rejected and users must sign in again.
+
+Findings that surfaced during the work:
+
+- `README.md` documented `BCRYPT_SALT` as a required variable.
+  Nothing reads it, and nothing ever did in this tree.
+  Anyone following the setup guide would set a no-op variable and reasonably assume salting was configured.
+- The chat WebSocket relayed every message to *every* connected socket as `Client #N says: ...`, and the dashboard rendered whatever arrived as agent output.
+  One user's text appeared in another user's transcript, attributed to the agent.
+  This was a data leak, not just a correctness bug, so the broadcast was removed rather than scoped.
+- `ProtectedRoute` authenticated by POSTing `{token}` to the *login* endpoint with no username, which raised a `KeyError` and returned a 500.
+  The redirect worked only because an exception was thrown.
+
 This must precede autonomy work.
 An agent that acts on the user's behalf with their saved credentials and card is not something to leave unauthenticated.
 

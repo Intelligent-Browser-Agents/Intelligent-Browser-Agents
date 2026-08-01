@@ -12,8 +12,9 @@
 fastapi==0.135.1
 uvicorn[standard]==0.42.0
 
-# Auth and database
+# Auth, database, and credential-vault encryption
 bcrypt==5.0.0
+cryptography==46.0.5
 psycopg2-binary==2.9.11
 pyjwt==2.12.1
 

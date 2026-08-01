@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Login.css";
+
+import { api, clearToken, setToken } from "../lib/api";
 
 export default function Login() {
   const navigate = useNavigate(); // allows navigation between pages
@@ -8,32 +10,43 @@ export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
+  // The Authorization header is deliberately NOT sent. This page used to attach
+  // any stored token to the login request, and the backend short-circuited on a
+  // valid header and returned that token without checking the submitted
+  // credentials. On a shared browser, the next person could type anything and be
+  // logged in as the previous user.
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
 
-    const token = localStorage.getItem('token');
-    const headers = {
-      'Content-Type': 'application/json' // Include the token in the Authorization header
-    };
+    setSubmitting(true);
+    setMessage("");
+    clearToken();
 
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+    try {
+      const data = await api.login(username, password);
 
-    const response = await fetch('/api/users/login/', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({ username, password }), // Sending raw JSON
-    });
+      if (data.resetRequired) {
+        // Carry the scoped reset token to the change-password page. Previously the
+        // frontend discarded the response here, so a user whose password had been
+        // reset could never log in again.
+        navigate("/change-password", { state: { resetToken: data.resetToken } });
+        return;
+      }
 
-    const data = await response.json();
-    if (data.error === '') {
-      localStorage.setItem('token', data.token);
-      navigate("/dashboard");
-    } else {
-      localStorage.removeItem('token'); // Clear any existing token on failed login
-      setMessage('Username or password is incorrect. Please try again.');
+      if (data.token) {
+        setToken(data.token);
+        navigate("/dashboard");
+        return;
+      }
+
+      setMessage(data.error || "Username or password is incorrect. Please try again.");
+    } catch (err) {
+      setMessage(err.detail || "Could not sign in. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -55,20 +68,30 @@ export default function Login() {
         </h1>
 
         <form onSubmit={handleSubmit} className="login-form">
+          <label className="login-label" htmlFor="login-username">Username</label>
           <input
+            id="login-username"
+            name="username"
             type="text"
+            autoComplete="username"
             placeholder="Username"
             className="login-input"
+            value={username}
             onChange={(e) => setUsername(e.target.value)}
           />
+          <label className="login-label" htmlFor="login-password">Password</label>
           <input
+            id="login-password"
+            name="password"
             type="password"
+            autoComplete="current-password"
             placeholder="Password"
             className="login-input"
+            value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           {message && (
-            <p className="login-message">
+            <p className="login-message" role="alert">
               {message}
             </p>
           )}
@@ -77,8 +100,9 @@ export default function Login() {
           <button
             type="submit"
             className="login-button"
+            disabled={submitting}
           >
-            Login
+            {submitting ? "Signing in..." : "Login"}
           </button>
         </div>
         </form>

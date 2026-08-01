@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Register.css"; // optional, you can style separately
 
+import { api } from "../lib/api";
+
 export default function Register() {
   const navigate = useNavigate();
 
@@ -11,6 +13,7 @@ export default function Register() {
   const [FirstName, setFirstName] = useState("");
   const [LastName, setLastName] = useState("");
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   // A `useEffect(() => setMessage(''))` with no dependency array used to live here.
   // It ran after *every* render, so it wiped the failure message set below before
@@ -19,22 +22,31 @@ export default function Register() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    const headers = {
-      'Content-Type': 'application/json' // Include the token in the Authorization header
-    };
+    if (submitting) return;
 
-    const response = await fetch('/api/users/insert/', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({ username: Username, firstname: FirstName, lastname: LastName, email: Email, password: Password }), // Sending raw JSON
-    });
-    
-    const data = await response.json();
-    if (data.userId) {
-      return navigate('/');
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const data = await api.register({
+        username: Username,
+        firstname: FirstName,
+        lastname: LastName,
+        email: Email,
+        password: Password,
+      });
+
+      if (data.userId) {
+        navigate('/');
+        return;
+      }
+      // Stay on the page so the banner is visible. The old code navigated to
+      // "/register" from "/register", which was a confusing no-op.
+      setMessage('Registration failed. ' + (data.error || 'Unknown error') + '. Please try again.');
+    } catch (err) {
+      setMessage('Registration failed. ' + (err.detail || 'Unknown error') + '. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
-    setMessage('Registration failed. ' + (data.error || 'Unknown error') + '. Please try again.');
-    return navigate("/register");
   };
 
   return (
@@ -53,7 +65,9 @@ export default function Register() {
               {message}
             </p>
           )}
-          <button type="submit" className="register-button"  >Register</button>
+          <button type="submit" className="register-button" disabled={submitting}>
+            {submitting ? "Creating account..." : "Register"}
+          </button>
         </form>
 
         <div className="back-to-login">

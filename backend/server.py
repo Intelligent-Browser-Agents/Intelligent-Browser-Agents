@@ -1,5 +1,20 @@
+"""
+FastAPI application: authentication, credential vault, and agent orchestration.
+
+Security model
+--------------
+Every REST endpoint except registration, login, and forgot-password requires a
+bearer access token, and the acting user is always derived from that token rather
+than from a request parameter. Both WebSocket endpoints authenticate with a first
+frame carrying the token, so credentials never appear in a URL or an access log.
+
+Saved user credentials live in Postgres encrypted with Fernet and keyed to the
+authenticated user id. They are handed to the agent subprocess over stdin, never
+as a command-line argument.
+"""
+
 # FastAPI framework, Requests for anything but GET
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from playwright.async_api import async_playwright
 import socket
 
@@ -8,11 +23,12 @@ import jwt
 from datetime import datetime, timezone, timedelta
 
 # Used for Ensuring Startup and Shutdown Events
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 # Database Config and Connection
 import yaml
 import psycopg2
+from psycopg2 import pool as psycopg2_pool
 
 # For loading .env variables
 import os
@@ -20,6 +36,9 @@ from dotenv import load_dotenv
 
 # Password hashing (import once at load time; native bcrypt + reload/re-import can misbehave)
 import bcrypt
+
+# Credential encryption at rest
+from cryptography.fernet import Fernet, InvalidToken
 
 # Emailing
 import smtplib
@@ -39,11 +58,6 @@ import asyncio
 import json
 import time
 
-# credential storage 
-CREDENTIALS_BY_SESSION = {}
-SESSION_CREDENTIAL_CREATED_AT = {}
-SESSION_CREDENTIAL_TTL_SECONDS = 60 * 30
-
 # Windows requires ProactorEventLoop for asyncio subprocess support.
 if sys.platform == "win32":
     try:
@@ -51,18 +65,38 @@ if sys.platform == "win32":
     except Exception as e:
         print(f"Warning: could not set Windows Proactor event loop policy: {e}")
 
-"""
-To-DO List:
--Create Verify Email endpoint, using app.get and token sent as query param
-"""
-
 
 # Global Variables
-conn = None #postgres connection
-cur = None #postgres terminal cursor
+DB_POOL = None  # psycopg2 ThreadedConnectionPool
+cur = None  # test seam only: when set, get_cursor() yields this instead of the pool
 userdb_config_path = 'configs/user_db_config.yaml'
 userdb_config = None
 PORT_POOL = asyncio.Queue()
+
+ACCESS_TOKEN_TTL_HOURS = 1
+RESET_TOKEN_TTL_MINUTES = 15
+ACCESS_SCOPE = "access"
+RESET_SCOPE = "password_reset"
+
+# Fields that must never be persisted, at any layer. Storing a card verification
+# value is prohibited by PCI-DSS regardless of encryption.
+FORBIDDEN_CREDENTIAL_FIELDS = frozenset({"cvv", "cvc", "cvv2", "cvc2", "securitycode", "security_code"})
+
+_FORGOT_PASSWORD_WINDOW_SECONDS = 15 * 60
+_FORGOT_PASSWORD_MAX_ATTEMPTS = 5
+_forgot_password_attempts: dict[str, list[float]] = {}
+
+
+def _allowed_origins() -> list[str]:
+    """CORS origins from ALLOWED_ORIGINS, defaulting to the Vite dev server.
+
+    `allow_origins=["*"]` together with `allow_credentials=True` is not a valid
+    combination: browsers reject a wildcard origin on credentialed requests, and
+    it defeats the purpose of the check.
+    """
+    raw = os.getenv("ALLOWED_ORIGINS", "")
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    return origins or ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 _DB_ENV_KEYS = {
     "dbname": "DB_NAME",
@@ -114,79 +148,314 @@ def load_db_config() -> dict:
 
     return {key: str(value) for key, value in config.items()}
 
+"""
+Database access
+"""
+
+
+@contextmanager
+def get_cursor(commit: bool = True):
+    """Yield a cursor on a connection borrowed from the pool for this call only.
+
+    Previously a single module-level connection and cursor were shared by every
+    request. psycopg2 cursors are not safe for concurrent use, so overlapping
+    requests could interleave results.
+
+    When the module-level ``cur`` is set, it is yielded instead. That is the seam
+    the tests use to inject a fake cursor; it is always None in production.
+    """
+    if cur is not None:
+        yield cur
+        return
+
+    if DB_POOL is None:
+        raise RuntimeError("Database pool is not initialised; did the app start up?")
+
+    connection = DB_POOL.getconn()
+    try:
+        with connection.cursor() as cursor:
+            yield cursor
+        if commit:
+            connection.commit()
+        else:
+            connection.rollback()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        DB_POOL.putconn(connection)
+
+
+def init_schema() -> None:
+    """Create the credential vault table if it does not exist."""
+    with get_cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_credentials (
+                user_id INTEGER PRIMARY KEY,
+                payload BYTEA NOT NULL,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            """
+        )
+
+
+"""
+Authentication
+"""
+
+
+def _token_secret() -> str:
+    secret = os.getenv('TOKEN_SECRET')
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server is missing TOKEN_SECRET; cannot issue or validate tokens.",
+        )
+    return secret
+
+
+def create_access_token(user_id: int, username: str, firstname: str, lastname: str) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        'user_id': user_id,
+        'username': username,
+        'firstname': firstname,
+        'lastname': lastname,
+        'scope': ACCESS_SCOPE,
+        'iat': now,
+        'exp': now + timedelta(hours=ACCESS_TOKEN_TTL_HOURS),
+    }
+    return jwt.encode(payload, _token_secret(), algorithm='HS256')
+
+
+def create_reset_token(user_id: int) -> str:
+    """Short-lived token that authorises exactly one action: setting a new password."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        'user_id': user_id,
+        'scope': RESET_SCOPE,
+        'iat': now,
+        'exp': now + timedelta(minutes=RESET_TOKEN_TTL_MINUTES),
+    }
+    return jwt.encode(payload, _token_secret(), algorithm='HS256')
+
+
+def _bearer_token(request: Request) -> str:
+    header = request.headers.get('authorization') or ''
+    scheme, _, token = header.partition(' ')
+    if scheme.lower() != 'bearer':
+        return ''
+    token = token.strip()
+    # The frontend has historically stringified missing values into the header.
+    if token in ('', 'undefined', 'null', 'None'):
+        return ''
+    return token
+
+
+def _decode_scoped_token(token: str, expected_scope: str) -> dict:
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        decoded = jwt.decode(token, _token_secret(), algorithms=['HS256'])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
+        # Deliberately not echoing the library's message back to the client.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # A reset token must never be usable as an access token, and vice versa.
+    if decoded.get('scope') != expected_scope:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is not valid for this operation.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id = decoded.get('user_id')
+    if not isinstance(user_id, int) or user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return decoded
+
+
+async def require_user(request: Request) -> int:
+    """FastAPI dependency: the authenticated user id, from the token only.
+
+    Endpoints must never accept a caller-supplied user id. Doing so was an IDOR:
+    `GET /api/users/?userId=N` returned any user's record with no token at all.
+    """
+    return _decode_scoped_token(_bearer_token(request), ACCESS_SCOPE)['user_id']
+
+
+async def require_reset_user(request: Request) -> int:
+    """FastAPI dependency: the user id from a password-reset token."""
+    return _decode_scoped_token(_bearer_token(request), RESET_SCOPE)['user_id']
+
+
+"""
+Credential vault encryption
+"""
+
+
+def _fernet() -> Fernet:
+    key = os.getenv('CREDENTIALS_KEY')
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Credential storage is disabled: CREDENTIALS_KEY is not set. Generate one "
+                "with: python -c \"from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())\""
+            ),
+        )
+    try:
+        return Fernet(key.encode('utf-8') if isinstance(key, str) else key)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="CREDENTIALS_KEY is not a valid Fernet key.",
+        )
+
+
+def strip_forbidden_fields(value):
+    """Recursively drop fields that must never be persisted (CVV and friends)."""
+    if isinstance(value, dict):
+        return {
+            k: strip_forbidden_fields(v)
+            for k, v in value.items()
+            if k.strip().lower().replace('-', '_') not in FORBIDDEN_CREDENTIAL_FIELDS
+        }
+    if isinstance(value, list):
+        return [strip_forbidden_fields(item) for item in value]
+    return value
+
+
+def encrypt_credentials(credentials: dict) -> bytes:
+    payload = json.dumps(credentials, ensure_ascii=False, default=str).encode('utf-8')
+    return _fernet().encrypt(payload)
+
+
+def decrypt_credentials(payload) -> dict:
+    if payload is None:
+        return {}
+    raw = bytes(payload) if isinstance(payload, memoryview) else payload
+    try:
+        decrypted = _fernet().decrypt(raw)
+    except InvalidToken:
+        # Wrong or rotated key. Treat as empty rather than leaking a 500.
+        print("[credentials] Stored blob could not be decrypted with the current CREDENTIALS_KEY.")
+        return {}
+    try:
+        loaded = json.loads(decrypted.decode('utf-8'))
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def load_user_credentials(user_id: int) -> dict:
+    with get_cursor(commit=False) as cursor:
+        cursor.execute('SELECT payload FROM user_credentials WHERE user_id = %s;', (user_id,))
+        row = cursor.fetchone()
+    if not row:
+        return {}
+    return decrypt_credentials(row[0])
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic: initialize the database connection
-    global conn
-    global cur
+    # Startup logic: initialise the database connection pool
+    global DB_POOL
     global userdb_config
-    # read connection parameters, for security setup a config file for db params
-    #params = config()
+
     print('Loading environment variables...')
     # Do not expand $... inside values (default dotenv treats $ as variable refs).
     load_dotenv(interpolate=False)
-    
+
     print("Resolving database configuration")
     userdb_config = load_db_config()
 
-    # connect to the PostgreSQL server
     print(
         "Connecting to the PostgreSQL database at "
         f"{userdb_config['host']}:{userdb_config['port']}/{userdb_config['dbname']}..."
     )
-    conn = psycopg2.connect(
-        dbname = userdb_config['dbname'],
-        user = userdb_config['user'],
-        password = userdb_config['password'],
-        port = userdb_config['port'],
-        host = userdb_config['host']
+    DB_POOL = psycopg2_pool.ThreadedConnectionPool(
+        minconn=1,
+        maxconn=int(os.getenv('DB_MAX_CONNECTIONS', '10')),
+        dbname=userdb_config['dbname'],
+        user=userdb_config['user'],
+        password=userdb_config['password'],
+        port=userdb_config['port'],
+        host=userdb_config['host'],
     )
-    conn.autocommit = True
-    # create a cursor
-    cur = conn.cursor()
-    print("Database connected!")
+    print("Database pool ready!")
+
+    try:
+        init_schema()
+        print("Credential vault schema ready.")
+    except Exception as exc:
+        print(f"Warning: could not ensure user_credentials table exists: {exc}")
+
+    if not os.getenv('CREDENTIALS_KEY'):
+        print(
+            "Warning: CREDENTIALS_KEY is not set. Credential storage endpoints will "
+            "return 503 until it is configured."
+        )
 
     while not PORT_POOL.empty():
         await PORT_POOL.get()
-            
-    for p in range(9000,9010): # Using 9000+ 
+
+    for p in range(9000, 9010):  # Using 9000+
         await PORT_POOL.put(p)
-    print(f"✅ POOL READY: {PORT_POOL.qsize()} ports available.")
-    
+    print(f"POOL READY: {PORT_POOL.qsize()} ports available.")
+
     yield
-    # Shutdown logic: close the database connection
-    print("Closing database connection...")
-    if cur is not None:
-        cur.close()
-        print('Cursor closed')
-    if conn is not None:
-        conn.close()
-        print('Database connection closed.')
+
+    print("Closing database pool...")
+    if DB_POOL is not None:
+        DB_POOL.closeall()
+        print('Database pool closed.')
 
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Your React URL
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["*"], # This allows POST, OPTIONS, etc.
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 """
 Helper Functions
 """
 def user_exists(username: str, email: str) -> bool:
-    query = 'SELECT * FROM users WHERE username = %s OR email = %s;'
-    cur.execute(query, (username, email))
-    results = cur.fetchone()
-    return results is not None
+    with get_cursor(commit=False) as cursor:
+        cursor.execute(
+            'SELECT user_id FROM users WHERE username = %s OR email = %s;',
+            (username, email),
+        )
+        return cursor.fetchone() is not None
 
 def user_exists_id(userId: int) -> bool:
-    query = 'SELECT * FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId),))
-    results = cur.fetchone()
-    return results is not None
+    with get_cursor(commit=False) as cursor:
+        cursor.execute('SELECT user_id FROM users WHERE user_id = %s;', (str(userId),))
+        return cursor.fetchone() is not None
 
 
 def hash_password_bcrypt(plain_password: str) -> str:
@@ -262,46 +531,36 @@ def send_forgot_password(to_email: str, new_password: str) -> None:
 """
 User CRUD Endpoints
 """
-@app.get('/api/users/') # Get User by Id
-async def get_user(request: Request):
-    #incoming: userId or JWT
+@app.get('/api/users/')  # Get the authenticated user
+async def get_user(user_id: int = Depends(require_user)):
+    #incoming: bearer access token
     #outgoing: username, firstname, lastname, email
-    error  = ''
+    #
+    # The `userId` query parameter this endpoint used to accept was an IDOR: it
+    # returned any user's record with no token at all. The user is now always the
+    # token subject. Columns are listed explicitly rather than using SELECT *,
+    # which silently depended on physical column order.
+    with get_cursor(commit=False) as cursor:
+        cursor.execute(
+            'SELECT user_id, username, firstname, lastname, email '
+            'FROM users WHERE user_id = %s;',
+            (str(user_id),),
+        )
+        results = cursor.fetchone()
 
-    token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
-    userId = -1
+    if results is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    # Checking values in query exists 
-    if request.query_params.get('userId') == ''  and (token == '' or token == 'undefined'):
-        error = 'No UserId or Token Specified'
-        return {'error' : error}
-    
-    if request.query_params.get('userId') is not None:
-        userId = int(request.query_params.get('userId', 0))
-    else:
-        try:
-            secret_key = os.getenv('TOKEN_SECRET')
-            decoded = jwt.decode(token, secret_key, algorithms='HS256')
-            userId = decoded['user_id']
-        except jwt.InvalidTokenError as e:
-            error = str(e)
-            return {'error': error}
+    return {
+        'user_id': results[0],
+        'username': results[1],
+        'firstname': results[2],
+        'lastname': results[3],
+        'email': results[4],
+        'error': '',
+    }
 
-    if userId <= 0: #Validate User
-        error = 'UserId is Invalid'
-        return {'error' : error}
-    
-    query = 'SELECT * FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId),))
-    results = cur.fetchone()
-    
-    if results is not None:
-        user_id, username, firstname, lastname, email, _, _, _, _ = results
-        return {'user_id': user_id, 'username': username, 'firstname': firstname, 'lastname':lastname, 'email':email,'error': error}
-    else:
-        error = f'No Users Found in Database'
-        return {'error': error}
-    
+
 @app.post('/api/users/insert/') # Insert New User 
 async def insert_user(request: Request):
     #incoming: username, firstname, lastname, email, password
@@ -329,295 +588,325 @@ async def insert_user(request: Request):
     # Inserting the new user
     query = 'INSERT INTO users (username, firstname, lastname, email, isverified, chng_pass, password) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING user_id;'
     hashed_password = hash_password_bcrypt(password)
-    cur.execute(query, (username, firstname, lastname, email, False, False, hashed_password))
-    newUserId = cur.fetchone()[0]
+    with get_cursor() as cursor:
+        cursor.execute(query, (username, firstname, lastname, email, False, False, hashed_password))
+        newUserId = cursor.fetchone()[0]
     return {'userId': newUserId, 'error': error}
 
-@app.delete('/api/users/delete/') # Delete User
-async def delete_user(request: Request):
-    #incoming: token
+@app.delete('/api/users/delete/') # Delete the authenticated user
+async def delete_user(user_id: int = Depends(require_user)):
+    #incoming: bearer access token
     #outgoing: success/failure
-    error  = ''
-    token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
+    #
+    # The old handler returned `{'error': e}` with a raw exception object on an
+    # invalid token, which FastAPI cannot serialise, producing a 500.
+    if not user_exists_id(user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
-    userId = 0
+    with get_cursor() as cursor:
+        # Remove the credential vault row first; there is no FK to cascade from.
+        cursor.execute('DELETE FROM user_credentials WHERE user_id = %s;', (user_id,))
+        cursor.execute('DELETE FROM users WHERE user_id = %s;', (str(user_id),))
 
-    if token != '':
-        try:
-            secret_key = os.getenv('TOKEN_SECRET')
-            decoded = jwt.decode(token, secret_key, algorithms='HS256')
-            userId = decoded['user_id']
-        except jwt.InvalidTokenError as e:
-            return {'error': e}
-    else:
-        error = 'No Token Provided'
-        return {'error' : error}
+    return {'error': ''}
 
-    if userId <= 0: #Validate User
-        error = 'UserId is Not Specified or Invalid'
-        return {'error' : error}
-    
-    check = user_exists_id(userId)
-    if check is False:
-        error = 'No User Found with the Given UserId'
-        return {'error' : error}
-    
-    # Deleting the user
-    query = 'DELETE FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId),))
-    
-    return {'error': error}
-
-@app.post('/api/users/update/') # Update User Info
-async def update_user(request: Request):
-    #incoming: token, username, firstname, lastname, email, password
+@app.post('/api/users/update/') # Update the authenticated user's info
+async def update_user(request: Request, user_id: int = Depends(require_user)):
+    #incoming: bearer access token, any of username/firstname/lastname/email/password
     #outgoing: new user info
-    error  = ''
     pass_updated = False
-
-    token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
     body = await request.json()
 
-    userId = 0
-
-    if token != '':
-        try:
-            secret_key = os.getenv('TOKEN_SECRET')
-            decoded = jwt.decode(token, secret_key, algorithms='HS256')
-            userId = decoded['user_id']
-        except jwt.InvalidTokenError as e:
-            error = str(e)
-            return {'error': error}
-    else:
-        error = 'No Token Provided'
-        return {'error' : error}
-
-    
     username = body['username'] if 'username' in body else None
     firstname = body['firstname'] if 'firstname' in body else None
     lastname = body['lastname'] if 'lastname' in body else None
     email = body['email'] if 'email' in body else None
     password = body['password'] if 'password' in body else None
 
-    if userId <= 0: #Validate User
-        error = 'UserId is Not Specified or Invalid'
-        return {'error' : error}
-    
-    check = user_exists_id(userId)
-    if check is False:
-        error = 'No User Found with the Given UserId'
-        return {'error' : error}
-    
-    if username is not None:
-        query = 'UPDATE users SET username = %s WHERE user_id = %s;'
-        cur.execute(query, (username, str(userId)))
-    if firstname is not None:
-        query = 'UPDATE users SET firstname = %s WHERE user_id = %s;'
-        cur.execute(query, (firstname, str(userId)))
-    if lastname is not None:
-        query = 'UPDATE users SET lastname = %s WHERE user_id = %s;'
-        cur.execute(query, (lastname, str(userId)))
-    if email is not None:
-        query = 'UPDATE users SET email = %s WHERE user_id = %s;'
-        cur.execute(query, (email, str(userId)))
-    if password is not None:
-        query = 'UPDATE users SET password = %s, chng_pass = false WHERE user_id = %s;'
-        hashed_password = hash_password_bcrypt(password)
-        cur.execute(query, (hashed_password, str(userId)))
-        pass_updated = True
-    
-    query = 'SELECT * FROM users WHERE user_id = %s;'
-    cur.execute(query, (str(userId),))
-    results = cur.fetchone()
-    if results is not None:
-        user_id, username, firstname, lastname, email, _, _, _, _ = results
-        return {'user_id': user_id, 'username': username, 'firstname': firstname, 'lastname':lastname, 'email':email,'passUpdated': pass_updated,'error': error}
-    else:
-        error = f'No Users Found in Database'
-        return {'error': error}
-    
+    if not user_exists_id(user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    # One connection for the whole update so a partial failure rolls back together,
+    # instead of each field being its own autocommitted statement.
+    with get_cursor() as cursor:
+        if username is not None:
+            cursor.execute('UPDATE users SET username = %s WHERE user_id = %s;', (username, str(user_id)))
+        if firstname is not None:
+            cursor.execute('UPDATE users SET firstname = %s WHERE user_id = %s;', (firstname, str(user_id)))
+        if lastname is not None:
+            cursor.execute('UPDATE users SET lastname = %s WHERE user_id = %s;', (lastname, str(user_id)))
+        if email is not None:
+            cursor.execute('UPDATE users SET email = %s WHERE user_id = %s;', (email, str(user_id)))
+        if password is not None:
+            hashed_password = hash_password_bcrypt(password)
+            cursor.execute(
+                'UPDATE users SET password = %s, chng_pass = false WHERE user_id = %s;',
+                (hashed_password, str(user_id)),
+            )
+            pass_updated = True
+
+        cursor.execute(
+            'SELECT user_id, username, firstname, lastname, email '
+            'FROM users WHERE user_id = %s;',
+            (str(user_id),),
+        )
+        results = cursor.fetchone()
+
+    if results is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    return {
+        'user_id': results[0],
+        'username': results[1],
+        'firstname': results[2],
+        'lastname': results[3],
+        'email': results[4],
+        'passUpdated': pass_updated,
+        'error': '',
+    }
+
+
 @app.post('/api/users/login/') # User Login
 async def login_user(request: Request):
-    #incoming: username, password, token(Optional)
-    #outgoing: token
-    error  = ''
-    token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
+    #incoming: username, password
+    #outgoing: token, or a scoped reset token when a password change is required
+    #
+    # This endpoint used to short-circuit on a valid Authorization header and
+    # return that token without checking the submitted credentials at all. Because
+    # the frontend attached any stored token to the login request, a second person
+    # at the same browser could type arbitrary credentials and be logged in as the
+    # previous user. The header is now ignored entirely: logging in requires proving
+    # the password.
     body = await request.json()
 
-    if token != '' and token != 'undefined':
-        try:
-            secret_key = os.getenv('TOKEN_SECRET')
-            decoded = jwt.decode(token, secret_key, algorithms='HS256')
-            return {'token': token, 'error': error}
-        except jwt.InvalidTokenError as e:
-            error = str(e)
-
-    username = body['username']
-    password = body['password']
-
-    #print(password)
+    username = body.get('username') or ''
+    password = body.get('password') or ''
 
     if username == '' or password == '':
-        error = 'Username or Password is Missing'
-        return {'error' : error}
+        return {'error': 'Username or Password is Missing'}
 
-    query = (
-        "SELECT user_id, username, firstname, lastname, password, chng_pass "
-        "FROM users WHERE username = %s;"
-    )
-    cur.execute(query, (username,))
-    results = cur.fetchone()
+    with get_cursor(commit=False) as cursor:
+        cursor.execute(
+            "SELECT user_id, username, firstname, lastname, password, chng_pass "
+            "FROM users WHERE username = %s;",
+            (username,),
+        )
+        results = cursor.fetchone()
 
-    if results is not None:
-        user_id, username, firstname, lastname, stored_hash, chng_pass = results
-        if not verify_password(password, stored_hash):
-            results = None
+    if results is None or not verify_password(password, results[4]):
+        # Identical response for "no such user" and "wrong password".
+        return {'error': 'Invalid Username or Password'}
 
-    if results is not None:
-        if chng_pass == True:
-            error = 'Password Change Required'
-        secret_key = os.getenv('TOKEN_SECRET')
-        # Generate JWT Token
-        payload = {
-            'user_id': user_id,
-            'username': username,
-            'firstname': firstname,
-            'lastname': lastname,
-            'exp': datetime.now(timezone.utc) + timedelta(hours=1)  # Token expires in 1 hour
+    user_id, db_username, firstname, lastname, _stored_hash, chng_pass = results
+
+    if chng_pass:
+        # Hand back a token scoped to the password-change endpoint only. Previously
+        # a full access token was returned alongside error='Password Change
+        # Required', which the frontend then discarded, leaving the reset flow with
+        # no way to complete.
+        return {
+            'resetRequired': True,
+            'resetToken': create_reset_token(user_id),
+            'error': 'Password Change Required',
         }
-        token = jwt.encode(payload, secret_key, algorithm='HS256')
-        error = ''
-        return {'token': token, 'error': error}
-    else:
-        error = 'Invalid Username or Password'
-        return {'error': error}
 
-@app.post('/api/users/verify/') # Verify logged-in user by token + password
-async def verify_user(request: Request):
-    token = request.headers['authorization'].split(' ')[1] if 'authorization' in request.headers else ''
+    return {
+        'token': create_access_token(user_id, db_username, firstname, lastname),
+        'error': '',
+    }
+
+@app.post('/api/users/verify/') # Confirm the authenticated user's password
+async def verify_user(request: Request, user_id: int = Depends(require_user)):
     body = await request.json()
-    password = body['password'] if 'password' in body else ''
+    password = body.get('password') or ''
 
-    if token in ('', 'undefined', 'null', 'None'):
-        return {'verified': False, 'error': 'No Token Provided'}
     if password == '':
         return {'verified': False, 'error': 'Password is Missing'}
 
-    try:
-        secret_key = os.getenv('TOKEN_SECRET')
-        decoded = jwt.decode(token, secret_key, algorithms='HS256')
-        user_id = decoded.get('user_id')
-    except jwt.InvalidTokenError as e:
-        return {'verified': False, 'error': str(e)}
-
-    if user_id is None:
-        return {'verified': False, 'error': 'Invalid token payload'}
-
-    query = "SELECT password FROM users WHERE user_id = %s;"
-    cur.execute(query, (str(user_id),))
-    result = cur.fetchone()
+    with get_cursor(commit=False) as cursor:
+        cursor.execute("SELECT password FROM users WHERE user_id = %s;", (str(user_id),))
+        result = cursor.fetchone()
 
     if result is None or not verify_password(password, result[0]):
         return {'verified': False, 'error': 'Invalid password'}
 
     return {'verified': True, 'error': ''}
-    
-@app.get('/api/users/forgot-password/') # User Forgot Password
+
+
+def _forgot_password_rate_limited(client_key: str) -> bool:
+    """Crude in-process sliding window. Enough to stop trivial enumeration loops."""
+    now = time.monotonic()
+    attempts = [
+        ts for ts in _forgot_password_attempts.get(client_key, [])
+        if now - ts < _FORGOT_PASSWORD_WINDOW_SECONDS
+    ]
+    if len(attempts) >= _FORGOT_PASSWORD_MAX_ATTEMPTS:
+        _forgot_password_attempts[client_key] = attempts
+        return True
+    attempts.append(now)
+    _forgot_password_attempts[client_key] = attempts
+    return False
+
+
+@app.post('/api/users/forgot-password') # User Forgot Password
 async def forgot_password(request: Request):
-    #incoming: username or email
-    #outgoing: success/failure
-    error  = ''
-
-    # Checking values in query exists 
-    if len(request.query_params) == 0 or (request.query_params.get('username') == None and request.query_params.get('email') == None):
-        error = 'No username or email Specified'
-        return {'error' : error}
-    
-    username = request.query_params.get('username') if 'username' in request.query_params else None
-    email = request.query_params.get('email') if 'email' in request.query_params else None
-    print(email)
-    
-    if username != None:
-        query = 'SELECT email, user_id FROM users WHERE username = %s;'
-        cur.execute(query, (username,))
-        results = cur.fetchone()
-    else: 
-        query = 'SELECT email, user_id FROM users WHERE email = %s;'
-        cur.execute(query, (email,))
-        results = cur.fetchone()
-
-    if results is not None:
-        email = results[0]
-        userId = results[1]
-        new_password = secrets.token_hex(6) # Generate a secure random password
-        hashed_password = hash_password_bcrypt(new_password)
-        query = 'UPDATE users SET password = %s, chng_pass = true WHERE user_id = %s;'
-        cur.execute(query, (hashed_password, str(userId)))
-        send_forgot_password(email, new_password)
-        return {'error': error}
-    else:
-        error = f'No Users Found in Database'
-        return {'error': error} 
-
-
-"""
-Placeholder for Agent API Endpoints
-"""
-
-
-""" ===== EDWIN TEST ENDPOINTS ===== """
-# # todo: handle user input and start app.py on the user's hardware
-@app.post('/api/start_agent')
-async def start_agent(requests: Request): 
-
-    # get user's input from frontend
-    body = await requests.json()
-    user_input = body.get("user_input")
-    print("TEST: ", user_input) 
-
-
-    # send user input to app.py
-    #! start the agent on the SERVER
-    # start main with subprocess
-    current_env = os.environ.copy()
-    current_env["PYTHONIOENCODING"] = "utf-8"
-    python_path = sys.executable
-
-    result = subprocess.run(
-        [python_path, f'src/app.py', '--prompt', user_input, '--video_port', '10000'],
-        env=current_env,
-        capture_output=True,
-        text=True
-    )
-
-    return {"STDOUT": result.stdout, "STDERR": result.stderr}
-
-# store credetials from this session
-@app.post('/api/users/store-credentials')
-async def store_credentials(request: Request): 
+    #incoming: {"username": ...} or {"email": ...}
+    #outgoing: always the same response
+    #
+    # Was a GET that rotated the user's password with the address in the query
+    # string. That made it CSRF-able from any <img src>, put PII in access logs,
+    # and its distinct "No Users Found in Database" reply allowed account
+    # enumeration. It is now a POST with a single generic response.
     body = await request.json()
-    session_id = body.get("session_id")
+    username = body.get('username') or None
+    email = body.get('email') or None
+
+    if not username and not email:
+        return {'error': 'No username or email Specified'}
+
+    client_host = request.client.host if request.client else 'unknown'
+    if _forgot_password_rate_limited(client_host):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many password reset requests. Try again later.",
+        )
+
+    if username:
+        query = 'SELECT email, user_id FROM users WHERE username = %s;'
+        params = (username,)
+    else:
+        query = 'SELECT email, user_id FROM users WHERE email = %s;'
+        params = (email,)
+
+    with get_cursor() as cursor:
+        cursor.execute(query, params)
+        results = cursor.fetchone()
+
+        if results is not None:
+            target_email, userId = results[0], results[1]
+            new_password = secrets.token_urlsafe(12)
+            hashed_password = hash_password_bcrypt(new_password)
+            cursor.execute(
+                'UPDATE users SET password = %s, chng_pass = true WHERE user_id = %s;',
+                (hashed_password, str(userId)),
+            )
+            send_forgot_password(target_email, new_password)
+
+    # Same reply whether or not the account exists.
+    return {'error': ''}
+
+
+@app.post('/api/users/change-password') # Complete a required password change
+async def change_password(request: Request, user_id: int = Depends(require_reset_user)):
+    #incoming: password-reset scoped token, {"password": "<new password>"}
+    #outgoing: a normal access token
+    #
+    # Completes the flow that previously dead-ended: login set chng_pass, the
+    # frontend discarded the token, and no change-password endpoint or page existed.
+    body = await request.json()
+    new_password = body.get('password') or ''
+
+    if len(new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be at least 8 characters.",
+        )
+
+    with get_cursor() as cursor:
+        cursor.execute(
+            'UPDATE users SET password = %s, chng_pass = false WHERE user_id = %s;',
+            (hash_password_bcrypt(new_password), str(user_id)),
+        )
+        cursor.execute(
+            'SELECT user_id, username, firstname, lastname FROM users WHERE user_id = %s;',
+            (str(user_id),),
+        )
+        row = cursor.fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+
+    return {
+        'token': create_access_token(row[0], row[1], row[2], row[3]),
+        'error': '',
+    }
+
+
+"""
+Agent API Endpoints
+
+Removed in Phase 1:
+  POST /api/start_agent  broken (launched src/app.py with an unsupported
+                         --video_port, and blocked the event loop with a
+                         synchronous subprocess.run). Runs start over
+                         WS /ws/stream instead.
+  GET  /send_logs        stub whose body was `pass`.
+  GET  /api/nuke         unauthenticated gc.collect() debugging leftover.
+"""
+
+
+@app.post('/api/users/store-credentials')
+async def store_credentials(request: Request, user_id: int = Depends(require_user)):
+    """Persist the caller's credential vault, encrypted, keyed to their token.
+
+    Previously this accepted an `Authorization` header and never read it, keying
+    instead on a client-supplied `session_id`. Anyone who learned a victim's
+    session_id could open a stream with it and pop that victim's credential blob
+    into their own agent run.
+    """
+    body = await request.json()
     credentials = body.get("credentials", {})
+    if not isinstance(credentials, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="credentials must be an object.")
 
-    if not session_id: 
-        return {"ok": False, "error": "session_id is required."}
+    # Drop CVV-like fields before they can reach storage.
+    sanitized = strip_forbidden_fields(credentials)
+    payload = encrypt_credentials(sanitized)
 
-    _prune_stale_session_credentials()
-    CREDENTIALS_BY_SESSION[session_id] = credentials
-    SESSION_CREDENTIAL_CREATED_AT[session_id] = time.monotonic()
+    with get_cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO user_credentials (user_id, payload, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (user_id) DO UPDATE
+                SET payload = EXCLUDED.payload, updated_at = NOW();
+            """,
+            (user_id, psycopg2.Binary(payload)),
+        )
+
+    return {"ok": True, "error": ""}
+
+
+@app.get('/api/users/credentials')
+async def read_credentials(user_id: int = Depends(require_user)):
+    """Return the caller's saved credentials so the UI can edit them.
+
+    This replaces keeping third-party passwords and card numbers in localStorage.
+    """
+    return {"credentials": load_user_credentials(user_id), "error": ""}
+
+
+@app.delete('/api/users/credentials')
+async def delete_credentials(user_id: int = Depends(require_user)):
+    with get_cursor() as cursor:
+        cursor.execute('DELETE FROM user_credentials WHERE user_id = %s;', (user_id,))
     return {"ok": True, "error": ""}
 
 
 async def wait_for_port(port: int, timeout: float = 10.0):
-    start_time = asyncio.get_event_loop().time()
-    while asyncio.get_event_loop().time() - start_time < timeout:
+    """Poll a loopback port until something accepts a connection."""
+    loop = asyncio.get_running_loop()
+    start_time = loop.time()
+    while loop.time() - start_time < timeout:
         try:
-            conn = await asyncio.get_event_loop().run_in_executor(
+            probe = await loop.run_in_executor(
                 None, lambda: socket.create_connection(("127.0.0.1", port), timeout=0.5)
             )
-            conn.close()
+            probe.close()
             return True
-        except:
+        except OSError:
+            # A bare `except:` here also swallowed KeyboardInterrupt and
+            # SystemExit, so the loop could not be cancelled during startup.
             await asyncio.sleep(0.5)
     return False
 
@@ -625,14 +914,19 @@ HITL_PREFIX = "@@HITL@@"
 
 import json as _json
 
-# Shared map: user_id → asyncio.Queue  for HITL replies.
-# Any endpoint (REST, /ws/chat, or /ws/stream) can push a reply here.
-HITL_REPLY_QUEUES: dict[str, asyncio.Queue] = {}
+# Shared map: authenticated user_id → asyncio.Queue for HITL replies.
+# Keyed by the token subject, not by a client-supplied path parameter. The
+# frontend used to hash a browser-generated UUID into a fake "user_id", which
+# both collided across users and reset on every page reload.
+HITL_REPLY_QUEUES: dict[int, asyncio.Queue] = {}
 # True only while we have sent CLARIFICATION and are waiting for stdin reply (user only).
-HITL_ACCEPTING: dict[str, bool] = {}
+HITL_ACCEPTING: dict[int, bool] = {}
 
 USER_HITL_REPLY_TYPE = "user_hitl_reply"
 ABORT_RUN_TYPE = "abort_run"
+
+# How long a socket may stay open before sending its authentication frame.
+WS_AUTH_TIMEOUT_SECONDS = 10
 
 
 def _is_stop_command(text: str) -> bool:
@@ -648,17 +942,45 @@ def _drain_async_queue(q: asyncio.Queue) -> None:
             break
 
 
-def _prune_stale_session_credentials() -> None:
-    """Drop expired session credential blobs to keep memory bounded."""
-    now = time.monotonic()
-    stale_ids = [
-        session_id
-        for session_id, created_at in SESSION_CREDENTIAL_CREATED_AT.items()
-        if now - created_at > SESSION_CREDENTIAL_TTL_SECONDS
-    ]
-    for session_id in stale_ids:
-        CREDENTIALS_BY_SESSION.pop(session_id, None)
-        SESSION_CREDENTIAL_CREATED_AT.pop(session_id, None)
+async def _authenticate_websocket(websocket: WebSocket, expected_type: str) -> dict | None:
+    """Read and validate the first frame of a WebSocket connection.
+
+    Returns the decoded frame with an added ``user_id``, or None after closing the
+    socket. Tokens travel in the frame body rather than the query string, which
+    keeps them out of proxy and uvicorn access logs.
+    """
+    try:
+        raw = await asyncio.wait_for(websocket.receive_text(), timeout=WS_AUTH_TIMEOUT_SECONDS)
+    except (asyncio.TimeoutError, WebSocketDisconnect, RuntimeError):
+        await _close_websocket(websocket, code=1008, reason="Authentication frame not received")
+        return None
+
+    try:
+        frame = _json.loads(raw)
+    except _json.JSONDecodeError:
+        await _close_websocket(websocket, code=1008, reason="Malformed authentication frame")
+        return None
+
+    if not isinstance(frame, dict) or frame.get("type") != expected_type:
+        await _close_websocket(websocket, code=1008, reason="Expected an authentication frame")
+        return None
+
+    token = frame.get("token") or ""
+    try:
+        decoded = _decode_scoped_token(token if isinstance(token, str) else "", ACCESS_SCOPE)
+    except HTTPException:
+        await _close_websocket(websocket, code=1008, reason="Authentication failed")
+        return None
+
+    frame["user_id"] = decoded["user_id"]
+    return frame
+
+
+async def _close_websocket(websocket: WebSocket, code: int, reason: str) -> None:
+    try:
+        await websocket.close(code=code, reason=reason)
+    except Exception:
+        pass
 
 
 async def _wait_for_process_or_disconnect(
@@ -705,16 +1027,20 @@ async def _terminate_process_gracefully(
         pass
 
 
-@app.post("/api/hitl_reply/{user_id}")
-async def hitl_reply(user_id: str, request: Request):
-    """REST endpoint the frontend can call to answer a clarification request."""
+@app.post("/api/hitl_reply")
+async def hitl_reply(request: Request, user_id: int = Depends(require_user)):
+    """REST endpoint the frontend can call to answer a clarification request.
+
+    The user id comes from the token. It used to be a path parameter, so any
+    caller could answer any running agent's clarification prompt.
+    """
     if not HITL_ACCEPTING.get(user_id):
-        return {"status": "error", "message": "No active clarification for this user_id."}
+        return {"status": "error", "message": "No active clarification for this user."}
     body = await request.json()
     user_input = body.get("content", body.get("user_input", ""))
     queue = HITL_REPLY_QUEUES.get(user_id)
     if queue is None:
-        return {"status": "error", "message": "No agent is waiting for input with that user_id."}
+        return {"status": "error", "message": "No agent is waiting for input for this user."}
     await queue.put({"content": user_input})
     return {"status": "ok"}
 
@@ -727,28 +1053,47 @@ async def _switch_to_new_page(new_page, start_screencast_fn):
         print(f"[screencast] Failed to switch to new tab: {exc}")
 
 
-@app.websocket("/ws/stream/{user_id}")
-async def stream_endpoint(websocket: WebSocket, user_id: str):
+@app.websocket("/ws/stream")
+async def stream_endpoint(websocket: WebSocket):
+    """Run an agent task and stream logs, HITL prompts, and browser frames.
+
+    The first frame must be {"type": "start", "token": ..., "prompt": ...}. The
+    prompt and token used to arrive as query parameters, which put both the task
+    text and the bearer token into every access log along the way, and the
+    endpoint required no authentication at all: any client could make the server
+    spawn a browser subprocess with an arbitrary prompt.
+    """
     await websocket.accept()
-    print("DEBUG 1: Socket Accepted")
+
+    start_frame = await _authenticate_websocket(websocket, expected_type="start")
+    if start_frame is None:
+        return
+
+    user_id: int = start_frame["user_id"]
+    prompt = start_frame.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        await _close_websocket(websocket, code=1008, reason="Missing prompt")
+        return
 
     stream_disconnect_event = asyncio.Event()
 
-    query_params = websocket.query_params
-    prompt = query_params.get("prompt", "Default Prompt")
-    session_id = query_params.get("session_id")
+    # Credentials come from the caller's own encrypted vault row. Nothing is read
+    # from a client-supplied session id.
+    try:
+        credentials = await asyncio.to_thread(load_user_credentials, user_id)
+    except HTTPException as exc:
+        # CREDENTIALS_KEY missing or invalid: run without saved credentials rather
+        # than failing the whole task.
+        print(f"[STREAM] Credential vault unavailable: {exc.detail}")
+        credentials = {}
+    except Exception as exc:
+        print(f"[STREAM] Could not load credentials: {type(exc).__name__}")
+        credentials = {}
 
-    _prune_stale_session_credentials()
-    credentials = CREDENTIALS_BY_SESSION.pop(session_id, {}) if session_id else {}
-    if session_id:
-        SESSION_CREDENTIAL_CREATED_AT.pop(session_id, None)
-    credentials_json = json.dumps(credentials)
-    print(f"[STREAM] session_id={session_id} credentials={credentials}")
-
-    print("Prompt Received in WebSocket Endpoint: ")
+    # Never log the blob itself.
+    print(f"[STREAM] user_id={user_id} credential_keys={sorted(credentials.keys())}")
 
     port = await PORT_POOL.get()
-    print(f"DEBUG 2: Got Port {port}")
 
     current_env = os.environ.copy()
     current_env["PYTHONUNBUFFERED"] = "1"
@@ -756,10 +1101,10 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
     python_path = sys.executable
     loop = asyncio.get_running_loop()
 
-    # 1. Launch Agent with stdin pipe for HITL replies
+    # 1. Launch Agent with stdin pipe for credentials and HITL replies
     def start_process():
         return subprocess.Popen(
-            [python_path, "src/app.py", "--port", str(port), "--prompt", prompt, "--credentials_json", credentials_json],
+            [python_path, "src/app.py", "--port", str(port), "--prompt", prompt],
             env=current_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -767,9 +1112,25 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
     process = await loop.run_in_executor(None, start_process)
-    print("DEBUG 3: Agent Subprocess Started")
 
-    # 2. Feed stdout/stderr into asyncio queue via threads
+    # 2. Hand over credentials as the first stdin line. They used to be passed as
+    #    a --credentials_json command-line argument, which is readable by any
+    #    other process on the machine via the process list.
+    #
+    #    The agent blocks on this line at startup, so on a write failure we must
+    #    close stdin. That gives the child EOF, and it continues without saved
+    #    credentials instead of hanging until the socket drops.
+    try:
+        process.stdin.write((json.dumps(credentials) + "\n").encode("utf-8"))
+        process.stdin.flush()
+    except Exception as exc:
+        print(f"[STREAM] Failed to send credentials to agent: {type(exc).__name__}")
+        try:
+            process.stdin.close()
+        except Exception:
+            pass
+
+    # 3. Feed stdout/stderr into asyncio queue via threads
     log_queue = asyncio.Queue()
 
     def pipe_reader(pipe, log_type):
@@ -867,7 +1228,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                 if msg.get("type") in {USER_HITL_REPLY_TYPE, ABORT_RUN_TYPE}:
                     content = msg.get("content", "")
                     if isinstance(content, str) and _is_stop_command(content):
-                        print(f"[HITL] Stop requested via WebSocket: {content[:200]!r}")
+                        print("[HITL] Stop requested via WebSocket")
                         HITL_ACCEPTING[user_id] = False
                         _drain_async_queue(reply_queue)
                         try:
@@ -891,7 +1252,9 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                 ):
                     content = msg.get("content", "")
                     if isinstance(content, str):
-                        print(f"[HITL] Received user_hitl_reply via WebSocket: {content[:200]!r}")
+                        # A clarification reply can legitimately contain a secret
+                        # (an MFA code, a password). Log its shape, not its value.
+                        print(f"[HITL] Received user_hitl_reply ({len(content)} chars)")
                         await reply_queue.put({"content": content})
                 # Other message types are ignored for HITL (no queue).
         except Exception:
@@ -960,7 +1323,7 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
                                 user_input = ws_msg.get("content", ws_msg.get("user_input", ""))
                                 if not isinstance(user_input, str):
                                     user_input = str(user_input) if user_input is not None else ""
-                                print(f"[HITL] Got reply: {str(user_input)[:200]}")
+                                print(f"[HITL] Got reply ({len(str(user_input))} chars)")
                             except asyncio.TimeoutError:
                                 user_input = ""
                                 print("[HITL] Timed out waiting for reply")
@@ -1083,78 +1446,52 @@ async def stream_endpoint(websocket: WebSocket, user_id: str):
         await _terminate_process_gracefully(process)
         await PORT_POOL.put(port)
 
-from typing import List
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
+@app.websocket("/ws/chat")
+async def websocket_endpoint(websocket: WebSocket):
+    """Fallback channel for delivering a HITL reply when no stream socket is open.
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+    Two changes from the previous version. It authenticates with a first frame
+    instead of accepting an unvalidated `token` query parameter, and it no longer
+    broadcasts. Every message used to be relayed to *every* connected socket as
+    `Client #N says: ...`, and the dashboard rendered whatever arrived as agent
+    output, so one user's text appeared in another user's transcript.
+    """
+    await websocket.accept()
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    auth_frame = await _authenticate_websocket(websocket, expected_type="auth")
+    if auth_frame is None:
+        return
 
-    async def broadcast(self, message: str):
-        stale_connections: List[WebSocket] = []
-        for connection in list(self.active_connections):
-            try:
-                await connection.send_text(message)
-            except Exception:
-                stale_connections.append(connection)
+    user_id: int = auth_frame["user_id"]
+    try:
+        await websocket.send_json({"type": "AUTH_OK"})
+    except Exception:
+        return
 
-        for stale in stale_connections:
-            self.disconnect(stale)
-
-manager = ConnectionManager()
-
-@app.websocket("/ws/chat/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: int):
-    await manager.connect(websocket)
-
-    query_params = websocket.query_params
-    token = query_params.get("token", "Default Prompt")
     try:
         while True:
             data = await websocket.receive_text()
-            print(f"Received message from client #{client_id}: {data}")
 
-            # Forward to any waiting HITL agent for this user
-            queue = HITL_REPLY_QUEUES.get(str(client_id))
-            if queue is not None:
+            queue = HITL_REPLY_QUEUES.get(user_id)
+            if queue is None:
                 try:
-                    payload = _json.loads(data)
-                except (ValueError, TypeError):
-                    payload = {"content": data}
-                await queue.put(payload)
-                print(f"[HITL] Forwarded chat message to agent for client {client_id}")
+                    await websocket.send_json({
+                        "type": "STATUS",
+                        "content": "No agent is currently waiting for input.",
+                    })
+                except Exception:
+                    break
+                continue
 
-            await manager.broadcast(f"Client #{client_id} says: {data}")
+            try:
+                payload = _json.loads(data)
+            except (ValueError, TypeError):
+                payload = {"content": data}
+            if not isinstance(payload, dict):
+                payload = {"content": str(payload)}
+            await queue.put(payload)
+            print(f"[HITL] Forwarded chat message to agent for user {user_id}")
     except WebSocketDisconnect:
-        await manager.broadcast(f"Client #{client_id} left the chat")
+        pass
     finally:
-        manager.disconnect(websocket)
-
-# todo: generate response for user to see the progress of the main script as it runs (as chat bubbles)
-@app.get('/send_logs')
-async def send_logs(requests: Request): 
-    
-    # get output from app.py
-    # send app.py output to the frontend
-    pass 
-
-# Testing memory fix
-import gc
-
-@app.get("/api/nuke")
-async def manual_cleanup():
-    # 1. Clear any global result lists/dicts here (e.g. results.clear())
-    # 2. Force garbage collection
-    gc.collect()
-    return {"message": "GC triggered"}
-
-# # test endpoint
-# @app.get('/')
-# def test():
-#     return {"message": "This works!"}
+        await _close_websocket(websocket, code=1000, reason="closed")

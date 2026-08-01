@@ -2,7 +2,10 @@
 .env
 .env.*
 !.env.example
-backend/configs/user_db_config.yaml
+# Real DB credentials. Glob covers backups and profile variants; the *.example
+# template is the only one that may be committed.
+backend/configs/*_db_config.yaml*
+!backend/configs/*.example.yaml
 
 # Agent run artifacts.
 # Scoped to the directories that actually collect generated output. A blanket

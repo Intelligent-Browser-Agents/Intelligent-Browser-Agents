@@ -241,15 +241,33 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None):
     print("SIMULATION COMPLETE", flush=True)
 
 
+def read_credentials_from_stdin() -> dict:
+    """Read the credential blob the server writes as the first stdin line.
+
+    Credentials used to arrive as a --credentials_json command-line argument,
+    which is visible to any other process on the machine through the process
+    list. stdin is private to the parent and this child.
+    """
+    try:
+        line = sys.stdin.readline()
+    except (OSError, ValueError):
+        return {}
+    if not line or not line.strip():
+        return {}
+    try:
+        loaded = json.loads(line)
+    except json.JSONDecodeError:
+        print("[startup] Could not parse the credential line; continuing without saved credentials.", flush=True)
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--prompt", type=str, required=True)
     parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--credentials_json", type=str, default="{}")
     args = parser.parse_args()
-    try:
-        credentials = json.loads(args.credentials_json) if args.credentials_json else {}
-    except json.JSONDecodeError:
-        credentials = {}
+
+    credentials = read_credentials_from_stdin()
 
     asyncio.run(main(args.prompt, args.port, credentials))

@@ -50,9 +50,30 @@
   line-height: 1.12;
 }
 
+.login-subtitle {
+  margin: -8px 0 18px;
+  color: #52738a;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
 .login-form {
   display: grid;
   gap: 10px;
+  text-align: left;
+}
+
+/* Visible labels tied to inputs via htmlFor/id. The inputs used to have only
+   placeholders, which leaves screen readers with no accessible name. */
+.login-label {
+  color: #334b58;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.login-label + .login-input {
+  margin-top: -4px;
 }
 
 .login-input {
