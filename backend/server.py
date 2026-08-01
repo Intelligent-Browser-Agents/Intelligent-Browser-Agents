@@ -910,6 +910,57 @@ async def wait_for_port(port: int, timeout: float = 10.0):
             await asyncio.sleep(0.5)
     return False
 
+
+class StreamViewUnavailable(RuntimeError):
+    """The agent's browser could not be attached for the live view.
+
+    The agent itself is unaffected and keeps running; only the video feed is lost.
+    """
+
+
+async def attach_to_agent_page(playwright, port: int, timeout: float = 20.0):
+    """Attach over CDP once the agent has actually opened its page.
+
+    The debugging port accepts connections as soon as Chromium boots, which is
+    before `src/app.py` calls `new_context()` / `new_page()`. Attaching on the
+    first successful TCP connect therefore raced the agent: Chromium reports one
+    context with zero pages, so `browser.contexts[0].pages[0]` raised
+    `IndexError: list index out of range` and the run lost its live view for the
+    rest of the session.
+
+    Retries until some context has a page.
+
+    Returns (browser, context, page), or (None, None, None) if it never appears.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    last_error = "no context with a page appeared"
+
+    while loop.time() < deadline:
+        browser = None
+        try:
+            browser = await playwright.chromium.connect_over_cdp(f"http://localhost:{port}")
+        except Exception as exc:
+            last_error = f"connect_over_cdp failed: {type(exc).__name__}"
+            await asyncio.sleep(0.25)
+            continue
+
+        for context in browser.contexts:
+            if context.pages:
+                return browser, context, context.pages[0]
+
+        # Connected, but the page does not exist yet. Drop this connection and
+        # retry rather than indexing into an empty list.
+        try:
+            await browser.close()
+        except Exception:
+            pass
+        await asyncio.sleep(0.25)
+
+    print(f"[STREAM] Could not attach to the agent browser on port {port}: {last_error}")
+    return None, None, None
+
+
 HITL_PREFIX = "@@HITL@@"
 
 import json as _json
@@ -1358,9 +1409,9 @@ async def stream_endpoint(websocket: WebSocket):
         if await wait_for_port(port):
             try:
                 async with async_playwright() as p:
-                    browser = await p.chromium.connect_over_cdp(f"http://localhost:{port}")
-                    context = browser.contexts[0]
-                    page = context.pages[0]
+                    browser, context, page = await attach_to_agent_page(p, port)
+                    if page is None:
+                        raise StreamViewUnavailable()
                     client = await context.new_cdp_session(page)
                     cdp_session_ref["client"] = client
 
@@ -1393,6 +1444,17 @@ async def stream_endpoint(websocket: WebSocket):
                     ))
 
                     await _wait_for_process_or_disconnect(process, stream_disconnect_event)
+            except StreamViewUnavailable:
+                # The agent is fine; only the live view failed. Keep the socket open
+                # so logs and HITL prompts still reach the user.
+                try:
+                    await websocket.send_json({
+                        "type": "STATUS",
+                        "content": "Live browser view unavailable; the agent is still running.",
+                    })
+                except Exception:
+                    pass
+                await _wait_for_process_or_disconnect(process, stream_disconnect_event)
             except NotImplementedError:
                 await websocket.send_json({
                     "type": "STATUS",
@@ -1410,10 +1472,25 @@ async def stream_endpoint(websocket: WebSocket):
                     pass
                 await _wait_for_process_or_disconnect(process, stream_disconnect_event)
         else:
-            await websocket.send_json({"type": "STATUS", "content": "Browser failed to open."})
+            # The debugging port never opened. Previously this fell straight through
+            # to cleanup, which closed the socket and killed a perfectly healthy
+            # agent run. Keep streaming logs and HITL prompts instead.
+            print(f"[STREAM] Debug port {port} never opened; continuing without the live view.")
+            await websocket.send_json({
+                "type": "STATUS",
+                "content": "Live browser view unavailable; the agent is still running.",
+            })
+            await _wait_for_process_or_disconnect(process, stream_disconnect_event)
 
     finally:
         # 5. Cleanup
+        exit_reason = (
+            "agent process exited" if process.poll() is not None
+            else "client disconnected" if stream_disconnect_event.is_set()
+            else "handler returned"
+        )
+        print(f"[STREAM] Run finished for user_id={user_id}: {exit_reason} (exit code {process.poll()}).")
+
         stream_disconnect_event.set()
         HITL_REPLY_QUEUES.pop(user_id, None)
         HITL_ACCEPTING.pop(user_id, None)
