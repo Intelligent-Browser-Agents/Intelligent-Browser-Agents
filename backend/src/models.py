@@ -126,7 +126,12 @@ def get_llm(
     
     extra_kwargs = {}
     if config.provider == "openai":
-        extra_kwargs["request_timeout"] = 60
+        # The per-request timeout must stay under the executor's own 45s ceiling,
+        # otherwise the client is still waiting on a request the caller has already
+        # given up on. Retries are bounded for the same reason: the default of 2
+        # silently turns one slow call into three sequential ones.
+        extra_kwargs["request_timeout"] = float(os.getenv("LLM_REQUEST_TIMEOUT", "40"))
+        extra_kwargs["max_retries"] = int(os.getenv("LLM_MAX_RETRIES", "1"))
 
     llm = LLMClass(
         model=config.name,

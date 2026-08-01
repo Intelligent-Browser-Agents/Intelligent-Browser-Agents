@@ -58,11 +58,27 @@ class DummyPage:
         return b""
 
 
-class DummyLLM:
-    """Routes the executor down its structured-output path.
+class _ToolBoundLLM:
+    """What `bind_tools()` returns: answers without any `tool_calls`.
 
-    `bind_tools(...).ainvoke(...)` returns a message with no `tool_calls`, which is
-    the documented signal for the executor to fall back to `llm_structured.invoke`.
+    That is the executor's documented signal to fall back to structured output.
+    """
+
+    def __init__(self, parent):
+        self._parent = parent
+
+    async def ainvoke(self, messages, *_args, **_kwargs):
+        self._parent.tool_messages = messages
+        return AIMessage(content="no tool call")
+
+
+class DummyLLM:
+    """Stands in for both executor models.
+
+    `llm_chat` and `llm_structured` are the same object here, so the two roles are
+    kept apart by binding: the tool-calling path goes through `bind_tools()` and
+    yields no tool call, while the structured path awaits `ainvoke` directly and
+    receives the canned `ExecutionResult`.
     """
 
     def __init__(self, response: ExecutionResult):
@@ -74,12 +90,12 @@ class DummyLLM:
         self.messages = messages
         return self.response
 
-    def bind_tools(self, _tools, **_kwargs):
-        return self
-
     async def ainvoke(self, messages, *_args, **_kwargs):
-        self.tool_messages = messages
-        return AIMessage(content="no tool call")
+        self.messages = messages
+        return self.response
+
+    def bind_tools(self, _tools, **_kwargs):
+        return _ToolBoundLLM(self)
 
     def get_num_tokens_from_messages(self, _messages, **_kwargs):
         return 0

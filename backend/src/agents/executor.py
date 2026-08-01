@@ -7,6 +7,7 @@ Uses LangChain tool calls when possible; falls back to structured output.
 import asyncio
 import base64
 import json
+import os
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -20,6 +21,12 @@ from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt, get_execution_tools_prompt
 from dom_extraction import dom_extractor
+
+
+# Wall-clock ceilings for a single executor step. Both paths that can block are
+# wrapped, so one unresponsive call cannot stall a run indefinitely.
+_LLM_CALL_TIMEOUT_SECONDS = int(os.getenv("EXECUTOR_LLM_TIMEOUT", "45"))
+_TOOL_CALL_TIMEOUT_SECONDS = int(os.getenv("EXECUTOR_TOOL_TIMEOUT", "60"))
 
 
 class Executor:
@@ -176,22 +183,33 @@ class Executor:
         llm_with_tools = self.llm_chat.bind_tools(tools)
         tool_map = {t.name: t for t in tools}
 
-        ctx_tokens = self.llm_chat.get_num_tokens_from_messages(tool_messages)
+        # Approximate from characters instead of calling
+        # get_num_tokens_from_messages, which runs a full tiktoken encode of the
+        # whole prompt on every step purely to print this line.
+        ctx_tokens = sum(len(str(m.content)) for m in tool_messages) // 4
         print(
             f"[executor] Calling LLM for tool selection... (~{ctx_tokens} tokens, LangChain)",
             flush=True,
         )
+        call_started = asyncio.get_event_loop().time()
         try:
             response = await asyncio.wait_for(
                 llm_with_tools.ainvoke(tool_messages),
-                timeout=45,
+                timeout=_LLM_CALL_TIMEOUT_SECONDS,
+            )
+            print(
+                f"[executor] LLM responded in {asyncio.get_event_loop().time() - call_started:.1f}s",
+                flush=True,
             )
         except asyncio.TimeoutError:
-            print("[executor] LLM call timed out after 45s", flush=True)
+            print(f"[executor] LLM call timed out after {_LLM_CALL_TIMEOUT_SECONDS}s", flush=True)
             return self._return_failure(
                 state, current_url,
                 action="none", args={},
-                message="Executor LLM timed out (45s). Context may be too large or API unresponsive.",
+                message=(
+                    f"Executor LLM timed out ({_LLM_CALL_TIMEOUT_SECONDS}s). "
+                    "Context may be too large or the API unresponsive."
+                ),
                 error_type="unknown",
             )
         except Exception as e:
@@ -304,7 +322,21 @@ class Executor:
                 consume_sensitive_approval = True
 
             try:
-                result = await tool_map[name].ainvoke(args)
+                # Browser tools had no timeout. A click cascading through frames,
+                # role aliases and name variants can spend minutes before failing,
+                # with nothing above it to cut the step short.
+                result = await asyncio.wait_for(
+                    tool_map[name].ainvoke(args),
+                    timeout=_TOOL_CALL_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                return self._return_failure(
+                    state, current_url,
+                    action=name, args=args,
+                    message=f"Browser action '{name}' timed out after {_TOOL_CALL_TIMEOUT_SECONDS}s.",
+                    error_type="tool_limit",
+                    clear_sensitive_approval=consume_sensitive_approval,
+                )
             except Exception as e:
                 return self._return_failure(
                     state, current_url,
@@ -322,9 +354,32 @@ class Executor:
                 clear_sensitive_approval=consume_sensitive_approval,
             )
         else:
-            # Fallback: structured output (no tool_calls)
+            # Fallback: structured output (no tool_calls).
+            #
+            # This was a synchronous `.invoke()` inside an async node with no
+            # asyncio timeout. It blocked the event loop for the whole call, which
+            # also stalls Playwright's I/O, and with the provider's own 60s request
+            # timeout plus client-side retries a single step could exceed two
+            # minutes before returning.
+            print("[executor] No tool call returned; retrying via structured output...", flush=True)
+            fallback_started = asyncio.get_event_loop().time()
             try:
-                action: ExecutionResult = self.llm_structured.invoke(json_messages)
+                action: ExecutionResult = await asyncio.wait_for(
+                    self.llm_structured.ainvoke(json_messages),
+                    timeout=_LLM_CALL_TIMEOUT_SECONDS,
+                )
+                print(
+                    f"[executor] Structured fallback responded in "
+                    f"{asyncio.get_event_loop().time() - fallback_started:.1f}s",
+                    flush=True,
+                )
+            except asyncio.TimeoutError:
+                return self._return_failure(
+                    state, current_url,
+                    action="none", args={},
+                    message=f"Executor structured fallback timed out ({_LLM_CALL_TIMEOUT_SECONDS}s).",
+                    error_type="unknown",
+                )
             except Exception as e:
                 return self._return_failure(
                     state, current_url,
@@ -1986,13 +2041,11 @@ class Executor:
 
         # Main frame
         try:
-            snapshot = await page.accessibility.snapshot(interesting_only=True)
-            if snapshot:
-                for line in self._format_accessibility_tree(snapshot, max_lines=300):
-                    all_lines.append(line)
-                    char_count += len(line) + 1
-                    if char_count >= max_chars:
-                        break
+            for line in await self._main_frame_snapshot_lines(page, max_lines=300):
+                all_lines.append(line)
+                char_count += len(line) + 1
+                if char_count >= max_chars:
+                    break
         except Exception as e:
             all_lines.append(f"[DOM snapshot failed: {e}]")
 
@@ -2048,6 +2101,68 @@ class Executor:
         if len(result) > max_chars:
             result = result[:max_chars] + "\n... [DOM truncated]"
         return result
+
+    # `- role "name" [attr=x]` from aria_snapshot. The name is optional so that
+    # container rows (`- banner:`) and text rows (`- text: hello`) fall out.
+    _ARIA_SNAPSHOT_LINE = re.compile(r'^-\s+([a-zA-Z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?')
+
+    # Roles that carry no actionable target, matching the previous tree walk.
+    _UNINTERESTING_ROLES = frozenset({"generic", "text", "staticText", "StaticText", "none", "presentation"})
+
+    async def _main_frame_snapshot_lines(self, page, max_lines: int = 300) -> list[str]:
+        """Role/name lines for the main frame.
+
+        Playwright removed `page.accessibility` in 1.5x. The executor still called
+        it, so on current Playwright every main-frame snapshot raised
+        AttributeError and the model was handed
+        `[DOM snapshot failed: 'Page' object has no attribute 'accessibility']`
+        on every single step. It could only see iframe content, which is why runs
+        leaned on repeated list_links/dom_search discovery and stalled.
+
+        Prefers `locator.aria_snapshot()`, falling back to the old tree walk when
+        running against an older Playwright.
+        """
+        accessibility = getattr(page, "accessibility", None)
+        if accessibility is not None:
+            snapshot = await accessibility.snapshot(interesting_only=True)
+            return self._format_accessibility_tree(snapshot, max_lines=max_lines) if snapshot else []
+
+        yaml_text = await page.locator("body").aria_snapshot()
+        return self._format_aria_snapshot(yaml_text, max_lines=max_lines)
+
+    @classmethod
+    def _format_aria_snapshot(cls, yaml_text: str, max_lines: int = 300) -> list[str]:
+        """Convert aria_snapshot YAML into the `[role="x"] "name"` lines used everywhere.
+
+        Several consumers parse that exact shape (field-priority ranking, click
+        target checks, the verifier's AFTER_STATE), so the format is preserved
+        rather than passing the YAML through.
+        """
+        lines: list[str] = []
+        for raw in (yaml_text or "").splitlines():
+            stripped = raw.strip()
+            if not stripped.startswith("-"):
+                continue
+            # Property rows such as `- /url: "https://..."` describe the row above.
+            if stripped[1:].lstrip().startswith("/"):
+                continue
+
+            match = cls._ARIA_SNAPSHOT_LINE.match(stripped)
+            if not match:
+                continue
+
+            role = (match.group(1) or "").strip()
+            name = (match.group(2) or "").strip()
+            if not name or role in cls._UNINTERESTING_ROLES:
+                continue
+
+            line = f'[role="{role}"] "{name}"'
+            if len(line) > 200:
+                line = line[:197] + "..."
+            lines.append(line)
+            if len(lines) >= max_lines:
+                break
+        return lines
 
     def _format_accessibility_tree(self, node: dict | None, prefix: str = "", max_lines: int = 500) -> list[str]:
         """Flatten accessibility tree to lines like [role=\"button\"] \"Submit\" for verifier and LLM."""

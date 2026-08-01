@@ -6,6 +6,7 @@ LLM tool-calling (bind_tools) instead of structured output, and
 adds lightweight DOM navigation/search helpers.
 """
 
+import re
 from typing import Literal
 
 from langchain_core.tools import StructuredTool
@@ -153,12 +154,33 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
                 return
 
     async def _list_links_from_accessibility(filter_text: str | None, max_results: int) -> list[dict]:
-        try:
-            snapshot = await page.accessibility.snapshot(interesting_only=True)
-        except Exception:
-            snapshot = None
         targets: list[dict] = []
-        _flatten_accessibility_click_targets(snapshot, targets, max_results * 3)
+
+        # Playwright removed `page.accessibility` in 1.5x, so this last-resort
+        # discovery path silently returned nothing on current versions.
+        accessibility = getattr(page, "accessibility", None)
+        if accessibility is not None:
+            try:
+                snapshot = await accessibility.snapshot(interesting_only=True)
+            except Exception:
+                snapshot = None
+            _flatten_accessibility_click_targets(snapshot, targets, max_results * 3)
+        else:
+            from agents.executor import Executor
+
+            try:
+                yaml_text = await page.locator("body").aria_snapshot()
+            except Exception:
+                yaml_text = ""
+            for line in Executor._format_aria_snapshot(yaml_text, max_lines=max_results * 3):
+                match = re.match(r'^\[role="([^"]+)"\]\s+"(.*)"$', line)
+                if not match:
+                    continue
+                role = match.group(1).lower()
+                if role not in {"link", "button", "tab", "menuitem"}:
+                    continue
+                targets.append({"role": role, "name": match.group(2), "url": page.url, "title": ""})
+
         if not targets:
             return []
         f = (filter_text or "").strip().lower()
