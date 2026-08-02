@@ -74,13 +74,29 @@ AGENT_MODELS = {
 }
 
 # Temperature presets for different agent behaviors
+# Control-plane agents are configured at 0 because their outputs are graph edges,
+# not prose: `verifier.step_complete` decides whether the orchestrator advances and
+# `verifier.handoff` selects the next node outright.
+#
+# IMPORTANT: these values are inert on the reasoning models currently assigned in
+# AGENT_MODELS. gpt-5.x accepts only temperature=1.0, and langchain-openai silently
+# drops any other value (verified: passing 0.0 or 0.3 stores None, passing 1.0
+# stores 1.0). So this dict does nothing today and sampling cannot be turned down.
+#
+# The practical consequence is that determinism has to come from structural checks
+# on observable state rather than from sampling settings. See
+# Verifier._credentials_still_requested for that approach, and Phase 4 of
+# docs/IMPROVEMENT_PLAN.md for the rest.
+#
+# These values still take effect if AGENT_MODELS is switched to a model that
+# supports temperature, such as the gemini-* entries.
 TEMPERATURES = {
-    "planner": 0.3,
-    "decision": 0.2,
-    "executor": 0.2,
-    "verifier": 0.3,
-    "fallback": 0.4,
-    "interaction": 0.5,
+    "planner": 0.2,
+    "decision": 0.0,
+    "executor": 0.0,
+    "verifier": 0.0,
+    "fallback": 0.0,
+    "interaction": 0.3,
 }
 
 

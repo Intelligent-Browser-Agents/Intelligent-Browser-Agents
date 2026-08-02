@@ -81,24 +81,38 @@ class Verifier:
 
         reasoning_log = state.get("reasoning_log", [])
         event = state.get("last_execution_event")
-        if isinstance(event, dict) and (event.get("action") or "").strip():
-            last_execution = last_execution_event_to_executor_log(event)
-        else:
-            # DEPRECATED: fall back to raw reasoning_log tail
-            last_execution = reasoning_log[-1] if reasoning_log else "No execution log."
         user_intent = self._get_user_intent(state)
 
-        last_exec_lower = (last_execution or "").lower()
         recent_executor_logs = [
             entry for entry in (reasoning_log or [])
             if isinstance(entry, str) and entry.startswith("[Executor]")
         ]
+
+        # Two different views of the same action, for two different jobs.
+        #
+        # `last_execution_structured` is rendered from last_execution_event and is
+        # what the deterministic guards below parse: action, status, error_type are
+        # always present and consistently formatted.
+        #
+        # `last_execution` is the raw executor log entry, which is the only place
+        # AFTER_STATE (the post-action page snapshot) exists. It is what the model
+        # sees. Previously the synthetic string was used for both *and* overwrote
+        # the tail of recent_executor_logs, so the freshest page content was deleted
+        # from the prompt while the prompt still claimed AFTER_STATE was present and
+        # instructed the model to prefer it. The verifier was judging each action
+        # using the previous action's page content, which is how "navigated to the
+        # Microsoft login page" got accepted as "logged in".
         if isinstance(event, dict) and (event.get("action") or "").strip():
-            syn = last_execution_event_to_executor_log(event)
-            if recent_executor_logs:
-                recent_executor_logs = recent_executor_logs[:-1] + [syn]
-            else:
-                recent_executor_logs = [syn]
+            last_execution_structured = last_execution_event_to_executor_log(event)
+        else:
+            last_execution_structured = recent_executor_logs[-1] if recent_executor_logs else "No execution log."
+
+        last_execution = recent_executor_logs[-1] if recent_executor_logs else last_execution_structured
+        if "AFTER_STATE" not in last_execution:
+            # No page evidence in the raw entry; the structured view is no worse.
+            last_execution = last_execution_structured
+
+        last_exec_lower = (last_execution_structured or "").lower()
         recent_executor_history = "\n\n".join(recent_executor_logs[-2:]) if recent_executor_logs else ""
         recent_executor_history = self._clip_text(recent_executor_history, 2600)
 
@@ -443,7 +457,9 @@ If this is the last step of the plan and the step is complete, set goal_complete
             result = None
 
         if result is None:
-            step_complete = "success" in (last_execution or "").lower() and "status: success" in (last_execution or "").lower()
+            # Match on the structured view: `last_execution` now carries AFTER_STATE,
+            # where the word "success" can appear in ordinary page copy.
+            step_complete = "status: success" in (last_execution_structured or "").lower()
             goal_complete = step_complete and is_last_step
             needs_fallback = not step_complete
             next_step_attempts = 0 if step_complete else int(state.get("step_attempts", 0)) + 1
@@ -452,6 +468,25 @@ If this is the last step of the plan and the step is complete, set goal_complete
             step_complete = result.step_complete
             goal_complete = result.goal_complete
             needs_fallback = result.handoff == "fallback"
+
+            # Structural guard: an authentication step is not finished while the
+            # page is still asking for credentials.
+            #
+            # Observed failure: on "Log in to MyUCF using saved credentials", the
+            # model returned step_complete=True after merely *arriving* at the
+            # identity provider's sign-in form. The orchestrator advanced to
+            # "go to the grades section", which then could not proceed, and the run
+            # ended asking the user to log in by hand. This judges the objective
+            # from page evidence rather than trusting the action's own success.
+            if step_complete and self._credentials_still_requested(state, last_execution):
+                step_complete = False
+                goal_complete = False
+                needs_fallback = False
+                result_message_suffix = (
+                    " [guard: credential fields still present, so the login step is not complete]"
+                )
+            else:
+                result_message_suffix = ""
             # Only count "attempts" for automated retries. If we're handing off to fallback
             # due to a hard block (CAPTCHA/2FA/human action), do not burn the safety budget.
             error_type = (result.error_type or "").strip().lower()
@@ -471,7 +506,7 @@ If this is the last step of the plan and the step is complete, set goal_complete
                 f"[Verifier] Verdict: {result.verdict}\n"
                 f"[Verifier] Step Complete: {step_complete}\n"
                 f"[Verifier] Goal Complete: {goal_complete}\n"
-                f"[Verifier] Message: {result.message}\n"
+                f"[Verifier] Message: {result.message}{result_message_suffix}\n"
                 f"[Verifier] Handoff: {result.handoff}"
             )
 
@@ -487,6 +522,45 @@ If this is the last step of the plan and the step is complete, set goal_complete
                 "reasoning_log": [verification_log],
             },
         )
+
+    # A password field in the post-action snapshot is the strongest available
+    # signal that authentication has not finished. Deliberately not a list of
+    # identity-provider domains: those go stale and only cover known vendors.
+    _CREDENTIAL_FIELD_MARKERS = (
+        '[role="textbox"] "password"',
+        '[role="textbox"] "enter the password',
+        'label=password',
+        'placeholder=password',
+        'type=password',
+        '"password"',
+    )
+
+    @classmethod
+    def _credentials_still_requested(cls, state: ProjectState, last_execution: str) -> bool:
+        """True when an authentication step still has credential fields on screen.
+
+        Only applies to steps whose intent is authentication, so an ordinary form
+        that happens to contain a password field (registration, say) is unaffected
+        once its own step objective is met.
+        """
+        step_intent = (state.get("step_intent") or "").strip().lower()
+        task = (state.get("current_task") or "").lower()
+        # `[\s-]*` so hyphenated spellings ("sign-in", "log-in") also match.
+        looks_like_login = step_intent == "authenticate" or bool(
+            re.search(r"\blog[\s-]*in\b|\bsign[\s-]*in\b|\bauthenticat", task)
+        )
+        if not looks_like_login:
+            return False
+
+        after_state = ""
+        marker = "AFTER_STATE"
+        if marker in (last_execution or ""):
+            after_state = last_execution.split(marker, 1)[1].lower()
+        if not after_state:
+            # No page evidence to judge from; do not override the model.
+            return False
+
+        return any(m in after_state for m in cls._CREDENTIAL_FIELD_MARKERS)
 
     def _get_user_intent(self, state: ProjectState) -> str:
         messages = state.get("messages") or []
