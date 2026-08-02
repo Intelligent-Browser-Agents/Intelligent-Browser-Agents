@@ -101,6 +101,83 @@ def test_regression_installed_playwright_lacks_the_old_api():
     )
 
 
+PEOPLESOFT_IFRAME = (
+    "<table>"
+    "<tr><td><input type='radio' name='term' id='t1'></td>"
+    "<td><label for='t1'>Spring 2026</label></td></tr>"
+    "<tr><td><input type='radio' name='term' id='t2'></td>"
+    "<td><label for='t2'>Fall 2025</label></td></tr>"
+    "</table><input type='button' value='Continue' id='cont'>"
+)
+
+
+@pytest.mark.browser
+async def test_iframe_controls_are_visible_to_the_model(page):
+    """A PeopleSoft-shaped term selector: radios and a Continue button in an iframe.
+
+    The previous hand-rolled DOM walk dropped both. Radios and
+    `<input type=button value=...>` have no aria-label, no title and no innerText,
+    which were the only name sources it consulted. On the real MyUCF grades page
+    the agent therefore could not see the term radios or the Continue button, kept
+    falling back to dom_search, and burned its retry budget.
+    """
+    executor = Executor.__new__(Executor)
+    await page.set_content(
+        f'<h1>View My Grades</h1><iframe srcdoc="{PEOPLESOFT_IFRAME}" width="900" height="400"></iframe>'
+    )
+    await page.wait_for_timeout(500)
+
+    snapshot = await executor._get_real_dom_snapshot(page, max_chars=4000)
+
+    assert '[role="radio"] "Spring 2026"' in snapshot
+    assert '[role="radio"] "Fall 2025"' in snapshot
+    assert '[role="button"] "Continue"' in snapshot
+
+
+@pytest.mark.browser
+async def test_iframe_roles_are_aria_roles_not_html_tag_names(page):
+    """`get_by_role("td")` is not valid, so tag names as roles are unclickable."""
+    executor = Executor.__new__(Executor)
+    await page.set_content(
+        f'<h1>Grades</h1><iframe srcdoc="{PEOPLESOFT_IFRAME}" width="900" height="400"></iframe>'
+    )
+    await page.wait_for_timeout(500)
+
+    snapshot = await executor._get_real_dom_snapshot(page, max_chars=4000)
+
+    for tag in ("td", "tr", "tbody", "table", "body", "label", "div", "span"):
+        assert f'role="{tag}"' not in snapshot, f"emitted HTML tag {tag!r} as an ARIA role"
+
+
+@pytest.mark.browser
+async def test_targets_the_snapshot_advertises_are_actually_clickable(page):
+    """Every role/name pair offered to the model must resolve to a real element."""
+    import re
+
+    executor = Executor.__new__(Executor)
+    await page.set_content(
+        f'<h1>Grades</h1><iframe srcdoc="{PEOPLESOFT_IFRAME}" width="900" height="400"></iframe>'
+    )
+    await page.wait_for_timeout(500)
+
+    snapshot = await executor._get_real_dom_snapshot(page, max_chars=4000)
+    actionable = {"radio", "button", "link", "checkbox", "textbox"}
+
+    checked = 0
+    for line in snapshot.splitlines():
+        match = re.match(r'^\[role="([^"]+)"\]\s+"(.+)"$', line)
+        if not match or match.group(1) not in actionable:
+            continue
+        role, name = match.group(1), match.group(2)
+        found = 0
+        for frame in page.frames:
+            found += await frame.get_by_role(role, name=name).count()
+        assert found > 0, f'snapshot advertised click(role={role}, name={name}) but nothing matches'
+        checked += 1
+
+    assert checked >= 3, "expected the radios and Continue button to be checked"
+
+
 @pytest.mark.browser
 async def test_snapshot_sees_real_page_elements(page):
     """End to end: the model must receive actual targets, not an error string."""

@@ -2057,40 +2057,35 @@ class Executor:
                 if char_count >= max_chars:
                     break
                 try:
-                    frame_snap = await frame.evaluate(
-                        """() => {
-                            const walk = (el) => {
-                                if (!el) return [];
-                                const items = [];
-                                const role = el.getAttribute && (el.getAttribute('role') || el.tagName.toLowerCase());
-                                const name = el.getAttribute && (
-                                    el.getAttribute('aria-label') ||
-                                    el.getAttribute('title') ||
-                                    (el.innerText || '').trim().slice(0, 120)
-                                );
-                                if (name && role) items.push({role, name});
-                                for (const child of (el.children || []))
-                                    items.push(...walk(child));
-                                return items;
-                            };
-                            return walk(document.body);
-                        }"""
+                    # Use the real accessibility tree, same as the main frame.
+                    #
+                    # This replaced a hand-rolled DOM walk that used
+                    # `getAttribute('role') || tagName` as the role and
+                    # `aria-label || title || innerText` as the name. That was wrong
+                    # in two ways that made PeopleSoft-style pages unusable:
+                    #
+                    #   * Roles came out as HTML tag names (td, tr, tbody, label), and
+                    #     `get_by_role("td")` is not a thing, so no emitted target
+                    #     could actually be clicked.
+                    #   * Controls whose name comes from anywhere other than
+                    #     aria-label/title/innerText were dropped entirely. Radios,
+                    #     checkboxes and `<input type=button value=...>` have none of
+                    #     those, so the model never saw them. On the MyUCF grades
+                    #     page that meant the term radios and the Continue button
+                    #     were both invisible while clearly present on screen.
+                    frame_lines = self._format_aria_snapshot(
+                        await frame.locator("body").aria_snapshot(),
+                        max_lines=200,
                     )
-                    if frame_snap:
+                    if frame_lines:
                         header = f'[iframe: {frame.url[:80]}]'
                         all_lines.append(header)
                         char_count += len(header) + 1
-                        for item in frame_snap[:200]:
+                        for line in frame_lines:
                             if char_count >= max_chars:
                                 break
-                            r = item.get("role", "")
-                            n = (item.get("name", "") or "").strip()
-                            if n:
-                                line = f'[role="{r}"] "{n}"'
-                                if len(line) > 200:
-                                    line = line[:197] + "..."
-                                all_lines.append(line)
-                                char_count += len(line) + 1
+                            all_lines.append(line)
+                            char_count += len(line) + 1
                 except Exception:
                     continue
 
