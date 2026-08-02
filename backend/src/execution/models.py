@@ -52,6 +52,9 @@ class ActionArgs(BaseModel):
     # fill
     clear: Optional[bool] = True
 
+    # read_page
+    section: Optional[int] = None
+
 
 ACTION_NAMES = (
     "navigate",
@@ -69,6 +72,7 @@ ACTION_NAMES = (
     "wait_for",
     "extract_content",
     "read_form",
+    "read_page",
     "list_tabs",
     "switch_tab",
     "close_tab",
@@ -95,6 +99,7 @@ class Action(BaseModel):
         "wait_for",
         "extract_content",
         "read_form",
+        "read_page",
         "list_tabs",
         "switch_tab",
         "close_tab",

@@ -34,6 +34,18 @@ from typing import Optional
 
 from playwright.async_api import Frame, Locator, Page
 
+from dom_extraction.snapshot import capture_page_snapshot, unique_frames
+
+__all__ = [
+    "Candidate",
+    "Resolution",
+    "element_inventory",
+    "normalize_role",
+    "resolve_target",
+    "suggest_candidates",
+    "unique_frames",
+]
+
 
 # Roles Playwright's get_by_role accepts. Passing anything else raises, so an
 # invalid role has to be caught before it reaches the locator.
@@ -125,60 +137,32 @@ def normalize_role(role: Optional[str]) -> str:
     return value if value in VALID_ARIA_ROLES else ""
 
 
-def unique_frames(page: Page) -> list[Frame]:
-    """Every frame exactly once.
-
-    `[page.main_frame] + list(page.frames)` processed the main frame twice,
-    doubling the work on every failing lookup.
-    """
-    seen: set[int] = set()
-    frames: list[Frame] = []
-    for frame in page.frames:
-        key = id(frame)
-        if key not in seen:
-            seen.add(key)
-            frames.append(frame)
-    return frames
-
-
-_ARIA_LINE = re.compile(r'^-\s+([a-zA-Z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?')
-
-
 async def element_inventory(page: Page, roles: Optional[set[str]] = None, limit: int = 120) -> list[Candidate]:
     """Every addressable role/name pair on the page, across all frames.
 
-    Built from the accessibility tree, so the names match what `get_by_role`
-    computes. One call per frame rather than a probe per guess.
+    Built from the shared page snapshot, so the names match what `get_by_role`
+    computes and the candidates offered after a miss are the same elements the
+    model saw in DOM_SNAPSHOT. Native `<option>` rows never appear: Chromium
+    does not accept clicks on them, so offering one as a candidate sent the
+    model straight into another failing action.
     """
+    snapshot = await capture_page_snapshot(page, max_elements=max(limit, 120))
     inventory: list[Candidate] = []
-    per_name_counts: dict[tuple[int, str, str], int] = {}
-
-    for frame_index, frame in enumerate(unique_frames(page)):
-        try:
-            yaml_text = await frame.locator("body").aria_snapshot()
-        except Exception:
+    for element in snapshot.elements:
+        if not element.name:
             continue
-
-        for raw in (yaml_text or "").splitlines():
-            stripped = raw.strip()
-            if not stripped.startswith("-") or stripped[1:].lstrip().startswith("/"):
-                continue
-            match = _ARIA_LINE.match(stripped)
-            if not match:
-                continue
-            role = (match.group(1) or "").strip().lower()
-            name = (match.group(2) or "").strip()
-            if not name or role in {"generic", "none", "presentation", "text"}:
-                continue
-            if roles is not None and role not in roles:
-                continue
-
-            key = (frame_index, role, name)
-            nth = per_name_counts.get(key, 0)
-            per_name_counts[key] = nth + 1
-            inventory.append(Candidate(role=role, name=name, nth=nth, frame_index=frame_index))
-            if len(inventory) >= limit:
-                return inventory
+        if roles is not None and element.role not in roles:
+            continue
+        inventory.append(
+            Candidate(
+                role=element.role,
+                name=element.name,
+                nth=element.nth or 0,
+                frame_index=element.frame_index,
+            )
+        )
+        if len(inventory) >= limit:
+            break
     return inventory
 
 

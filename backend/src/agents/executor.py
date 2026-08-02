@@ -21,6 +21,7 @@ from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt, get_execution_tools_prompt
 from dom_extraction import dom_extractor
+from dom_extraction.snapshot import SNAPSHOT_LINE, capture_page_snapshot
 
 
 # Wall-clock ceilings for a single executor step. Both paths that can block are
@@ -1033,12 +1034,11 @@ class Executor:
             "email address",
         )
         for raw in (dom_snapshot or "").splitlines():
-            line = raw.strip().lower()
-            m = re.search(r'^\[role="([^"]+)"\]\s+"(.+)"$', line)
+            m = SNAPSHOT_LINE.search(raw.strip().lower())
             if not m:
                 continue
-            role = (m.group(1) or "").strip().lower()
-            name = (m.group(2) or "").strip().lower()
+            role = (m.group("role") or "").strip().lower()
+            name = (m.group("name") or "").strip().lower()
             if role in {"textbox", "combobox"} and any(tok in name for tok in recipient_tokens):
                 return True
         return False
@@ -1170,11 +1170,11 @@ class Executor:
         controls: list[tuple[str, str]] = []
         seen = set()
         for line in (dom_snapshot or "").splitlines():
-            m = re.match(r'^\[role="([^"]+)"\]\s+"(.+)"$', line.strip())
+            m = SNAPSHOT_LINE.search(line.strip())
             if not m:
                 continue
-            role = (m.group(1) or "").strip().lower()
-            name = (m.group(2) or "").strip()
+            role = (m.group("role") or "").strip().lower()
+            name = (m.group("name") or "").strip()
             if not name:
                 continue
             key = (role, name.lower())
@@ -2028,151 +2028,19 @@ class Executor:
     
 
 
-    async def _get_real_dom_snapshot(self, page, max_chars: int = 8000) -> str:
-        """Get a role/name snapshot including iframes from Playwright accessibility tree.
+    async def _get_real_dom_snapshot(self, page, max_chars: int = 8000, section: int = 1) -> str:
+        """One section of the unified page snapshot (see dom_extraction.snapshot).
 
         Args:
-            max_chars: Hard character budget. The snapshot is truncated once this
-                       limit is reached so that downstream LLM context stays
-                       manageable (portal pages can easily exceed 30k chars).
+            max_chars: Character budget per section. A page that does not fit is
+                       paginated, not truncated: the rendered section says how
+                       many elements are hidden and which read_page(section=N)
+                       call shows them, so a long form's bottom fields are
+                       reachable instead of silently cut.
+            section:   1-based section to render.
         """
-        all_lines: list[str] = []
-        char_count = 0
-
-        # Main frame
         try:
-            for line in await self._main_frame_snapshot_lines(page, max_lines=300):
-                all_lines.append(line)
-                char_count += len(line) + 1
-                if char_count >= max_chars:
-                    break
+            snapshot = await capture_page_snapshot(page)
         except Exception as e:
-            all_lines.append(f"[DOM snapshot failed: {e}]")
-
-        # Child frames / iframes (PeopleSoft, etc.)
-        if char_count < max_chars:
-            for frame in page.frames:
-                if frame == page.main_frame:
-                    continue
-                if char_count >= max_chars:
-                    break
-                try:
-                    # Use the real accessibility tree, same as the main frame.
-                    #
-                    # This replaced a hand-rolled DOM walk that used
-                    # `getAttribute('role') || tagName` as the role and
-                    # `aria-label || title || innerText` as the name. That was wrong
-                    # in two ways that made PeopleSoft-style pages unusable:
-                    #
-                    #   * Roles came out as HTML tag names (td, tr, tbody, label), and
-                    #     `get_by_role("td")` is not a thing, so no emitted target
-                    #     could actually be clicked.
-                    #   * Controls whose name comes from anywhere other than
-                    #     aria-label/title/innerText were dropped entirely. Radios,
-                    #     checkboxes and `<input type=button value=...>` have none of
-                    #     those, so the model never saw them. On the MyUCF grades
-                    #     page that meant the term radios and the Continue button
-                    #     were both invisible while clearly present on screen.
-                    frame_lines = self._format_aria_snapshot(
-                        await frame.locator("body").aria_snapshot(),
-                        max_lines=200,
-                    )
-                    if frame_lines:
-                        header = f'[iframe: {frame.url[:80]}]'
-                        all_lines.append(header)
-                        char_count += len(header) + 1
-                        for line in frame_lines:
-                            if char_count >= max_chars:
-                                break
-                            all_lines.append(line)
-                            char_count += len(line) + 1
-                except Exception:
-                    continue
-
-        if not all_lines:
-            return "[No interactive elements in snapshot]"
-
-        result = "\n".join(all_lines)
-        if len(result) > max_chars:
-            result = result[:max_chars] + "\n... [DOM truncated]"
-        return result
-
-    # `- role "name" [attr=x]` from aria_snapshot. The name is optional so that
-    # container rows (`- banner:`) and text rows (`- text: hello`) fall out.
-    _ARIA_SNAPSHOT_LINE = re.compile(r'^-\s+([a-zA-Z][\w-]*)(?:\s+"((?:[^"\\]|\\.)*)")?')
-
-    # Roles that carry no actionable target, matching the previous tree walk.
-    _UNINTERESTING_ROLES = frozenset({"generic", "text", "staticText", "StaticText", "none", "presentation"})
-
-    async def _main_frame_snapshot_lines(self, page, max_lines: int = 300) -> list[str]:
-        """Role/name lines for the main frame.
-
-        Playwright removed `page.accessibility` in 1.5x. The executor still called
-        it, so on current Playwright every main-frame snapshot raised
-        AttributeError and the model was handed
-        `[DOM snapshot failed: 'Page' object has no attribute 'accessibility']`
-        on every single step. It could only see iframe content, which is why runs
-        leaned on repeated list_links/dom_search discovery and stalled.
-
-        Prefers `locator.aria_snapshot()`, falling back to the old tree walk when
-        running against an older Playwright.
-        """
-        accessibility = getattr(page, "accessibility", None)
-        if accessibility is not None:
-            snapshot = await accessibility.snapshot(interesting_only=True)
-            return self._format_accessibility_tree(snapshot, max_lines=max_lines) if snapshot else []
-
-        yaml_text = await page.locator("body").aria_snapshot()
-        return self._format_aria_snapshot(yaml_text, max_lines=max_lines)
-
-    @classmethod
-    def _format_aria_snapshot(cls, yaml_text: str, max_lines: int = 300) -> list[str]:
-        """Convert aria_snapshot YAML into the `[role="x"] "name"` lines used everywhere.
-
-        Several consumers parse that exact shape (field-priority ranking, click
-        target checks, the verifier's AFTER_STATE), so the format is preserved
-        rather than passing the YAML through.
-        """
-        lines: list[str] = []
-        for raw in (yaml_text or "").splitlines():
-            stripped = raw.strip()
-            if not stripped.startswith("-"):
-                continue
-            # Property rows such as `- /url: "https://..."` describe the row above.
-            if stripped[1:].lstrip().startswith("/"):
-                continue
-
-            match = cls._ARIA_SNAPSHOT_LINE.match(stripped)
-            if not match:
-                continue
-
-            role = (match.group(1) or "").strip()
-            name = (match.group(2) or "").strip()
-            if not name or role in cls._UNINTERESTING_ROLES:
-                continue
-
-            line = f'[role="{role}"] "{name}"'
-            if len(line) > 200:
-                line = line[:197] + "..."
-            lines.append(line)
-            if len(lines) >= max_lines:
-                break
-        return lines
-
-    def _format_accessibility_tree(self, node: dict | None, prefix: str = "", max_lines: int = 500) -> list[str]:
-        """Flatten accessibility tree to lines like [role=\"button\"] \"Submit\" for verifier and LLM."""
-        if node is None or max_lines <= 0:
-            return []
-        lines = []
-        role = node.get("role") or "generic"
-        name = (node.get("name") or "").strip()
-        if name and role not in ("generic", "text", "StaticText"):
-            line = f'[role="{role}"] "{name}"'
-            if len(line) > 200:
-                line = line[:197] + "..."
-            lines.append(line)
-        for child in node.get("children") or []:
-            lines.extend(self._format_accessibility_tree(child, prefix, max_lines - len(lines)))
-            if len(lines) >= max_lines:
-                break
-        return lines
+            return f"[DOM snapshot failed: {e}]"
+        return snapshot.render(max_chars=max_chars, section=section)

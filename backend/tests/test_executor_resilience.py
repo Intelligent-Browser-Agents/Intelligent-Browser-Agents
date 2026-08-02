@@ -22,21 +22,27 @@ removed_recovery = pytest.mark.xfail(
 DEFAULT_ELEMENTS = [{"role": "textbox", "name": "Search site"}]
 
 
-class DummyAccessibility:
-    """Minimal stand-in for `page.accessibility`."""
+class DummyLocator:
+    """Answers `locator("body").aria_snapshot()`, the modern snapshot source."""
 
     def __init__(self, elements):
         self._elements = elements
 
-    async def snapshot(self, interesting_only: bool = True):
-        return {
-            "role": "WebArea",
-            "name": "UCF",
-            "children": [
-                {"role": el["role"], "name": el["name"], "children": []}
-                for el in self._elements
-            ],
-        }
+    async def aria_snapshot(self, **_kwargs):
+        return "\n".join(f'- {el["role"]} "{el["name"]}"' for el in self._elements)
+
+
+class DummyFrame:
+    def __init__(self, elements, url: str):
+        self._elements = elements
+        self.url = url
+
+    def locator(self, _selector):
+        return DummyLocator(self._elements)
+
+    async def evaluate(self, _js, *_args):
+        # The metadata pass; no enrichment in the dummy.
+        return []
 
 
 class DummyContext:
@@ -49,8 +55,7 @@ class DummyPage:
 
     def __init__(self, url: str = "https://ucf.edu", elements=None):
         self.url = url
-        self.accessibility = DummyAccessibility(elements or DEFAULT_ELEMENTS)
-        self.main_frame = object()
+        self.main_frame = DummyFrame(elements or DEFAULT_ELEMENTS, url)
         self.frames = [self.main_frame]
         self.context = DummyContext(self)
 
@@ -126,8 +131,8 @@ def build_executor(response: ExecutionResult, page: DummyPage | None = None, llm
 def install_dom_mocks(monkeypatch, elements=None):
     """Stub the page-text extraction used to populate `dom_cache`.
 
-    The interactive-element snapshot the prompt sees comes from
-    `page.accessibility.snapshot`, so pass `elements` to `DummyPage` for that.
+    The interactive-element snapshot the prompt sees is built from each frame's
+    `aria_snapshot()`, so pass `elements` to `DummyPage` for that.
     """
 
     async def fake_get_page_text(page, max_chars: int = 3500):

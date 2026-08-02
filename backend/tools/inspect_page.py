@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from playwright.async_api import async_playwright  # noqa: E402
 
-from agents.executor import Executor  # noqa: E402
+from dom_extraction.snapshot import capture_page_snapshot  # noqa: E402
 from execution import actions  # noqa: E402
 from execution.targeting import element_inventory, resolve_target, unique_frames  # noqa: E402
 
@@ -63,24 +63,18 @@ async def inspect(url: str, headed: bool, wait: float) -> int:
         print(f"FRAMES  {len(unique_frames(page))}")
 
         # --- what the model is shown -------------------------------------
-        executor = Executor.__new__(Executor)
-        snapshot = await executor._get_real_dom_snapshot(page, max_chars=5200)
-        lines = [l for l in snapshot.splitlines() if l.startswith('[role=')]
-        main_count = 0
-        for line in snapshot.splitlines():
-            if line.startswith("[iframe"):
-                break
-            if line.startswith("[role="):
-                main_count += 1
+        snap = await capture_page_snapshot(page)
+        main_count = sum(1 for e in snap.elements if e.frame_index == 0)
 
         rule("SNAPSHOT (what the model sees)")
-        if "DOM snapshot failed" in snapshot:
-            print("  BROKEN:", next(l for l in snapshot.splitlines() if "failed" in l))
+        if not snap.elements:
+            print("  BROKEN: the snapshot has no elements at all.")
         print(f"  main frame elements: {main_count}")
-        print(f"  total elements:      {len(lines)}")
-        print(f"  characters:          {len(snapshot)} (budget 5200)")
-        if len(snapshot) >= 5200:
-            print("  TRUNCATED: fields near the end of the page are not visible to the agent.")
+        print(f"  total elements:      {len(snap.elements)}")
+        sections = snap.section_count(max_chars=5200)
+        print(f"  sections at 5200 chars: {sections}"
+              + ("" if sections == 1 else "  (later sections via read_page)"))
+        lines = [e.render_line() for e in snap.elements]
         for line in lines[:15]:
             print("   ", line[:92])
         if len(lines) > 15:

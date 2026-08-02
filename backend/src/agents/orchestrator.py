@@ -8,7 +8,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from capabilities import normalize_plan_steps
 from schema import OrchestratorPlan, OrchestratorDecision, infer_step_intent
-from state import ProjectState
+from state import ProjectState, get_mission_goal
 from models import Models
 from prompt_loader import get_orchestration_plan_prompt, get_orchestration_reasoning_prompt
 
@@ -21,6 +21,12 @@ class Orchestrator:
     - Reasoning and action: LLM decides advance, retry, or plan_complete from verification state.
     """
 
+    # Consecutive final-step cycles where the step verified complete but the
+    # goal did not. Each cycle costs a full execute/verify/decide round; without
+    # this brake the three loop counters reset each other and the run only ends
+    # at the recursion limit.
+    _GOAL_RETRY_CAP = 4
+
     def __init__(self):
         self.planner = Models.planner(OrchestratorPlan)
         self.decision_maker = Models.decision_maker(OrchestratorDecision)
@@ -32,20 +38,17 @@ class Orchestrator:
         if abort_reason:
             return self._merge_orchestrator_out(state, self._abort_mission(state, abort_reason))
 
-        user_intent = self._get_user_intent(state)
+        user_intent = get_mission_goal(state)
         current_plan = state.get("current_plan", [])
         current_step = state.get("current_step_index", 0)
 
-        needs_new_plan = len(current_plan) == 0
-        simulated_page = self._get_simulated_page_context(
-            state.get("current_url", ""),
-            current_step,
-            user_intent,
-        )
+        # A missing plan or an explicit CREATE request (fallback replan, next
+        # work item) both rebuild the plan from live page context.
+        needs_new_plan = len(current_plan) == 0 or state.get("plan_status") == "CREATE"
 
         if needs_new_plan:
             return self._merge_orchestrator_out(
-                state, self._create_plan(user_intent, simulated_page, state)
+                state, self._create_plan(user_intent, state)
             )
 
         return self._merge_orchestrator_out(
@@ -53,21 +56,44 @@ class Orchestrator:
         )
 
     @staticmethod
-    def _merge_orchestrator_out(_state: ProjectState, result: dict) -> dict:
-        """Attach step_intent and clear recovery_context when task text has no fallback markers."""
+    def _merge_orchestrator_out(state: ProjectState, result: dict) -> dict:
+        """Attach step_intent; clear recovery_context when the step advances.
+
+        recovery_context survives retries of the same step (it carries the
+        stable task signature across tactical rewordings) and is dropped as
+        soon as the run moves to a different plan step.
+        """
         out = dict(result)
         if "current_task" in out and out.get("current_task") is not None:
             out["step_intent"] = infer_step_intent(str(out["current_task"]))
-            task = (out.get("current_task") or "").strip()
-            if (
-                task
-                and "[Recovery Hint:" not in task
-                and "[Then continue objective:" not in task
-            ):
+        if "recovery_context" not in out:
+            prev_step = int(state.get("current_step_index", 0) or 0)
+            next_step = out.get("current_step_index", prev_step)
+            if next_step != prev_step:
                 out["recovery_context"] = None
         return out
 
-    def _create_plan(self, user_intent: str, page_state: str, state: ProjectState) -> dict:
+    @staticmethod
+    def _get_page_context(state: ProjectState) -> str:
+        """Real page evidence for the planner.
+
+        Prefers the executor's structured post-action snapshot, then the most
+        recent dom_cache text capture. Before anything has loaded it says so
+        honestly instead of pretending elements are visible.
+        """
+        snapshot = (state.get("last_page_snapshot") or "").strip()
+        if snapshot:
+            return snapshot[:3500]
+        cache = state.get("dom_cache") or []
+        latest = str(cache[-1]).strip() if cache else ""
+        if latest:
+            return latest[:3500]
+        url = (state.get("current_url") or "").strip()
+        if url and url != "about:blank":
+            return f"[No page snapshot captured yet. Current URL: {url}]"
+        return "[No page loaded yet. The browser is blank; the plan must start with a navigation step.]"
+
+    def _create_plan(self, user_intent: str, state: ProjectState) -> dict:
         # Build a conversation recap so the planner sees any clarification replies
         conversation_block = ""
         raw_msgs = state.get("messages", [])
@@ -87,6 +113,29 @@ class Orchestrator:
             )
 
         credentials_block = self._build_credentials_summary(state)
+        page_state = self._get_page_context(state)
+
+        # On a replan (fallback escalation or next work item), show the planner
+        # what was already tried so it does not repeat a failed plan verbatim.
+        replan_block = ""
+        plan_history = state.get("plan_history") or []
+        previous_plan = plan_history[-1] if plan_history and isinstance(plan_history[-1], list) else []
+        if previous_plan:
+            signals = state.get("status_signals") or {}
+            completed = {
+                int(i) for i in (signals.get("completed_steps") or []) if isinstance(i, int)
+            }
+            lines = []
+            for i, step in enumerate(previous_plan):
+                mark = "done" if i in completed else "not done"
+                lines.append(f"  {i + 1}. [{mark}] {step}")
+            replan_block = (
+                "\n\nPREVIOUS PLAN (replaced because it stopped fitting the page; "
+                "do not repeat steps already done, and plan from the CURRENT page state):\n"
+                + "\n".join(lines)
+            )
+
+        work_item_block = self._build_work_item_block(state)
 
         context = f"""
         USER REQUEST: {user_intent}
@@ -95,6 +144,8 @@ class Orchestrator:
 
         PAGE STATE:
         {page_state}
+        {replan_block}
+        {work_item_block}
         {conversation_block}
         {credentials_block}
 
@@ -116,7 +167,6 @@ class Orchestrator:
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_plan": [],
-                "plan_history": [],
                 "current_step_index": 0,
                 "plan_status": "NEEDS_CLARIFICATION",
                 "current_task": "Awaiting user clarification",
@@ -137,7 +187,6 @@ class Orchestrator:
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_plan": [],
-                "plan_history": [],
                 "current_step_index": 0,
                 "plan_status": "NEEDS_CLARIFICATION",
                 "current_task": "Awaiting user clarification",
@@ -159,7 +208,8 @@ class Orchestrator:
             reasoning += f"[Planner] Capability note: {note}\n"
 
         first_task = normalized_steps[0] if normalized_steps else "No steps generated"
-        return {
+        mission_goal = (plan.goal or "").strip()
+        out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_plan": normalized_steps,
             "plan_history": normalized_steps,
@@ -172,19 +222,42 @@ class Orchestrator:
             "last_step_complete": False,
             "mission_failed": False,
             "step_attempts": 0,
+            "goal_retry_cycles": 0,
             "handoff_interaction": False,
+            "recovery_context": None,
         }
+        if mission_goal:
+            out["mission_goal"] = mission_goal
+        return out
+
+    @staticmethod
+    def _build_work_item_block(state: ProjectState) -> str:
+        """Planner context for the active work item, when a work queue exists."""
+        work_items = state.get("work_items") or []
+        if not work_items:
+            return ""
+        idx = int(state.get("current_item_index", 0) or 0)
+        idx = min(max(idx, 0), len(work_items) - 1)
+        item = work_items[idx] if isinstance(work_items[idx], dict) else {}
+        description = str(item.get("description") or "").strip() or f"work item {idx + 1}"
+        url = str(item.get("url") or "").strip()
+        url_line = f"\n  Item URL: {url}" if url else ""
+        return (
+            f"\n\nWORK QUEUE: item {idx + 1} of {len(work_items)}. "
+            f"Plan ONLY for this item; the outer loop advances items automatically.\n"
+            f"  Item: {description}{url_line}"
+        )
 
     def _make_decision(self, current_plan: list, current_step: int, state: ProjectState) -> dict:
         step_complete = state.get("last_step_complete", False)
         total_steps = len(current_plan)
         safe_step = min(max(current_step, 0), max(total_steps - 1, 0))
         current_task = state.get("current_task") or (current_plan[safe_step] if current_plan else "No task")
-        user_intent = self._get_user_intent(state)
+        user_intent = get_mission_goal(state)
         recent_log = [self._clip_text(str(entry), 600) for entry in (state.get("reasoning_log") or [])[-3:]]
 
         if self._should_handoff_final_response(state, safe_step, total_steps, current_task):
-            return {
+            return self._complete_or_next_item(state, {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": safe_step,
                 "plan_status": "MAINTAIN",
@@ -196,7 +269,7 @@ class Orchestrator:
                 "handoff_interaction": True,
                 "needs_fallback": False,
                 "mission_failed": False,
-            }
+            })
 
         # Post-HITL handling via status_signals.
         # When the user just completed a HITL (e.g. MFA) and the login_phase
@@ -220,7 +293,7 @@ class Orchestrator:
                 next_step = min(safe_step + 1, total_steps - 1)
                 next_task = current_plan[next_step]
                 if safe_step >= total_steps - 1:
-                    return {
+                    return self._complete_or_next_item(state, {
                         "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                         "current_step_index": safe_step,
                         "plan_status": "MAINTAIN",
@@ -230,7 +303,7 @@ class Orchestrator:
                         "handoff_interaction": True,
                         "needs_fallback": False,
                         "mission_failed": False,
-                    }
+                    })
                 return {
                     "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                     "current_step_index": next_step,
@@ -319,7 +392,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             # the executor can finish the actual goal.
             if goal_already_complete:
                 reasoning = "[Decision] Final step verified complete; marking plan complete."
-                return {
+                return self._complete_or_next_item(state, {
                     "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                     "current_step_index": safe_step,
                     "plan_status": "MAINTAIN",
@@ -329,11 +402,23 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                     "handoff_interaction": True,
                     "needs_fallback": False,
                     "mission_failed": False,
-                }
-            # step_complete but goal NOT complete — more work needed
+                })
+            # step_complete but goal NOT complete — more work needed. This is
+            # the one loop none of the other counters see: the verifier resets
+            # step_attempts and stall_cycles on every step_complete=True, so
+            # this branch keeps its own counter and stops the run honestly
+            # instead of spinning until the recursion limit.
+            cycles = int(state.get("goal_retry_cycles", 0) or 0) + 1
+            if cycles >= self._GOAL_RETRY_CAP:
+                return self._abort_mission(
+                    state,
+                    f"The final step verified complete {cycles} times without the overall "
+                    f"goal completing; the plan cannot reach the goal as written.",
+                )
             reasoning = (
                 f"[Decision] Step {safe_step + 1}/{total_steps} marked complete "
-                f"but the overall goal is not yet achieved; retrying to finish."
+                f"but the overall goal is not yet achieved; retrying to finish "
+                f"(goal retry {cycles}/{self._GOAL_RETRY_CAP})."
             )
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
@@ -345,6 +430,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "needs_fallback": False,
                 "mission_failed": False,
                 "last_step_complete": False,
+                "goal_retry_cycles": cycles,
             }
         if step_complete and safe_step < total_steps - 1:
             original_step = current_plan[safe_step]
@@ -396,6 +482,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "needs_fallback": False,
                 "mission_failed": False,
                 "last_step_complete": False,
+                "goal_retry_cycles": 0,
             }
 
         try:
@@ -413,7 +500,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
         reasoning = f"[Decision] {decision_reasoning or '(no reasoning)'}\n[Decision] Action: {decision_action}"
 
         if decision_action == "plan_complete":
-            return {
+            return self._complete_or_next_item(state, {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": safe_step,
                 "plan_status": "MAINTAIN",
@@ -423,12 +510,12 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "handoff_interaction": True,
                 "needs_fallback": False,
                 "mission_failed": False,
-            }
+            })
 
         if decision_action == "advance":
             if safe_step >= total_steps - 1:
                 if goal_already_complete:
-                    return {
+                    return self._complete_or_next_item(state, {
                         "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                         "current_step_index": safe_step,
                         "plan_status": "MAINTAIN",
@@ -438,7 +525,16 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                         "handoff_interaction": True,
                         "needs_fallback": False,
                         "mission_failed": False,
-                    }
+                    })
+                # Same shape as the goal-retry loop above: the model wants to
+                # move past the final step while the goal is unmet.
+                cycles = int(state.get("goal_retry_cycles", 0) or 0) + 1
+                if cycles >= self._GOAL_RETRY_CAP:
+                    return self._abort_mission(
+                        state,
+                        f"The final step kept passing without the overall goal completing "
+                        f"({cycles} cycles); the plan cannot reach the goal as written.",
+                    )
                 return {
                     "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                     "current_step_index": safe_step,
@@ -449,11 +545,12 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                     "needs_fallback": False,
                     "mission_failed": False,
                     "last_step_complete": False,
+                    "goal_retry_cycles": cycles,
                 }
             next_step = min(safe_step + 1, total_steps - 1)
             next_task = current_plan[next_step]
             if self._should_handoff_final_response(state, next_step, total_steps, next_task):
-                return {
+                return self._complete_or_next_item(state, {
                     "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                     "current_step_index": next_step,
                     "plan_status": "MAINTAIN",
@@ -466,7 +563,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                     "handoff_interaction": True,
                     "needs_fallback": False,
                     "mission_failed": False,
-                }
+                })
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": next_step,
@@ -477,6 +574,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "needs_fallback": False,
                 "mission_failed": False,
                 "last_step_complete": False,
+                "goal_retry_cycles": 0,
             }
 
         # retry: keep same step; optionally narrow current_task for the executor
@@ -600,7 +698,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
         """Rule-based fallback when the reasoning LLM fails."""
         total_steps = len(current_plan)
         if step_complete and safe_step >= total_steps - 1:
-            return {
+            return self._complete_or_next_item(state, {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": safe_step,
                 "plan_status": "MAINTAIN",
@@ -610,12 +708,12 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "handoff_interaction": True,
                 "needs_fallback": False,
                 "mission_failed": False,
-            }
+            })
         if step_complete:
             next_step = min(safe_step + 1, total_steps - 1)
             next_task = current_plan[next_step]
             if self._should_handoff_final_response(state, next_step, total_steps, next_task):
-                return {
+                return self._complete_or_next_item(state, {
                     "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                     "current_step_index": next_step,
                     "plan_status": "MAINTAIN",
@@ -627,7 +725,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                     "handoff_interaction": True,
                     "needs_fallback": False,
                     "mission_failed": False,
-                }
+                })
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "current_step_index": next_step,
@@ -638,6 +736,7 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 "needs_fallback": False,
                 "mission_failed": False,
                 "last_step_complete": False,
+                "goal_retry_cycles": 0,
             }
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
@@ -659,13 +758,60 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             return text
         return text[:max_chars] + "\n... [truncated]"
 
-    def _get_user_intent(self, state: ProjectState) -> str:
-        user_message = state["messages"][0] if state["messages"] else None
-        if isinstance(user_message, dict):
-            return user_message.get("content", "Unknown intent")
-        if hasattr(user_message, "content"):
-            return user_message.content
-        return str(user_message) if user_message else "Unknown intent"
+    def _complete_or_next_item(self, state: ProjectState, result: dict) -> dict:
+        """Deterministic work-queue advancement.
+
+        Wraps every "plan complete" outcome: when a work queue exists and items
+        remain, record the finished item's result and restart planning for the
+        next item instead of ending the mission. The per-item plan stays
+        LLM-generated; only this outer loop is deterministic.
+        """
+        if not result.get("is_complete") or result.get("mission_failed"):
+            return result
+        work_items = state.get("work_items") or []
+        if not work_items:
+            return result
+
+        idx = int(state.get("current_item_index", 0) or 0)
+        idx = min(max(idx, 0), len(work_items) - 1)
+        finished = work_items[idx] if isinstance(work_items[idx], dict) else {}
+        item_record = {
+            "index": idx,
+            "description": str(finished.get("description") or f"work item {idx + 1}"),
+            "status": "completed",
+            "final_url": state.get("current_url", ""),
+            "transactions": int(state.get("number_of_transactions", 0) or 0),
+        }
+
+        if idx >= len(work_items) - 1:
+            out = dict(result)
+            out["item_results"] = [item_record]
+            return out
+
+        next_idx = idx + 1
+        next_item = work_items[next_idx] if isinstance(work_items[next_idx], dict) else {}
+        next_description = str(next_item.get("description") or f"work item {next_idx + 1}")
+        return {
+            "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+            "current_item_index": next_idx,
+            "item_results": [item_record],
+            "current_plan": [],
+            "current_step_index": 0,
+            "plan_status": "CREATE",
+            "current_task": f"Start work item {next_idx + 1} of {len(work_items)}: {next_description}",
+            "reasoning_log": [
+                f"[Decision] Work item {idx + 1}/{len(work_items)} complete; "
+                f"advancing to item {next_idx + 1}."
+            ],
+            "is_complete": False,
+            "handoff_interaction": False,
+            "needs_fallback": False,
+            "mission_failed": False,
+            "last_step_complete": False,
+            "step_attempts": 0,
+            "goal_retry_cycles": 0,
+            "recovery_context": None,
+        }
 
     def _get_abort_reason(self, state: ProjectState) -> str:
         max_step_attempts = int(state.get("max_step_attempts", 6))
@@ -678,20 +824,14 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
                 f"Aborted after {step_attempts} failed attempts on the current step "
                 f"(limit: {max_step_attempts})."
             )
-        signals = state.get("status_signals") or {}
-        completed_steps_raw = signals.get("completed_steps") or []
-        completed_steps = len({int(step) for step in completed_steps_raw if isinstance(step, int)})
-        recent_step_success = 1 if bool(state.get("last_step_complete", False)) else 0
 
-        # Successful completed steps still consume budget, but less than pure retries.
-        success_credits = completed_steps + recent_step_success
-        effective_transactions = max(0, transactions - success_credits)
-
-        if effective_transactions >= max_transactions:
+        # A plain counter. The old "success credit" subtraction meant every
+        # completed step pushed the stop further out, so the graceful abort ran
+        # after the recursion limit instead of before it.
+        if transactions >= max_transactions:
             return (
                 f"Aborted after {transactions} transactions without completion "
-                f"(effective load: {effective_transactions}, success credits: {success_credits}, "
-                f"limit: {max_transactions})."
+                f"(limit: {max_transactions})."
             )
         return ""
 
@@ -741,13 +881,3 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
             "\n\nAVAILABLE USER CREDENTIALS (the agent can auto-fill these — no need for human-in-the-loop):\n"
             + "\n".join(parts)
         )
-
-    def _get_simulated_page_context(self, url: str, step: int, intent: str) -> str:
-        stages = [
-            f"Page loaded at {url}. Navigation and content elements visible.",
-            "Interacted with page. Elements responding to actions.",
-            "Progress made. Page state updated.",
-            "Near completion. Final actions pending.",
-            "Task completed successfully.",
-        ]
-        return stages[min(step, len(stages) - 1)]

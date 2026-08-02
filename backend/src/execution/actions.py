@@ -601,45 +601,46 @@ async def do_read_form(page: Page) -> ExecutionOutput:
     model had to re-read a truncated snapshot and infer, and because truncation is
     in DOM order the unfilled fields at the bottom of a long form were exactly
     what got cut.
+
+    Uses the same collector as the page snapshot, so this inventory and
+    DOM_SNAPSHOT cannot disagree, and both see the composed tree: fields inside
+    open shadow roots (Salesforce/LWC, many airline widgets) and names resolved
+    through aria-labelledby (Workday, most React form libraries) are included.
     """
+    from dom_extraction.snapshot import collect_form_fields
+
     start = asyncio.get_event_loop().time()
     rows: list[str] = []
 
     for frame_index, frame in enumerate(unique_frames(page)):
-        try:
-            fields = await frame.evaluate(
-                """() => Array.from(document.querySelectorAll('input, select, textarea'))
-                    .filter(el => el.type !== 'hidden')
-                    .map(el => {
-                        const label = el.labels && el.labels.length ? el.labels[0].innerText.trim() : '';
-                        const name = label || el.getAttribute('aria-label') || el.getAttribute('placeholder')
-                                     || el.getAttribute('name') || el.id || '';
-                        let state;
-                        if (el.type === 'checkbox' || el.type === 'radio') state = el.checked ? 'checked' : 'unchecked';
-                        else if (el.tagName === 'SELECT') state = el.value ? ('selected: ' + el.value) : 'empty';
-                        else if (el.type === 'file') state = (el.files && el.files.length) ? ('file: ' + el.files[0].name) : 'no file';
-                        else state = el.value ? ('filled (' + el.value.length + ' chars)') : 'empty';
-                        return {
-                            name: String(name).slice(0, 80),
-                            kind: el.tagName === 'SELECT' ? 'select' : (el.type || 'text'),
-                            state,
-                            required: !!el.required,
-                            disabled: !!(el.disabled || el.readOnly),
-                        };
-                    })"""
-            )
-        except Exception:
-            continue
-
-        for f in fields or []:
+        for f in await collect_form_fields(frame):
+            kind = f.get("type") or "text"
+            if f.get("tag") not in ("input", "select", "textarea"):
+                if kind in ("submit", "button", "reset", "image") or f.get("tag") == "button":
+                    continue
+                kind = f.get("role") or kind
+            if kind in ("submit", "button", "reset", "image"):
+                continue
+            if f.get("checked") is not None:
+                state = "checked" if f.get("checked") else "unchecked"
+            elif kind in ("select", "combobox", "listbox"):
+                selected = (f.get("selectedValue") or "").strip()
+                state = f"selected: {selected}" if selected else "empty"
+            elif kind == "file":
+                state = f"file: {f.get('fileName')}" if f.get("filled") else "no file"
+            elif f.get("filled"):
+                state = f"filled ({f.get('valueLen') or '?'} chars)"
+            else:
+                state = "empty"
             flags = []
             if f.get("required"):
                 flags.append("required")
-            if f.get("disabled"):
+            if f.get("disabled") or f.get("readonly"):
                 flags.append("readonly")
             suffix = f" [{', '.join(flags)}]" if flags else ""
             prefix = f"frame{frame_index} " if frame_index else ""
-            rows.append(f"- {prefix}{f.get('kind')} \"{f.get('name')}\": {f.get('state')}{suffix}")
+            name = str(f.get("name") or f.get("fallbackId") or "")[:80]
+            rows.append(f"- {prefix}{kind} \"{name}\": {state}{suffix}")
 
     if not rows:
         return _ok("read_form", {}, "No form fields found on the page.", start, verified=True, extracted_text="")
@@ -647,6 +648,37 @@ async def do_read_form(page: Page) -> ExecutionOutput:
     empty = sum(1 for r in rows if r.endswith("empty") or ": empty" in r or "no file" in r)
     summary = f"{len(rows)} field(s), {empty} still empty."
     return _ok("read_form", {}, summary, start, verified=True, extracted_text=summary + "\n" + "\n".join(rows))
+
+
+# ---------------------------------------------------------------------------
+# read_page
+# ---------------------------------------------------------------------------
+
+async def do_read_page(page: Page, section: int = 1) -> ExecutionOutput:
+    """Render one section of the paginated page snapshot.
+
+    The snapshot shown each step is budget-limited. It used to be truncated in
+    DOM order, so on a long form the unfilled fields at the bottom were exactly
+    what got cut, with nothing telling the model they existed. Now the snapshot
+    names its section count and this action fetches the rest.
+    """
+    from dom_extraction.snapshot import capture_page_snapshot
+
+    start = asyncio.get_event_loop().time()
+    args = {"section": section}
+    try:
+        snapshot = await capture_page_snapshot(page)
+    except PlaywrightError as exc:
+        return _fail("read_page", args, f"Could not snapshot the page: {str(exc).splitlines()[0]}", "unknown", start)
+
+    wanted = max(1, int(section or 1))
+    total = snapshot.section_count(max_chars=4000)
+    body = snapshot.render(max_chars=4000, section=wanted)
+    shown = min(wanted, total)
+    message = f"Section {shown} of {total} ({len(snapshot.elements)} elements total)."
+    if wanted > total:
+        message = f"Section {wanted} does not exist; showing last section {shown} of {total}."
+    return _ok("read_page", args, message, start, verified=True, extracted_text=body)
 
 
 # ---------------------------------------------------------------------------
@@ -746,6 +778,7 @@ __all__ = [
     "do_upload_file",
     "do_wait_for",
     "do_read_form",
+    "do_read_page",
     "do_scroll_to",
     "do_list_tabs",
     "do_switch_tab",

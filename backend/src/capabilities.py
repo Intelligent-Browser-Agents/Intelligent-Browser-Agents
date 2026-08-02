@@ -21,6 +21,7 @@ EXECUTOR_CAPABILITIES = frozenset(
         "upload_file",
         "wait_for",
         "read_form",
+        "read_page",
         "scroll_to",
         "list_tabs",
         "switch_tab",

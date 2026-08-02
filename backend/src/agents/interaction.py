@@ -4,14 +4,26 @@ Formats internal results into user-facing responses.
 Uses LangGraph's interrupt() for human-in-the-loop:
   - "finish" responses are delivered to the user via interrupt, then the graph ends.
   - "request" (clarification) responses pause the graph, collect user input, and resume.
+
+Two interrupt-lifecycle rules this file must keep:
+
+* LangGraph re-runs a node from the top when interrupt() resumes. The LLM call
+  is therefore memoized on a fingerprint of the input state: the replay reuses
+  the first response instead of paying for a second call whose sampling could
+  take a different branch and consume the resume value at the wrong call site.
+* Every interrupt payload carries a deterministic correlation_id, and a resume
+  value shaped {"correlation_id": ..., "user_input": ...} is only accepted when
+  the ids match; otherwise the same question is asked again. Replies are
+  matched by id, never by call order.
 """
 
+import hashlib
 import re
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 from schema import InteractionResponse
-from state import ProjectState
+from state import ProjectState, get_mission_goal
 from models import Models
 from prompt_loader import get_interaction_prompt
 
@@ -21,13 +33,61 @@ class InteractionAgent:
     LLM-powered Interaction agent that generates user-facing responses.
     Uses the interaction prompt from the prompts directory.
     """
-    
+
+    _LLM_CACHE_MAX = 8
+
     def __init__(self):
         self.llm = Models.interaction(InteractionResponse)
         self.system_prompt = get_interaction_prompt()
+        # Fingerprint of input state -> InteractionResponse | None. Survives the
+        # node re-execution that follows every interrupt() resume.
+        self._llm_cache: dict = {}
+
+    # ── interrupt plumbing ─────────────────────────────────
+
+    @staticmethod
+    def _correlation_id(state: ProjectState, kind: str, message: str) -> str:
+        """Deterministic id for one interrupt: stable across the node replay
+        that follows a resume (same input state → same id), distinct across
+        different questions."""
+        basis = f"{kind}|{int(state.get('number_of_transactions', 0) or 0)}|{message}"
+        return hashlib.sha1(basis.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+    @staticmethod
+    def _ask_user(state: ProjectState, payload: dict) -> str:
+        """interrupt() with correlation-id matching.
+
+        Accepts either a plain string reply (legacy) or a dict
+        {"correlation_id": ..., "user_input": ...}. A dict whose id does not
+        match this payload is a reply to a different question; the same
+        question is asked again rather than consuming the stale value.
+        """
+        cid = InteractionAgent._correlation_id(
+            state, str(payload.get("type", "request")), str(payload.get("message", ""))
+        )
+        payload = dict(payload)
+        payload["correlation_id"] = cid
+        while True:
+            reply = interrupt(payload)
+            if isinstance(reply, dict) and "correlation_id" in reply:
+                if str(reply.get("correlation_id")) == cid:
+                    return str(reply.get("user_input", ""))
+                continue
+            if isinstance(reply, dict):
+                return str(reply.get("user_input", ""))
+            return str(reply)
+
+    @staticmethod
+    def _announce_finish(state: ProjectState, message: str) -> None:
+        payload = {
+            "type": "finish",
+            "message": message,
+            "correlation_id": InteractionAgent._correlation_id(state, "finish", message),
+        }
+        interrupt(payload)
 
     def __call__(self, state: ProjectState) -> dict:
-        user_intent = self._get_user_intent(state)
+        user_intent = get_mission_goal(state)
         plan_history = state.get("plan_history", [])
         reasoning_log = state.get("reasoning_log", [])
         current_url = state.get("current_url", "unknown")
@@ -42,7 +102,7 @@ class InteractionAgent:
                 pending_sensitive.get("message")
                 or "Please confirm this sensitive action. Reply yes to proceed or no to cancel."
             )
-            user_reply = interrupt({
+            user_reply = self._ask_user(state, {
                 "type": "request",
                 "message": confirmation_message,
                 "requested_fields": ["approval"],
@@ -74,7 +134,7 @@ class InteractionAgent:
 
             if parsed is False:
                 final_message = "Sensitive action canceled. No irreversible action was executed."
-                interrupt({"type": "finish", "message": final_message})
+                self._announce_finish(state, final_message)
                 return {
                     "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                     "reasoning_log": [
@@ -84,6 +144,7 @@ class InteractionAgent:
                     ],
                     "messages": [{"role": "assistant", "content": final_message}],
                     "is_complete": True,
+                    "handoff_interaction": False,
                     "pending_sensitive_action": None,
                     "sensitive_action_approval": {
                         "approved": False,
@@ -120,7 +181,7 @@ class InteractionAgent:
                 message = "Could you provide more details about what you'd like me to do?"
                 fields = ["additional details"]
 
-            user_reply = interrupt({
+            user_reply = self._ask_user(state, {
                 "type": "request",
                 "message": message,
                 "requested_fields": fields,
@@ -134,6 +195,7 @@ class InteractionAgent:
                 ],
                 "handoff_interaction": False,
                 "is_complete": False,
+                "plan_status": "CREATE",
                 "messages": [
                     {"role": "assistant", "content": message},
                     {"role": "user", "content": str(user_reply)},
@@ -148,7 +210,7 @@ class InteractionAgent:
                 if str(item).strip():
                     message += f"\n- {str(item).strip()}"
 
-            user_reply = interrupt({
+            user_reply = self._ask_user(state, {
                 "type": "request",
                 "message": message,
                 "requested_fields": [str(item).strip() for item in requested_context if str(item).strip()],
@@ -175,7 +237,7 @@ class InteractionAgent:
                 f"Reason: {abort_reason or 'Exceeded retry safety limits.'}\n"
                 f"Last URL: {current_url}"
             )
-            interrupt({"type": "finish", "message": final_message})
+            self._announce_finish(state, final_message)
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "reasoning_log": [
@@ -184,6 +246,8 @@ class InteractionAgent:
                     f"[Interaction] Final:\n{final_message}"
                 ],
                 "messages": [{"role": "assistant", "content": final_message}],
+                "is_complete": True,
+                "handoff_interaction": False,
             }
 
         extracted_content = state.get("extracted_content") or []
@@ -214,17 +278,16 @@ class InteractionAgent:
         extracted_block = "\n\n---\n\n".join(extracted_content) if extracted_content else "(No content extracted from pages.)"
         extracted_block = self._clip_text(extracted_block, 15000)
 
-        compose_draft = signals.get("compose_draft") or {}
-        compose_subject = (compose_draft.get("subject") or "").strip()
-        compose_body = (compose_draft.get("body") or "").strip()
-        if compose_subject or compose_body:
-            body_preview = compose_body[:320] + ("..." if len(compose_body) > 320 else "")
-            compose_draft_block = (
-                f"Subject: {compose_subject or '(not captured)'}\n"
-                f"Body Preview: {body_preview or '(not captured)'}"
-            )
+        # Per-item outcomes for work-queue missions ("apply to these 5 jobs").
+        item_results = state.get("item_results") or []
+        if item_results:
+            item_lines = [
+                f"- item {int(r.get('index', 0)) + 1}: {r.get('description', '?')} → {r.get('status', '?')}"
+                for r in item_results if isinstance(r, dict)
+            ]
+            item_results_block = "\n".join(item_lines)
         else:
-            compose_draft_block = "(No compose draft captured.)"
+            item_results_block = "(No per-item results; this was a single-objective mission.)"
 
         mission_status = self._clip_text(state.get("mission_status") or "", 2200)
         context = f"""
@@ -242,13 +305,13 @@ class InteractionAgent:
 
             SYSTEM_STATUS: {system_status}
 
-            COMPOSE_DRAFT_CAPTURED (authoritative when summarizing sent email content):
-            {compose_draft_block}
+            WORK_ITEM_RESULTS (per-item outcomes for bulk missions):
+            {item_results_block}
 
             MISSION_STATUS:
             {mission_status}
 
-            Generate a user-facing response based on this information. If EXTRACTED_CONTENT is present, summarize or use it to answer the user's goal. If COMPOSE_DRAFT_CAPTURED is present, keep any sent-email summary aligned to that captured draft.
+            Generate a user-facing response based on this information. If EXTRACTED_CONTENT is present, summarize or use it to answer the user's goal. If WORK_ITEM_RESULTS has entries, report the outcome of every item.
             """
 
         messages = [
@@ -256,10 +319,23 @@ class InteractionAgent:
             HumanMessage(content=context)
         ]
 
-        try:
-            response: InteractionResponse = self.llm.invoke(messages)
-        except Exception:
-            response = None
+        # Memoized across the node replay that follows an interrupt resume:
+        # the same input state must produce the same response object, so the
+        # replay walks the same branch and the resume value is consumed by the
+        # same interrupt call site (and the second LLM call is never paid).
+        cache_key = hashlib.sha1(
+            f"{state.get('number_of_transactions', 0)}|{system_status}|{context}".encode("utf-8", errors="replace")
+        ).hexdigest()
+        if cache_key in self._llm_cache:
+            response = self._llm_cache[cache_key]
+        else:
+            try:
+                response: InteractionResponse = self.llm.invoke(messages)
+            except Exception:
+                response = None
+            if len(self._llm_cache) >= self._LLM_CACHE_MAX:
+                self._llm_cache.pop(next(iter(self._llm_cache)))
+            self._llm_cache[cache_key] = response
 
         if response is not None:
             is_empty_finish = (
@@ -280,7 +356,7 @@ class InteractionAgent:
         # ── HITL: deliver response to user via interrupt ──
         if response is not None and response.type == "request":
             requested_fields = getattr(response, "requested_fields", []) or []
-            user_reply = interrupt({
+            user_reply = self._ask_user(state, {
                 "type": "request",
                 "message": final_message,
                 "requested_fields": requested_fields,
@@ -302,7 +378,7 @@ class InteractionAgent:
             }
 
         # "finish" path — deliver the final answer to the user, then let the graph end
-        interrupt({"type": "finish", "message": final_message})
+        self._announce_finish(state, final_message)
 
         interaction_log = (
             "[Interaction] Type: finish\n"
@@ -312,6 +388,7 @@ class InteractionAgent:
         return {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "reasoning_log": [interaction_log],
+            "handoff_interaction": False,
             "messages": [{"role": "assistant", "content": final_message}],
         }
 
@@ -352,14 +429,6 @@ class InteractionAgent:
                 if stripped.startswith("- "):
                     questions.append(stripped[2:].strip())
         return questions
-
-    def _get_user_intent(self, state: ProjectState) -> str:
-        user_message = state["messages"][0] if state["messages"] else None
-        if isinstance(user_message, dict):
-            return user_message.get("content", "Unknown intent")
-        elif hasattr(user_message, "content"):
-            return user_message.content
-        return str(user_message) if user_message else "Unknown intent"
 
     @staticmethod
     def _clip_text(value: str, max_chars: int) -> str:

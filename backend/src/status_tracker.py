@@ -6,8 +6,14 @@ can read.  Deterministic fields (plan progress, last action, URL) are derived
 from raw state; narrative fields (situation summary, blocking issues) are
 recycled from existing agent outputs so no extra LLM calls are needed.
 
+There is exactly one field-completion tracker here: `field_progress`, fed by
+the executor's verified field actions (fill / select_option / set_checkbox /
+type) and by `read_form` inventories. The old parallel `compose_fields`
+tracker — email-specific slots back-filled by string-matching verifier prose —
+is gone with the rest of the compose special-casing.
+
 Usage in main.py:
-    wrapped = StatusTracker.wrap(agent_callable, "execution")
+    wrapped = status_tracker.wrap(agent_callable, "execution")
     workflow.add_node("execution", wrapped)
 
 Each agent then reads state["mission_status"] for a concise, structured
@@ -37,83 +43,8 @@ _FINALIZATION_KEYWORDS = (
 
 _MAX_HITL_EVENTS = 10
 
-
-def _type_event_haystack(event: dict[str, Any]) -> str:
-    """Lowercase string from structured type() target metadata + args (for slot matching)."""
-    args = event.get("args") if isinstance(event.get("args"), dict) else {}
-    parts = [
-        str(args.get("target_description") or ""),
-        str(args.get("target_name") or ""),
-        str(args.get("target_role") or ""),
-        str(args.get("text") or ""),
-    ]
-    return " ".join(parts).lower()
-
-
-def _classify_compose_slot_from_type_event(event: dict[str, Any]) -> str | None:
-    """
-    Map a successful type event to a generic compose slot using target metadata.
-    Returns None if the event is not a typed success or lacks target metadata (use legacy log heuristics).
-    """
-    if (event.get("action") or "").strip().lower() != "type":
-        return None
-    if str(event.get("status") or "").lower() != "success":
-        return None
-    args = event.get("args") if isinstance(event.get("args"), dict) else {}
-    if not any(
-        str(args.get(k) or "").strip()
-        for k in ("target_description", "target_name", "target_role")
-    ):
-        return None
-
-    h = _type_event_haystack(event)
-    text = (args.get("text") or "").strip()
-    has_at = "@" in text
-
-    def hits(markers: tuple[str, ...]) -> bool:
-        return any(m in h for m in markers)
-
-    # Generic markers (not provider-specific URLs).
-    recipient_markers = (
-        "label=to",
-        ", to,",
-        "name=to",
-        "recipient",
-        "add recipients",
-        "search my contacts",
-        "search for email",
-        "placeholder=to",
-    )
-    subject_markers = (
-        "subject",
-        "title",
-        "add a subject",
-        "heading",
-    )
-    body_markers = (
-        "message body",
-        "messagebody",
-        "label=message",
-        "placeholder=message",
-    )
-
-    rec = hits(recipient_markers)
-    sub = hits(subject_markers)
-    bod = hits(body_markers)
-
-    if rec:
-        return "recipient"
-    if sub:
-        return "subject"
-    if bod:
-        return "body"
-    if "contenteditable=true" in h and not rec and not sub:
-        return "body"
-    if has_at:
-        return "recipient"
-    if len(text) >= 50:
-        return "body"
-    return None
+# Executor actions whose success means a specific form field now holds a value.
+_FIELD_WRITE_ACTIONS = ("fill", "select_option", "set_checkbox", "upload_file", "type")
 
 
 # ── public helpers ─────────────────────────────────────────────────────
@@ -156,15 +87,17 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
     tx = _get("number_of_transactions", 0)
 
     # ── Objective ──────────────────────────────────────────────────────
-    messages = state.get("messages") or []
-    objective = ""
-    if messages:
-        first = messages[0]
-        if isinstance(first, dict):
-            objective = first.get("content", "")
-        elif hasattr(first, "content"):
-            objective = first.content
-    objective = objective.replace("USER REQUEST: ", "").strip() or "(not set)"
+    objective = (_get("mission_goal") or "").strip()
+    if not objective:
+        messages = state.get("messages") or []
+        if messages:
+            first = messages[0]
+            if isinstance(first, dict):
+                objective = str(first.get("content", ""))
+            elif hasattr(first, "content"):
+                objective = str(first.content)
+        objective = objective.replace("USER REQUEST: ", "").strip()
+    objective = objective or "(not set)"
     objective = objective[:500] + ("..." if len(objective) > 500 else "")
 
     # ── Plan progress ──────────────────────────────────────────────────
@@ -180,6 +113,18 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
         arrow = " ← CURRENT" if i == step_idx else ""
         plan_lines.append(f"- {mark} {i + 1}. {step_text}{arrow}")
     plan_section = "\n".join(plan_lines) if plan_lines else "(no plan yet)"
+
+    # ── Work queue ─────────────────────────────────────────────────────
+    work_items = _get("work_items") or []
+    if work_items:
+        item_idx = int(_get("current_item_index", 0) or 0)
+        done = len(_get("item_results") or [])
+        work_queue_section = (
+            f"- item {min(item_idx + 1, len(work_items))} of {len(work_items)} in progress\n"
+            f"- {done} item(s) finished"
+        )
+    else:
+        work_queue_section = "(no work queue for this mission)"
 
     # ── Last action ────────────────────────────────────────────────────
     last = signals.get("last_action") or {}
@@ -202,30 +147,7 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
     # ── Login phase ────────────────────────────────────────────────────
     login_phase = signals.get("login_phase", "not_started")
 
-    # ── Compose fields ─────────────────────────────────────────────────
-    compose_fields = signals.get("compose_fields") or {
-        "recipient": False,
-        "subject": False,
-        "body": False,
-    }
-    compose_draft = signals.get("compose_draft") or {}
-    compose_section = (
-        f"- recipient: {'done' if compose_fields.get('recipient') else 'pending'}\n"
-        f"- subject: {'done' if compose_fields.get('subject') else 'pending'}\n"
-        f"- body: {'done' if compose_fields.get('body') else 'pending'}"
-    )
-    draft_subject = (compose_draft.get("subject") or "").strip()
-    draft_body = (compose_draft.get("body") or "").strip()
-    if draft_subject or draft_body:
-        body_preview = draft_body[:220] + ("..." if len(draft_body) > 220 else "")
-        compose_draft_section = (
-            f"- subject: {draft_subject or '(not captured)'}\n"
-            f"- body preview: {body_preview or '(not captured)'}"
-        )
-    else:
-        compose_draft_section = "(none captured yet)"
-
-    # ── Generic field progress ───────────────────────────────────────
+    # ── Field progress (the one tracker) ───────────────────────────────
     field_progress = signals.get("field_progress") or {}
     required_count = int(field_progress.get("required_count") or 0)
     completed_fields = list(field_progress.get("completed_fields") or [])
@@ -255,13 +177,23 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
     else:
         hitl_section = "(none)"
 
+    # Stats sit near the top: mission_status is clipped from the tail by its
+    # consumers, and step position is too load-bearing to be the first casualty.
     return f"""# Mission Status
 
 ## Objective
 {objective}
 
+## Stats
+- Transactions: {tx}
+- Current step: {step_idx + 1}/{len(plan) if plan else '?'}
+- Current task: {task}
+
 ## Plan Progress
 {plan_section}
+
+## Work Queue
+{work_queue_section}
 
 ## Current Situation
 {situation}
@@ -273,12 +205,6 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
 ## Login Phase
 {login_phase}
 
-## Compose Fields
-{compose_section}
-
-## Compose Draft
-{compose_draft_section}
-
 ## Field Progress
 {field_progress_section}
 
@@ -287,11 +213,6 @@ def build(state: dict, *, overlay: dict | None = None) -> str:
 
 ## HITL History
 {hitl_section}
-
-## Stats
-- Transactions: {tx}
-- Current step: {step_idx + 1}/{len(plan) if plan else '?'}
-- Current task: {task}
 """
 
 
@@ -322,37 +243,36 @@ def _update_orchestrator(signals: dict, state: dict, result: dict) -> None:
     plan = result.get("current_plan") or state.get("current_plan") or []
     step_idx = result.get("current_step_index", state.get("current_step_index", 0))
 
+    # A fresh plan (initial, replan, or next work item) resets step bookkeeping;
+    # completed indices from a replaced plan would mark the wrong steps done.
+    fresh_plan = (
+        "current_plan" in result
+        and result.get("current_plan")
+        and result.get("current_plan") != (state.get("current_plan") or [])
+        and int(result.get("current_step_index", 0) or 0) == 0
+    )
+    if fresh_plan:
+        signals["completed_steps"] = []
+        signals["blocking_issue"] = None
+
     # Track completed steps
     completed: list[int] = list(signals.get("completed_steps", []))
     prev_step = state.get("current_step_index", 0)
-    if result.get("last_step_complete") or step_idx > prev_step:
+    if not fresh_plan and (result.get("last_step_complete") or step_idx > prev_step):
         if prev_step not in completed:
             completed.append(prev_step)
-    signals["completed_steps"] = completed
+    signals["completed_steps"] = completed if not fresh_plan else []
 
     # Clear blocking issue when orchestrator advances
     if step_idx > prev_step:
         signals["blocking_issue"] = None
 
-    # Detect login phase from current task
-    task = (result.get("current_task") or state.get("current_task") or "").lower()
-    if any(k in task for k in _LOGIN_KEYWORDS):
-        if signals.get("login_phase") in (None, "not_started"):
-            signals["login_phase"] = "in_progress"
-    elif signals.get("login_phase") == "in_progress":
-        signals["login_phase"] = "completed"
-
-    # Reset compose field tracker when starting/opening a fresh draft step.
-    if any(tok in task for tok in ("new email draft", "open a new email draft", "start a new email draft", "new mail")):
-        signals["compose_fields"] = {
-            "recipient": False,
-            "subject": False,
-            "body": False,
-        }
-        signals["compose_draft"] = {
-            "subject": "",
-            "body": "",
-        }
+    # Login phase begins when an authenticate-intent step starts. Completion is
+    # evidence-based (see _update_verifier and _update_interaction); a step's
+    # wording no longer flips it.
+    step_intent = (result.get("step_intent") or state.get("step_intent") or "").strip()
+    if step_intent == "authenticate" and signals.get("login_phase") in (None, "not_started"):
+        signals["login_phase"] = "in_progress"
 
     # Start/reset generic field progress when the step objective changes.
     current_task = (result.get("current_task") or state.get("current_task") or "").strip()
@@ -383,7 +303,8 @@ def _update_orchestrator(signals: dict, state: dict, result: dict) -> None:
 def _update_executor(signals: dict, state: dict, result: dict) -> None:
     log_entries = result.get("reasoning_log") or []
     event = result.get("last_execution_event")
-    if isinstance(event, dict) and (event.get("action") or "").strip():
+    event = event if isinstance(event, dict) else {}
+    if (event.get("action") or "").strip():
         last_entry = last_execution_event_to_executor_log(event)
     else:
         # DEPRECATED: parse last reasoning_log line; remove once all executor paths emit last_execution_event
@@ -407,13 +328,12 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
         "status": action_status or "unknown",
         "message": (action_msg or "")[:200],
     }
-    if isinstance(event, dict):
-        ev_args = event.get("args")
-        if isinstance(ev_args, dict):
-            for k in ("target_name", "target_role", "target_description"):
-                v = ev_args.get(k)
-                if v is not None and str(v).strip():
-                    last_action[k] = str(v)[:300]
+    ev_args = event.get("args")
+    ev_args = ev_args if isinstance(ev_args, dict) else {}
+    for k in ("target_name", "target_role", "target_description"):
+        v = ev_args.get(k)
+        if v is not None and str(v).strip():
+            last_action[k] = str(v)[:300]
     signals["last_action"] = last_action
 
     if (
@@ -423,115 +343,124 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
     ):
         signals["blocking_issue"] = "Sensitive action confirmation required before proceeding."
 
-    compose_fields = dict(signals.get("compose_fields") or {
-        "recipient": False,
-        "subject": False,
-        "body": False,
-    })
-    compose_draft = dict(signals.get("compose_draft") or {
-        "subject": "",
-        "body": "",
-    })
-    entry_l = (last_entry or "").lower()
-    target_l = (target or "").lower()
+    if (action_status or "").lower() == "success":
+        _feed_field_progress(
+            signals,
+            state,
+            result,
+            action_type=(action_type or "").lower(),
+            event=event,
+            ev_args=ev_args,
+            last_entry=last_entry,
+        )
 
-    # Successful recipient entry or selection.
-    if action_status == "success":
-        if action_type == "type":
-            typed_text = _extract_typed_text(last_entry or "")
-            normalized_typed = (typed_text or "").strip()
-            structured_slot = (
-                _classify_compose_slot_from_type_event(event)
-                if isinstance(event, dict)
-                else None
-            )
-
-            if structured_slot == "recipient":
-                compose_fields["recipient"] = True
-            elif structured_slot == "subject" and len(normalized_typed) >= 3:
-                compose_fields["subject"] = True
-                if normalized_typed and not compose_draft.get("subject"):
-                    compose_draft["subject"] = normalized_typed[:200]
-            elif structured_slot == "body" and normalized_typed:
-                compose_fields["body"] = True
-                if normalized_typed and not compose_draft.get("body"):
-                    compose_draft["body"] = normalized_typed[:1400]
-            elif structured_slot is None:
-                if "@" in typed_text and any(tok in entry_l for tok in (
-                    "label=to",
-                    "name=to",
-                    "label=recipient",
-                    "placeholder=recipient",
-                    "search my contacts",
-                    "add recipients",
-                    "search for email",
-                )):
-                    compose_fields["recipient"] = True
-
-                if any(tok in entry_l for tok in ("label=subject", "placeholder=add a subject", "name=subject")):
-                    if len(typed_text) >= 3:
-                        compose_fields["subject"] = True
-                        if normalized_typed and not compose_draft.get("subject"):
-                            compose_draft["subject"] = normalized_typed[:200]
-
-                recipient_context = any(tok in entry_l for tok in (
-                    "label=to",
-                    "name=to",
-                    "label=recipient",
-                    "search my contacts",
-                    "add recipients",
-                    "search for email",
-                ))
-                body_context = any(tok in entry_l for tok in (
-                    "label=message body",
-                    "placeholder=message",
-                )) or ("contenteditable=true" in entry_l and not recipient_context)
-                if body_context and bool((typed_text or "").strip()):
-                    compose_fields["body"] = True
-                    if normalized_typed and not compose_draft.get("body"):
-                        compose_draft["body"] = normalized_typed[:1400]
-
-            # Generic field-progress tracking for any multi-field step.
-            field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
-            _rc = state.get("recovery_context")
-            task_signature = _normalize_task_signature(
-                (state.get("current_task") or "").strip(),
-                _rc if isinstance(_rc, dict) else None,
-            )
-            if field_progress and field_progress.get("task_signature") == task_signature:
-                completed = list(field_progress.get("completed_fields") or [])
-                field_id = _extract_field_identifier(last_entry or "")
-                required_count = int(field_progress.get("required_count") or 0)
-                if not field_id and typed_text.strip():
-                    # For multi-field steps, avoid synthetic per-typing IDs that can
-                    # falsely inflate completion; only allow generic fallback on
-                    # single-field objectives.
-                    if required_count <= 1 and not completed:
-                        field_id = "typed:generic"
-
-                if field_id and field_id not in completed:
-                    completed.append(field_id)
-                    cap = max(required_count, 20) if required_count > 0 else 20
-                    if len(completed) > cap:
-                        completed = completed[-cap:]
-                    field_progress["completed_fields"] = completed
-                    signals["field_progress"] = field_progress
-
-        if action_type == "click" and "role=option" in target_l and "@" in target_l:
-            compose_fields["recipient"] = True
-
-    signals["compose_fields"] = compose_fields
-    signals["compose_draft"] = compose_draft
-
-    # Update login phase based on executor actions
+    # Login phase transitions driven by executor evidence (informational only;
+    # "completed" is set by verified authenticate steps or MFA HITL completion).
     lp = signals.get("login_phase", "not_started")
-    if lp == "in_progress" and action_type == "type" and action_status == "success":
+    if lp == "in_progress" and (action_type or "").lower() in ("type", "fill") and action_status == "success":
         signals["login_phase"] = "credentials_entering"
     if lp in ("in_progress", "credentials_entering"):
-        if action_type == "click" and action_status == "success":
-            target_l = target.lower()
+        if (action_type or "").lower() == "click" and action_status == "success":
+            target_l = (target or "").lower()
             if any(k in target_l for k in ("next", "submit", "sign in", "log in")):
                 signals["login_phase"] = "submitted"
+
+
+def _feed_field_progress(
+    signals: dict,
+    state: dict,
+    result: dict,
+    *,
+    action_type: str,
+    event: dict,
+    ev_args: dict,
+    last_entry: str,
+) -> None:
+    """Feed the single field-progress tracker from executor evidence.
+
+    Two sources:
+      * a successful field-write action (fill/select_option/set_checkbox/
+        upload_file/type) — the target's accessible name is the field id;
+      * a read_form inventory — every field it reports as filled/checked/
+        selected is a completed field, straight from page readback.
+    """
+    field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
+    if not field_progress:
+        return
+    _rc = state.get("recovery_context")
+    task_signature = _normalize_task_signature(
+        (state.get("current_task") or "").strip(),
+        _rc if isinstance(_rc, dict) else None,
+    )
+    if field_progress.get("task_signature") != task_signature:
+        return
+
+    completed = list(field_progress.get("completed_fields") or [])
+    required_count = int(field_progress.get("required_count") or 0)
+    new_ids: list[str] = []
+
+    if action_type == "read_form":
+        for row in _read_form_rows(result):
+            field_id = _read_form_filled_field(row)
+            if field_id:
+                new_ids.append(field_id)
+    elif action_type in _FIELD_WRITE_ACTIONS:
+        field_id = ""
+        name = str(ev_args.get("name") or "").strip().lower()
+        if name:
+            field_id = name
+        else:
+            field_id = _extract_field_identifier(last_entry or "")
+        typed_text = str(ev_args.get("text") or "").strip() or _extract_typed_text(last_entry or "")
+        if not field_id and typed_text:
+            # For multi-field steps, avoid synthetic per-typing IDs that can
+            # falsely inflate completion; only allow generic fallback on
+            # single-field objectives.
+            if required_count <= 1 and not completed:
+                field_id = "typed:generic"
+        if field_id:
+            new_ids.append(field_id)
+
+    changed = False
+    for field_id in new_ids:
+        if field_id and field_id not in completed:
+            completed.append(field_id)
+            changed = True
+    if not changed:
+        return
+    cap = max(required_count, 20) if required_count > 0 else 20
+    if len(completed) > cap:
+        completed = completed[-cap:]
+    field_progress["completed_fields"] = completed
+    signals["field_progress"] = field_progress
+
+
+def _read_form_rows(result: dict) -> list[str]:
+    """The row lines a read_form action put into extracted_content."""
+    chunks = result.get("extracted_content") or []
+    if not chunks:
+        return []
+    text = str(chunks[-1] or "")
+    return [line.strip() for line in text.splitlines() if line.strip().startswith("- ")]
+
+
+_READ_FORM_ROW = re.compile(r'^-\s+(?:frame\d+\s+)?[\w-]+\s+"(?P<name>[^"]*)":\s*(?P<state>.+?)(?:\s*\[[^\]]*\])?$')
+
+
+def _read_form_filled_field(row: str) -> str:
+    """Field id when a read_form row shows a value present, else ''."""
+    m = _READ_FORM_ROW.match(row or "")
+    if not m:
+        return ""
+    field_state = (m.group("state") or "").strip().lower()
+    if (
+        field_state.startswith("filled")
+        or field_state.startswith("checked")
+        or field_state.startswith("selected:")
+        or field_state.startswith("file:")
+    ):
+        return (m.group("name") or "").strip().lower()
+    return ""
 
 
 def _update_verifier(signals: dict, state: dict, result: dict) -> None:
@@ -552,27 +481,15 @@ def _update_verifier(signals: dict, state: dict, result: dict) -> None:
     if any(k in msg_l for k in ("multi-factor", "mfa", "2fa", "two-factor", "two-step")):
         signals["login_phase"] = "mfa_pending"
 
-    compose_fields = dict(signals.get("compose_fields") or {
-        "recipient": False,
-        "subject": False,
-        "body": False,
-    })
-    if "recipient entry appears confirmed" in msg_l:
-        compose_fields["recipient"] = True
-    if "subject and message body appear populated" in msg_l:
-        compose_fields["subject"] = True
-        compose_fields["body"] = True
-    signals["compose_fields"] = compose_fields
-
-    # Allow verifier messages to finalize generic field-progress state.
-    field_progress = signals.get("field_progress") if isinstance(signals.get("field_progress"), dict) else None
-    if field_progress and "field-entry step complete" in msg_l:
-        required_count = int(field_progress.get("required_count") or 0)
-        completed = list(field_progress.get("completed_fields") or [])
-        while required_count > 0 and len(completed) < required_count:
-            completed.append(f"verified:{len(completed) + 1}")
-        field_progress["completed_fields"] = completed
-        signals["field_progress"] = field_progress
+    # Evidence-based login completion: the verifier confirmed an
+    # authenticate-intent step, which it only does when credential fields are
+    # gone from the page (see Verifier._credentials_still_requested).
+    if (
+        result.get("last_step_complete")
+        and (state.get("step_intent") or "").strip() == "authenticate"
+        and signals.get("login_phase") not in (None, "not_started")
+    ):
+        signals["login_phase"] = "completed"
 
 
 def _update_fallback(signals: dict, state: dict, result: dict) -> None:
@@ -590,9 +507,9 @@ def _update_fallback(signals: dict, state: dict, result: dict) -> None:
             signals["blocking_issue"] = "Need user context: " + ", ".join(requested_context[:3])
         else:
             signals["blocking_issue"] = diagnosis[:200] or "Additional user context required."
-    elif update_type == "revise_step":
+    elif update_type in ("revise_step", "insert_step_before", "replan"):
         signals["blocking_issue"] = None
-        signals["situation"] = f"Fallback revised step: {diagnosis[:200]}"
+        signals["situation"] = f"Fallback applied {update_type}: {diagnosis[:200]}"
     elif update_type == "abort":
         signals["blocking_issue"] = diagnosis[:200] or "Mission aborted by fallback."
 
@@ -629,10 +546,10 @@ def _normalize_task_signature(task: str, recovery_context: dict | None = None) -
     base = (rc.get("base_task") or "").strip()
     if base:
         return base.lower()
-    # DEPRECATED: strip recovery markers from current_task text
     text = (task or "").strip()
     if not text:
         return ""
+    # Legacy runs may still carry bracket markers in current_task.
     text = re.sub(r"\s*\[Recovery Hint:.*$", "", text, flags=re.IGNORECASE).strip()
     text = re.sub(r"\s*\[Then continue objective:.*$", "", text, flags=re.IGNORECASE).strip()
     return text.lower()
@@ -651,16 +568,6 @@ def _is_field_tracking_task(task_signature: str) -> bool:
 def _infer_required_field_names(task_signature: str) -> list[str]:
     text = task_signature or ""
     names: list[str] = []
-
-    # Generic compose-writing inference: when the step asks to write/draft an email
-    # but does not explicitly enumerate fields, track both subject and body.
-    is_compose_write = (
-        any(tok in text for tok in ("email", "mail", "message"))
-        and any(tok in text for tok in ("write", "draft", "compose"))
-        and not any(tok in text for tok in ("recipient", "to field", "to:", "send", "review", "confirm"))
-    )
-    if is_compose_write:
-        names.extend(["subject", "body"])
 
     keyword_map = (
         ("recipient", ("recipient", "to field", "to:")),

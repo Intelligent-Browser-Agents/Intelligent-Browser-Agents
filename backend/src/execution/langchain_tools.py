@@ -6,7 +6,6 @@ LLM tool-calling (bind_tools) instead of structured output, and
 adds lightweight DOM navigation/search helpers.
 """
 
-import re
 from typing import Literal, Optional
 
 from langchain_core.tools import StructuredTool
@@ -18,6 +17,7 @@ from .actions import (
     do_fill,
     do_list_tabs,
     do_read_form,
+    do_read_page,
     do_scroll_to,
     do_select_option,
     do_set_checkbox,
@@ -36,6 +36,7 @@ from .handlers import (
     handle_go_back,
 )
 from dom_extraction import dom_extractor
+from dom_extraction.snapshot import capture_page_snapshot
 
 
 # -----------------------------------------------------------------------------
@@ -169,6 +170,15 @@ class GoBackInput(BaseModel):
     pass
 
 
+class ReadPageInput(BaseModel):
+    """Input for read_page tool."""
+    section: int = Field(
+        default=1,
+        ge=1,
+        description="1-based section of the page snapshot to read. The DOM_SNAPSHOT footer names the next section when more elements exist.",
+    )
+
+
 # -----------------------------------------------------------------------------
 # Tool factory: build tools bound to a Playwright page
 # -----------------------------------------------------------------------------
@@ -259,96 +269,35 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
             return []
         return dom_extractor.search_dom_text([f"URL: {page.url}\n\n{text}"], query=query, max_results=max_results)
 
-    def _flatten_accessibility_click_targets(node: dict | None, out: list[dict], max_items: int) -> None:
-        if node is None or len(out) >= max_items:
-            return
-        role = (node.get("role") or "").strip().lower()
-        name = (node.get("name") or "").strip()
-        if name and role in {"link", "button", "tab", "menuitem"}:
-            out.append({
-                "role": role,
-                "name": name,
-                "url": page.url,
-                "title": "",
-            })
-            if len(out) >= max_items:
-                return
-        for child in node.get("children") or []:
-            _flatten_accessibility_click_targets(child, out, max_items)
-            if len(out) >= max_items:
-                return
+    async def list_links(filter_text: str | None = None, max_results: int = 30):
+        """
+        List clickable targets (links, buttons, tabs, menu items) from the unified
+        page snapshot, optionally filtering by accessible name.
 
-    async def _list_links_from_accessibility(filter_text: str | None, max_results: int) -> list[dict]:
-        targets: list[dict] = []
-
-        # Playwright removed `page.accessibility` in 1.5x, so this last-resort
-        # discovery path silently returned nothing on current versions.
-        accessibility = getattr(page, "accessibility", None)
-        if accessibility is not None:
-            try:
-                snapshot = await accessibility.snapshot(interesting_only=True)
-            except Exception:
-                snapshot = None
-            _flatten_accessibility_click_targets(snapshot, targets, max_results * 3)
-        else:
-            from agents.executor import Executor
-
-            try:
-                yaml_text = await page.locator("body").aria_snapshot()
-            except Exception:
-                yaml_text = ""
-            for line in Executor._format_aria_snapshot(yaml_text, max_lines=max_results * 3):
-                match = re.match(r'^\[role="([^"]+)"\]\s+"(.*)"$', line)
-                if not match:
-                    continue
-                role = match.group(1).lower()
-                if role not in {"link", "button", "tab", "menuitem"}:
-                    continue
-                targets.append({"role": role, "name": match.group(2), "url": page.url, "title": ""})
-
-        if not targets:
-            return []
+        Every name returned resolves through get_by_role: this used to run a
+        separate BeautifulSoup pipeline whose guessed names regularly failed to
+        match, and whose error paths made this tool silently return [].
+        """
+        snapshot = await capture_page_snapshot(page)
         f = (filter_text or "").strip().lower()
-        deduped: list[dict] = []
-        seen = set()
-        for target in targets:
-            key = (target.get("role"), (target.get("name") or "").lower())
+        targets: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        for element in snapshot.elements:
+            if element.role not in {"link", "button", "tab", "menuitem"} or not element.name:
+                continue
+            key = (element.role, element.name.lower())
             if key in seen:
                 continue
             seen.add(key)
-            if f and f not in (target.get("name") or "").lower():
+            if f and f not in element.name.lower():
                 continue
-            deduped.append(target)
-            if len(deduped) >= max_results:
+            targets.append({"role": element.role, "name": element.name, "url": snapshot.url, "title": ""})
+            if len(targets) >= max_results:
                 break
-        return deduped
+        return targets
 
-    async def list_links(filter_text: str | None = None, max_results: int = 30):
-        """
-        List link-like interactive elements from the current page (role=link, name),
-        optionally filtering by visible link text.
-        """
-        dom_json, *_ = await dom_extractor.main(page)
-        interactive_json = dom_extractor.retrieve_interactive_elements(dom_json)
-        strict_targets = dom_extractor.list_dom_click_targets_from_interactive_json(
-            interactive_json,
-            filter_text=filter_text,
-            max_results=max_results,
-            roles=("link", "button", "tab"),
-        )
-        if strict_targets:
-            return strict_targets
-
-        relaxed_targets = dom_extractor.list_dom_click_targets_from_interactive_json(
-            interactive_json,
-            filter_text=filter_text,
-            max_results=max_results,
-            roles=("link", "button", "tab", "generic"),
-        )
-        if relaxed_targets:
-            return relaxed_targets
-
-        return await _list_links_from_accessibility(filter_text=filter_text, max_results=max_results)
+    async def read_page(section: int = 1):
+        return await do_read_page(page, section=section)
 
     async def go_back():
         return await handle_go_back(page)
@@ -492,6 +441,16 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
             name="list_links",
             description="List link-like elements (role='link', name) on the current page, optionally filtered by visible text. Use to choose a link to click based on its name/title.",
             args_schema=ListLinksInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=read_page,
+            name="read_page",
+            description=(
+                "Read a further section of the page snapshot when DOM_SNAPSHOT says more elements exist "
+                "below (e.g. '... Call read_page(section=2)'). Long forms are paginated, not truncated: "
+                "the fields past the budget are in later sections, not gone."
+            ),
+            args_schema=ReadPageInput,
         ),
         StructuredTool.from_function(
             coroutine=go_back,

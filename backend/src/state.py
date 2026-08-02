@@ -10,6 +10,32 @@ _MAX_EXTRACTED_TOTAL_CHARS = 50000
 _MAX_EXTRACTED_ITEM_CHARS = 12000
 _MAX_REASONING_ENTRIES = 16
 _MAX_REASONING_ITEM_CHARS = 3200
+_MAX_ITEM_RESULTS = 200
+
+
+def get_mission_goal(state) -> str:
+    """The mission objective, preferred over re-reading the raw first message.
+
+    `mission_goal` is the planner's clarified one-sentence goal. Before the
+    planner has run (or if it produced nothing) fall back to the user's first
+    message. The legacy "USER REQUEST: " prefix is stripped for runs resumed
+    from checkpoints created before app.py stopped adding it.
+    """
+    goal = (state.get("mission_goal") or "").strip()
+    if goal:
+        return goal
+    messages = state.get("messages") or []
+    first = messages[0] if messages else None
+    if isinstance(first, dict):
+        content = str(first.get("content", ""))
+    elif hasattr(first, "content"):
+        content = str(first.content)
+    else:
+        content = str(first) if first is not None else ""
+    content = content.strip()
+    if content.startswith("USER REQUEST: "):
+        content = content[len("USER REQUEST: "):].strip()
+    return content or "Unknown intent"
 
 def append_plan(old_plans: List[List[str]], new_plan: List[str]) -> List[List[str]]:
     """
@@ -59,15 +85,28 @@ def append_reasoning(old: List[str], new: List[str]) -> List[str]:
     return combined[-_MAX_REASONING_ENTRIES:]
 
 
+def append_item_results(old: List[Dict], new: List[Dict]) -> List[Dict]:
+    """Append per-work-item outcome records (for state reducer)."""
+    if new is None:
+        return old or []
+    items = new if isinstance(new, list) else [new]
+    combined = (old or []) + [item for item in items if isinstance(item, dict)]
+    return combined[-_MAX_ITEM_RESULTS:]
+
+
 class ProjectState(TypedDict):
     # Standard conversation history
     messages: Annotated[list, add_messages]
+
+    # Mission identity
+    mission_goal: Optional[str]  # Planner's clarified one-sentence goal; MAIN_GOAL for every agent
 
     # Browser-specific context
     current_url: str
     screenshot: Optional[str]  # Base64 encoded
     screenshot_meta: Optional[Dict]  # Capture metadata for freshness/escalation checks
     dom_cache: Annotated[List[str], append_dom_cache]  # Recent DOM/text snapshots for navigation
+    last_page_snapshot: Optional[str]  # Post-action page snapshot (structured evidence, not a log line)
 
     # Plan tracking
     plan_history: Annotated[List[List[str]], append_plan]  # History of all plan versions
@@ -79,7 +118,14 @@ class ProjectState(TypedDict):
     stall_tracked_step: int  # Plan step index the stall counter is tied to
     max_step_attempts: int  # Max retries before aborting
     max_transactions: int  # Max graph transactions before aborting
-    
+    goal_retry_cycles: int  # Consecutive final-step retries where step passed but the goal did not
+
+    # Work queue for bulk tasks ("apply to these 20 jobs"): the outer loop over
+    # items is deterministic; only the per-item plan is LLM-generated.
+    work_items: Optional[List[Dict]]  # Each item: {"description": str, "url": Optional[str]}
+    current_item_index: int  # Index into work_items for the item being worked
+    item_results: Annotated[List[Dict], append_item_results]  # One outcome record per finished item
+
     # Coordination fields
     plan_status: Literal["MAINTAIN", "UPDATE", "CREATE", "NEEDS_CLARIFICATION"]
     current_task: str  # The specific task for executor
@@ -97,6 +143,10 @@ class ProjectState(TypedDict):
 
     # User-provided credentials (service logins, personal info, payment, experience)
     user_credentials: Optional[Dict]
+
+    # Autonomy policy chosen by the user (see autonomy.py); None means the default
+    # confirm-irreversible policy.
+    autonomy_policy: Optional[Dict]
 
     # Mission status — living document accessible to all agents
     mission_status: Optional[str]          # Rendered markdown status page

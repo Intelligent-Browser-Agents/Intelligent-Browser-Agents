@@ -30,7 +30,6 @@ langgraph==1.1.3
 # Browser automation and page parsing
 beautifulsoup4==4.14.3
 playwright==1.58.0
-pympler==1.1
 
 # Configuration and validation
 pydantic==2.12.5

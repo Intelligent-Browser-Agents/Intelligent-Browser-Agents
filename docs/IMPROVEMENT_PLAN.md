@@ -383,6 +383,38 @@ Implementation notes.
 
 There are currently two unrelated snapshot pipelines, and the one the model sees is the weaker of the two.
 
+**Status: complete.** Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Snapshot producers | 2 unrelated (BS4 tag walk, aria formatter) | **1: `dom_extraction/snapshot.py`** |
+| `aria-labelledby` names (Workday, React form libs) | deliberately unimplemented, field had no name | **resolved (Playwright accname)** |
+| Open shadow DOM (Salesforce/LWC) | invisible to every consumer | **in the snapshot and in `read_form`** |
+| Long form over budget | hard truncation in DOM order; bottom fields silently cut | **paginated; footer names the exact `read_page(section=N)` call; every element reachable** |
+| Per-element facts | role and name only | **`ref`, `nth`, input type, required, readonly, disabled, checked, filled, options with selection, frame path** |
+| `<select>` options | standalone unclickable `option` rows | **folded into the combobox line; also gone from miss-candidate lists** |
+| `input[type=file]` | reported as a textbox; model typed paths into it | **`[file input]` with attachment state** |
+| `input[type=hidden]` | emitted as a textbox target | **excluded** |
+| Duplicate labels | `ambiguous_target` error round-trip first | **`[nth=k]` emitted up front, same ordering as the resolver** |
+| Typed secrets in the snapshot | aria YAML carries live field values | **presence only, the text is never parsed out (browser test pins it)** |
+| Site-specific role promotion | any div classed `hotel`/`card`/`result` became a button | **deleted, regression-pinned** |
+| Screenshot side effect | full-page PNG written and discarded per `list_links` | **gone; `pympler` dropped from requirements** |
+| `dom_extractor.main` contract | 3-tuple or bare string; `list_links` unpacked it char by char to `[]` | **deleted; `list_links` reads the snapshot** |
+| `get_page_text` | decomposed `nav`/`header`/`footer` ("Step 2 of 5", validation summaries) | **keeps landmarks** |
+| Advertised vs addressable (fixture) | unmeasurable | **0 unaddressable; test asserts every advertised target resolves** |
+| Tools offered to the model | 19 | **20 (`read_page`)** |
+| Tests | 177 offline + 89 browser | **194 offline + 96 browser** |
+
+Deliberate deviations from the item list below:
+
+- Item 4 asked for dedupe and ranking by visibility and viewport proximity alongside pagination.
+  Ranking was not implemented: pagination removes the starvation problem ranking was meant to soften, DOM order keeps `nth` hints aligned with the resolver, and reordering would make the snapshot lie about the page.
+  Dedupe was not implemented because collapsing duplicate role/name rows would delete exactly the `nth` information that makes duplicates addressable.
+- The JS metadata pass never *adds* elements to the snapshot; it only enriches rows the aria snapshot produced.
+  A JS-computed accessible name is not guaranteed to resolve through `get_by_role`, and advertising unaddressable targets is the failure mode this phase exists to end.
+  Controls only the JS pass can see still surface through `read_form`, which shares the same collector.
+- The executor's per-step budget (`_dom_snapshot_budget`, 3500 or 5200 chars) is unchanged, but it now bounds a *section*, not the whole page.
+
 1. **Consolidate.** Delete `dom_extractor.get_dom_tree_and_page_screenshot` and `retrieve_interactive_elements`. Build one producer on `page.accessibility.snapshot` plus a single JS pass that walks documents, iframes, and `shadowRoot`.
 2. **Emit what the model needs to act.** For each interactive element: `ref` (stable within the snapshot), role, accessible name resolved through `aria-labelledby` (currently deliberately unimplemented at `dom_extractor.py:136-140`, which is exactly how Workday and most React form libraries label inputs), tag, input type, `required`, `disabled`, `checked`, whether a value is present, `<select>` options, visibility, and frame path.
 3. **Fix the type misclassification.** `input[type=file]` must not be reported as a textbox, `<select>` must carry its options rather than emitting unclickable `<option>` rows, and `type=hidden` must be filtered out entirely.

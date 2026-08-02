@@ -1,13 +1,19 @@
 """
 Fallback Agent
 Uses an LLM to diagnose failures and propose a revised step or recovery.
+
+Recoveries mutate the plan for real: `revise_step` rewrites the current plan
+step and `insert_step_before` inserts a genuine prerequisite step, so the
+orchestrator's ordinary advance logic carries the run forward. The old
+mechanism — decorating current_task with `[Recovery Hint: ...]` /
+`[Then continue objective: ...]` markers while the plan stayed frozen — is gone.
 """
 
 import re
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from state import ProjectState
+from state import ProjectState, get_mission_goal
 from schema import FallbackStrategy, infer_step_intent
 from models import Models
 from prompt_loader import get_fallback_prompt
@@ -18,6 +24,11 @@ class Fallback:
     LLM-based fallback: given the failed step and execution/verification logs,
     the model decides how to recover (revise step, insert step, request context, or abort).
     """
+
+    # After this many failed attempts on one step, a detected action loop
+    # escalates from another step revision to a full replan from live page
+    # state. Bounded by max_step_attempts and the transaction budget.
+    _REPLAN_ATTEMPT_THRESHOLD = 3
 
     def __init__(self):
         self.llm = Models.fallback(FallbackStrategy)
@@ -33,7 +44,7 @@ class Fallback:
             current_task, rc_in if isinstance(rc_in, dict) else None
         )
         reasoning_log = state.get("reasoning_log", [])
-        user_intent = self._get_user_intent(state)
+        user_intent = get_mission_goal(state)
         current_url = state.get("current_url", "")
         dom_cache = state.get("dom_cache") or []
         last_dom_snapshot = dom_cache[-1] if dom_cache else ""
@@ -50,36 +61,66 @@ class Fallback:
         )
 
         if popup_signal.get("is_blocking", False):
+            # A blocking popup is a prerequisite, not a rewording of the step:
+            # insert a real dismissal step before the objective so the
+            # orchestrator returns to the objective by ordinary advancement.
             popup_hint = self._build_popup_recovery_hint(popup_signal)
-            revised_task = self._compose_recovery_task(
+            mutation = self._mutate_plan(
+                state,
+                update_type="insert_step_before",
+                new_step_text=popup_hint,
                 objective_task=objective_task,
-                proposed_task=popup_hint,
-                update_type="revise_step",
-            )
-            popup_rc = self._build_recovery_context(
-                objective_task, popup_hint, "revise_step"
             )
             fallback_log = (
-                "[Fallback] Update Type: revise_step\n"
+                "[Fallback] Update Type: insert_step_before\n"
                 "[Fallback] Diagnosis: Blocking popup/modal likely intercepting interactions.\n"
                 "[Fallback] Message to Orchestration: Dismiss the popup first, then continue objective.\n"
-                f"[Fallback] Proposed Step: {revised_task}\n"
+                f"[Fallback] Proposed Step: {mutation.get('current_task', popup_hint)}\n"
                 f"[Fallback] Popup Signal: {popup_signal.get('reason', 'detected by DOM evidence')}"
             )
-            return {
+            out = {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-                "current_task": revised_task,
                 "reasoning_log": [fallback_log],
                 "needs_fallback": False,
-                "recovery_context": popup_rc,
-                "step_intent": infer_step_intent(revised_task),
+                "step_intent": infer_step_intent(mutation.get("current_task", popup_hint)),
             }
+            out.update(mutation)
+            return out
 
         loop_signal = self._detect_repeat_loop(
             reasoning_log=reasoning_log,
             last_dom_snapshot=last_dom_snapshot,
             previous_dom_snapshot=previous_dom_snapshot,
         )
+
+        # Escalate to a full replan when revisions have stopped helping: the
+        # executor is looping on the same action and several attempts on this
+        # step are already burnt. The orchestrator rebuilds the plan from live
+        # page context (plan_status=CREATE with an empty current_plan).
+        if (
+            loop_signal.get("is_loop", False)
+            and int(state.get("step_attempts", 0) or 0) >= self._REPLAN_ATTEMPT_THRESHOLD
+            and (state.get("current_plan") or [])
+        ):
+            fallback_log = (
+                "[Fallback] Update Type: replan\n"
+                "[Fallback] Diagnosis: Repeated action loop persists after step-level recovery; "
+                "the current plan no longer fits the page.\n"
+                "[Fallback] Message to Orchestration: Rebuild the plan from the current page state.\n"
+                f"[Fallback] Abandoned Step: {objective_task}"
+            )
+            return {
+                "number_of_transactions": state.get("number_of_transactions", 0) + 1,
+                "current_plan": [],
+                "current_step_index": 0,
+                "plan_status": "CREATE",
+                "current_task": objective_task,
+                "reasoning_log": [fallback_log],
+                "needs_fallback": False,
+                "recovery_context": None,
+                "step_attempts": 0,
+                "step_intent": infer_step_intent(objective_task),
+            }
 
         loop_analysis_block = (
             "LOOP_ANALYSIS:\n"
@@ -166,31 +207,23 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 err = RuntimeError(f"multimodal={err}; text_retry={retry_err}")
                 strategy = None
 
-        proposed_for_context = ""
         if strategy is None:
-            revised_task = objective_task
+            update_type = "revise_step"
+            proposed = objective_task
+            needs_human = False
+            requested_context = []
             fallback_log = (
                 "[Fallback] LLM failed; retrying same step.\n"
                 f"[Fallback] Error: {err}\n"
                 f"[Fallback] Message to Orchestration: Retry the current step."
             )
-            needs_human = False
-            requested_context = []
-            update_type = "revise_step"
         else:
             proposed = (
                 (strategy.proposed_step or "").strip()
                 or (strategy.insert_step or "").strip()
                 or objective_task
             )
-            proposed_for_context = proposed
             update_type = strategy.update_type
-
-            revised_task = self._compose_recovery_task(
-                objective_task=objective_task,
-                proposed_task=proposed,
-                update_type=strategy.update_type,
-            )
 
             needs_human = strategy.update_type in {"request_human_action", "request_context"}
             requested_context = [str(item).strip() for item in (strategy.requested_context or []) if str(item).strip()]
@@ -225,7 +258,6 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 f"[Fallback] Update Type: {strategy.update_type}\n"
                 f"[Fallback] Diagnosis: {strategy.diagnosis}\n"
                 f"[Fallback] Message to Orchestration: {strategy.message_to_orchestration}\n"
-                f"[Fallback] Proposed Step: {revised_task}\n"
                 f"[Fallback] Last Verification: {last_verification[:180]}"
             )
 
@@ -236,39 +268,124 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
                 f"[Fallback] Screenshot Escalation: {mode}; reasons={', '.join(screenshot_reasons) or 'none'}"
             )
 
-        revised_task, steering_note = self._enforce_directional_recovery(
-            objective_task=objective_task,
-            revised_task=revised_task,
-            update_type=update_type,
-            loop_signal=loop_signal,
-        )
-        if steering_note:
-            fallback_log += f"\n[Fallback] Objective Steering: {steering_note}"
-            proposed_for_context = self._build_forced_recovery_hint(loop_signal)
-            update_type_for_rc = "revise_step"
-        else:
-            update_type_for_rc = update_type
-
-        recovery_context = self._build_recovery_context(
-            objective_task, proposed_for_context, update_type_for_rc
-        )
+        # Loop steering: a "revision" that just restates the objective while the
+        # executor loops on one action would repeat the loop. Force a different
+        # tactical direction instead.
+        if (
+            not needs_human
+            and update_type in {"revise_step", "insert_step_before"}
+            and loop_signal.get("is_loop", False)
+            and proposed.strip().lower() == objective_task.strip().lower()
+        ):
+            forced_hint = self._build_forced_recovery_hint(loop_signal)
+            proposed = f"{objective_task} (Recovery guidance: {forced_hint})"
+            update_type = "revise_step"
+            fallback_log += (
+                "\n[Fallback] Objective Steering: Detected repeated executor action with "
+                "little page-state change; forcing a different tactical direction instead "
+                "of repeating the same step."
+            )
 
         out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-            "current_task": revised_task,
             "reasoning_log": [fallback_log],
             "needs_fallback": False,
-            "recovery_context": recovery_context,
-            "step_intent": infer_step_intent(revised_task),
         }
+
         if needs_human:
+            # No plan mutation while waiting on the user. The objective stays the
+            # current task; the proposal travels in recovery_context for context.
+            out["current_task"] = objective_task
+            out["recovery_context"] = (
+                {
+                    "base_task": objective_task,
+                    "recovery_hint": proposed,
+                    "continuation_objective": None,
+                }
+                if proposed and proposed.strip().lower() != objective_task.strip().lower()
+                else None
+            )
+            out["step_intent"] = infer_step_intent(objective_task)
             out["handoff_interaction"] = True
             out["requested_context"] = requested_context
             # Reset step_attempts so that human-in-the-loop pauses do not trigger
             # the orchestrator safety stop immediately after the user completes
             # the required action.
             out["step_attempts"] = 0
+            return out
+
+        # A "revision" that is really a repositioning prerequisite (navigate back,
+        # reopen the right surface) becomes a genuine inserted step, so the
+        # original objective is reached again by ordinary plan advancement.
+        if update_type == "revise_step" and self._looks_like_prerequisite_realign(proposed, objective_task):
+            update_type = "insert_step_before"
+
+        mutation = self._mutate_plan(
+            state,
+            update_type=update_type,
+            new_step_text=proposed,
+            objective_task=objective_task,
+        )
+        out.update(mutation)
+        out["step_intent"] = infer_step_intent(out.get("current_task") or objective_task)
+        fallback_log += f"\n[Fallback] Applied: {update_type} → {out.get('current_task', objective_task)}"
+        out["reasoning_log"] = [fallback_log]
         return out
+
+    @staticmethod
+    def _mutate_plan(
+        state: ProjectState,
+        *,
+        update_type: str,
+        new_step_text: str,
+        objective_task: str,
+    ) -> dict:
+        """Apply a recovery to current_plan and return the state delta.
+
+        insert_step_before inserts a real prerequisite step at the current
+        index; revise_step replaces the current step in place. Both record the
+        new plan version in plan_history and mark plan_status=UPDATE. When
+        there is nothing to change, only current_task is (re)asserted.
+        """
+        plan = list(state.get("current_plan") or [])
+        idx = int(state.get("current_step_index", 0) or 0)
+        step_text = (new_step_text or "").strip()
+
+        if not plan or not step_text:
+            return {"current_task": step_text or objective_task, "recovery_context": None}
+
+        idx = min(max(idx, 0), len(plan) - 1)
+
+        if update_type == "insert_step_before":
+            plan.insert(idx, step_text)
+            return {
+                "current_plan": plan,
+                "plan_history": plan,
+                "current_step_index": idx,
+                "plan_status": "UPDATE",
+                "current_task": step_text,
+                "recovery_context": None,
+            }
+
+        # revise_step (and anything unrecognized): replace in place.
+        original = (plan[idx] or "").strip()
+        if step_text.lower() == original.lower():
+            return {"current_task": original, "recovery_context": None}
+        plan[idx] = step_text
+        return {
+            "current_plan": plan,
+            "plan_history": plan,
+            "current_step_index": idx,
+            "plan_status": "UPDATE",
+            "current_task": step_text,
+            # base_task keeps the pre-revision wording as the stable signature so
+            # mid-step field progress is not reset by a tactical rewording.
+            "recovery_context": {
+                "base_task": objective_task or original,
+                "recovery_hint": step_text,
+                "continuation_objective": None,
+            },
+        }
 
     @staticmethod
     def _base_task(task: str, recovery_context: dict | None = None) -> str:
@@ -346,15 +463,6 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             "repeat_count": repeat_count,
             "dom_unchanged": dom_unchanged,
         }
-
-    @staticmethod
-    def _task_has_recovery_directive(task: str, recovery_context: dict | None = None) -> bool:
-        rc = recovery_context if isinstance(recovery_context, dict) else {}
-        if (rc.get("recovery_hint") or "").strip():
-            return True
-        # DEPRECATED: substring markers in task text
-        text = (task or "").lower()
-        return "[recovery hint:" in text or "[then continue objective:" in text
 
     @staticmethod
     def _looks_like_auth_goal(text: str) -> bool:
@@ -445,38 +553,6 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             "Close the blocking popup/modal using Close/X/Not now, then continue the objective on the underlying page."
         )
 
-    @classmethod
-    def _enforce_directional_recovery(
-        cls,
-        objective_task: str,
-        revised_task: str,
-        update_type: str,
-        loop_signal: dict,
-    ) -> tuple[str, str]:
-        # Keep explicit human/context/abort decisions untouched.
-        if update_type in {"request_human_action", "request_context", "abort"}:
-            return revised_task, ""
-
-        if not loop_signal.get("is_loop", False):
-            return revised_task, ""
-
-        base_unchanged = cls._base_task(revised_task).lower() == cls._base_task(objective_task).lower()
-        has_directive = cls._task_has_recovery_directive(revised_task, None)
-        if not base_unchanged or has_directive:
-            return revised_task, ""
-
-        hint = cls._build_forced_recovery_hint(loop_signal)
-        forced = cls._compose_recovery_task(
-            objective_task=objective_task,
-            proposed_task=hint,
-            update_type="revise_step",
-        )
-        note = (
-            "Detected repeated executor action with little page-state change; "
-            "forcing a different tactical direction instead of repeating the same step."
-        )
-        return forced, note
-
     @staticmethod
     def _build_forced_recovery_hint(loop_signal: dict) -> str:
         action = (loop_signal.get("action") or "").lower()
@@ -501,60 +577,6 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
         return (
             "Avoid repeating the same action sequence. Use current DOM cues to choose an alternative actionable path toward this objective."
         )
-
-    @staticmethod
-    def _compose_recovery_task(objective_task: str, proposed_task: str, update_type: str) -> str:
-        obj = (objective_task or "Unknown task").strip()
-        hint = (proposed_task or "").strip()
-        if not hint or hint.lower() == obj.lower():
-            return obj
-        if update_type == "insert_step_before":
-            return f"{hint} [Then continue objective: {obj}]"
-        if update_type == "revise_step":
-            # Adaptive escape hatch: when reality requires a prerequisite
-            # navigation/repositioning action, place that action first while
-            # preserving the objective as an explicit continuation.
-            if Fallback._looks_like_prerequisite_realign(hint, obj):
-                return f"{hint} [Then continue objective: {obj}]"
-            return f"{obj} [Recovery Hint: {hint}]"
-        if update_type in {"request_context", "request_human_action"}:
-            return f"{obj} [Recovery Hint: {hint}]"
-        return obj
-
-    @staticmethod
-    def _build_recovery_context(
-        objective_task: str, proposed_task: str, update_type: str
-    ) -> dict | None:
-        """Structured recovery metadata (dual-write alongside bracket markers in current_task)."""
-        obj = (objective_task or "Unknown task").strip()
-        hint = (proposed_task or "").strip()
-        if not hint or hint.lower() == obj.lower():
-            return None
-        if update_type == "insert_step_before":
-            return {
-                "base_task": obj,
-                "recovery_hint": hint,
-                "continuation_objective": obj,
-            }
-        if update_type == "revise_step":
-            if Fallback._looks_like_prerequisite_realign(hint, obj):
-                return {
-                    "base_task": obj,
-                    "recovery_hint": hint,
-                    "continuation_objective": obj,
-                }
-            return {
-                "base_task": obj,
-                "recovery_hint": hint,
-                "continuation_objective": None,
-            }
-        if update_type in {"request_context", "request_human_action"}:
-            return {
-                "base_task": obj,
-                "recovery_hint": hint,
-                "continuation_objective": None,
-            }
-        return None
 
     @staticmethod
     def _looks_like_prerequisite_realign(hint: str, objective: str) -> bool:
@@ -602,14 +624,6 @@ Diagnose the failure and propose a recovery. Use update_type: revise_step with p
             if isinstance(entry, str) and prefix in entry:
                 return entry
         return ""
-
-    def _get_user_intent(self, state: ProjectState) -> str:
-        user_message = state["messages"][0] if state["messages"] else None
-        if isinstance(user_message, dict):
-            return user_message.get("content", "Unknown intent")
-        if hasattr(user_message, "content"):
-            return user_message.content
-        return str(user_message) if user_message else "Unknown intent"
 
     @staticmethod
     def _clip_text(value: str, max_chars: int) -> str:

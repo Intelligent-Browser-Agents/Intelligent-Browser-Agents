@@ -58,10 +58,23 @@
   <label for="req-id">Requisition</label>
   <input id="req-id" name="req_id" type="text" value="REQ-4417" readonly>
 
+  <!-- Labeled the way Workday and most React form libraries do it: no <label>,
+       the name only resolves through aria-labelledby. The old extractor
+       deliberately skipped aria-labelledby, so this field had no name at all. -->
+  <div id="salary-label">Expected salary</div>
+  <input id="salary" name="salary" type="text" aria-labelledby="salary-label">
+
+  <!-- Never a target: must not appear in any snapshot. -->
+  <input type="hidden" name="csrf_token" value="fixture-csrf-token">
+
   <!-- Same accessible name as the nav button above. -->
   <button type="button" id="save-draft">Save</button>
   <button type="submit" id="submit">Submit application</button>
 </form>
+
+<!-- A Salesforce/LWC-shaped widget: the controls only exist inside an open
+     shadow root, which the old BeautifulSoup pipeline could not see at all. -->
+<div id="referral-widget"></div>
 
 <p id="status"></p>
 
@@ -72,6 +85,13 @@
     e.preventDefault();
     document.getElementById('status').textContent = 'Application received';
   });
+
+  // The shadow-root widget. Labeled via aria-labelledby *inside* the root.
+  var shadow = document.getElementById('referral-widget').attachShadow({ mode: 'open' });
+  shadow.innerHTML =
+    '<div id="ref-label">Referral code</div>' +
+    '<input id="ref-input" type="text" aria-labelledby="ref-label" required>' +
+    '<button type="button" id="ref-verify">Verify referral</button>';
 
   // A control that appears late, for wait_for.
   setTimeout(function () {

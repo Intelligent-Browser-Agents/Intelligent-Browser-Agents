@@ -52,8 +52,11 @@ async def test_dispatch_click(page):
 @pytest.mark.asyncio
 async def test_dispatch_type(page):
     """Test that type actions are routed to handle_type."""
-    # Setup: Navigate to a page with a focused input
+    # Setup: Navigate to a page and focus the input deliberately. `autofocus`
+    # alone races page load under a busy test run, and `type` is defined as
+    # "type into whatever currently has focus", so focus explicitly.
     await page.goto("data:text/html,<input autofocus />")
+    await page.focus("input")
 
     action = Action(
         action="type",

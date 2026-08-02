@@ -82,6 +82,7 @@ class ExecutionArgs(BaseModel):
     text_contains: Optional[str] = Field(default=None, description="Visible text for wait_for.")
     index: Optional[int] = Field(default=None, description="Tab index for switch_tab / close_tab.")
     clear: Optional[bool] = Field(default=True, description="Whether fill clears the field first.")
+    section: Optional[int] = Field(default=None, description="1-based snapshot section for read_page.")
     text: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("text", "query"),
@@ -97,8 +98,8 @@ class ExecutionArgs(BaseModel):
 class ExecutionResult(BaseModel):
     action: Literal[
         "navigate", "click", "fill", "select_option", "set_checkbox", "upload_file",
-        "wait_for", "read_form", "scroll_to", "list_tabs", "switch_tab", "close_tab",
-        "go_back",
+        "wait_for", "read_form", "read_page", "scroll_to", "list_tabs", "switch_tab",
+        "close_tab", "go_back",
         # Legacy, target-free actions.
         "type", "search", "scroll", "press_key", "wait", "extract_content",
     ]
@@ -122,6 +123,7 @@ class ExecutionResult(BaseModel):
             "upload_file": ["document_id"],
             "wait_for": [],
             "read_form": [],
+            "read_page": [],
             "scroll_to": ["role", "name"],
             "list_tabs": [],
             "switch_tab": [],

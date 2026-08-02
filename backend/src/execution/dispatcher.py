@@ -13,6 +13,7 @@ from .actions import (
     do_fill,
     do_list_tabs,
     do_read_form,
+    do_read_page,
     do_scroll_to,
     do_select_option,
     do_set_checkbox,
@@ -79,6 +80,7 @@ async def dispatch_action(page: Page, action: Action) -> ExecutionOutput:
             seconds=a.seconds if a.seconds and a.seconds > 0 else 10.0,
         ),
         "read_form": lambda: do_read_form(page),
+        "read_page": lambda: do_read_page(page, section=a.section or 1),
         "list_tabs": lambda: do_list_tabs(page),
         # Legacy, target-free. Kept for compatibility; prefer fill/wait_for.
         "type": lambda: handle_type(page, a.text),

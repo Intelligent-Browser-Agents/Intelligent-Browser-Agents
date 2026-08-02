@@ -15,36 +15,27 @@ The ``page`` fixture is provided by backend/tests/conftest.py.
 """
 
 import asyncio
-import json
 import time
 
 import pytest
 from playwright.async_api import Page
 
 from execution import Action, ActionArgs, dispatch_action
-from dom_extraction import dom_extractor
+from dom_extraction.snapshot import capture_page_snapshot
 
 pytestmark = pytest.mark.browser
 
 
-async def test_dom_extraction_aria_format(page: Page):
-    """DOM extraction returns interactive elements in role/name (ARIA) form."""
+async def test_snapshot_extracts_elements_from_a_live_site(page: Page):
+    """The unified snapshot returns addressable role/name elements on a real page."""
     await page.goto("https://www.google.com")
     await page.wait_for_load_state("domcontentloaded")
 
-    result = await dom_extractor.main(page)
-    assert isinstance(result, tuple), f"expected (json, screenshot, page) tuple, got {type(result)}"
-
-    dom_data = json.loads(result[0])
-    assert dom_data.get("status") == "success"
-
-    interactive_data = json.loads(dom_extractor.retrieve_interactive_elements(result[0]))
-    assert interactive_data.get("status") == "success"
-
-    elements = interactive_data.get("interactive_elements", [])
-    assert elements, "no interactive elements extracted"
-    for elem in elements[:5]:
-        assert "role" in elem and "name" in elem, f"element missing role/name: {elem}"
+    snapshot = await capture_page_snapshot(page)
+    assert snapshot.elements, "no interactive elements extracted"
+    for element in snapshot.elements[:5]:
+        assert element.role and element.ref
+    assert any(e.role in {"button", "combobox", "textbox", "link"} for e in snapshot.elements)
 
 
 async def test_action_navigate(page: Page):
