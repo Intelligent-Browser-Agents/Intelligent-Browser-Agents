@@ -80,7 +80,10 @@ async def test_handle_click_element_not_found(page):
 
     assert result.status == "failure"
     assert result.error_type == "element_not_found"
-    assert "Could not click" in result.message
+    # The message now names the target that was not found. When the page does have
+    # candidates it also lists them, which is what lets the next turn correct
+    # itself instead of retrying the same wrong name.
+    assert "NonExistent" in result.message
 
 
 @pytest.mark.asyncio

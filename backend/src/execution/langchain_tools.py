@@ -7,12 +7,23 @@ adds lightweight DOM navigation/search helpers.
 """
 
 import re
-from typing import Literal
+from typing import Literal, Optional
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 from playwright.async_api import Page
 
+from .actions import (
+    do_click,
+    do_fill,
+    do_list_tabs,
+    do_read_form,
+    do_scroll_to,
+    do_select_option,
+    do_set_checkbox,
+    do_upload_file,
+    do_wait_for,
+)
 from .handlers import (
     handle_navigate,
     handle_click,
@@ -40,11 +51,77 @@ class ClickInput(BaseModel):
     """Input for click tool."""
     role: str = Field(description="ARIA role of the element (e.g. button, link, textbox)")
     name: str = Field(description="Accessible name or label of the element")
+    nth: Optional[int] = Field(
+        default=None,
+        description=(
+            "0-based index, required only when a previous attempt reported "
+            "ambiguous_target because several elements share this role and name."
+        ),
+    )
+
+
+class FillInput(BaseModel):
+    """Input for fill tool."""
+    role: str = Field(description="ARIA role of the field: textbox, searchbox, combobox or spinbutton")
+    name: str = Field(description="Accessible name or label of the field, exactly as shown in DOM_SNAPSHOT")
+    text: str = Field(description="Value to put in the field")
+    nth: Optional[int] = Field(default=None, description="0-based index, only when disambiguating")
+
+
+class SelectOptionInput(BaseModel):
+    """Input for select_option tool."""
+    role: str = Field(default="combobox", description="Usually 'combobox' for a dropdown")
+    name: str = Field(description="Accessible name or label of the dropdown")
+    label: Optional[str] = Field(default=None, description="Visible option text to choose (preferred)")
+    value: Optional[str] = Field(default=None, description="Underlying option value, if the label is unknown")
+    nth: Optional[int] = Field(default=None, description="0-based index, only when disambiguating")
+
+
+class SetCheckboxInput(BaseModel):
+    """Input for set_checkbox tool."""
+    role: str = Field(description="checkbox, radio or switch")
+    name: str = Field(description="Accessible name or label of the control")
+    checked: bool = Field(default=True, description="Desired state. Setting an explicit state is idempotent, unlike a click.")
+    nth: Optional[int] = Field(default=None, description="0-based index, only when disambiguating")
+
+
+class UploadFileInput(BaseModel):
+    """Input for upload_file tool."""
+    name: Optional[str] = Field(default=None, description="Accessible name of the file input, if it has one")
+    role: Optional[str] = Field(default="textbox", description="Role of the file input, if known")
+    file_path: str = Field(description="Absolute path to the file on the agent host")
+    nth: Optional[int] = Field(default=None, description="0-based index when the page has several file inputs")
+
+
+class WaitForInput(BaseModel):
+    """Input for wait_for tool."""
+    role: Optional[str] = Field(default=None, description="Role of an element to wait for")
+    name: Optional[str] = Field(default=None, description="Accessible name of the element to wait for")
+    url_contains: Optional[str] = Field(default=None, description="Wait until the URL contains this substring")
+    text_contains: Optional[str] = Field(default=None, description="Wait until this text is visible")
+    seconds: float = Field(default=10.0, description="Maximum seconds to wait", gt=0, le=60)
+
+
+class ScrollToInput(BaseModel):
+    """Input for scroll_to tool."""
+    role: str = Field(description="ARIA role of the element to bring into view")
+    name: str = Field(description="Accessible name of the element")
+    nth: Optional[int] = Field(default=None, description="0-based index, only when disambiguating")
+
+
+class SwitchTabInput(BaseModel):
+    """Input for switch_tab tool."""
+    index: int = Field(description="0-based tab index from list_tabs")
+
+
+class NoArgsInput(BaseModel):
+    """For tools that take no arguments."""
+    pass
 
 
 class TypeInput(BaseModel):
-    """Input for type tool."""
-    text: str = Field(description="Text to type into the focused input")
+    """Input for the legacy type tool."""
+    text: str = Field(description="Text to type into the currently focused input")
 
 
 class SearchInput(BaseModel):
@@ -104,8 +181,56 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
     async def navigate(url: str):
         return await handle_navigate(page, url)
 
-    async def click(role: str, name: str):
-        return await handle_click(page, role, name)
+    async def click(role: str, name: str, nth: Optional[int] = None):
+        return await do_click(page, role, name, nth=nth)
+
+    async def fill(role: str, name: str, text: str, nth: Optional[int] = None):
+        return await do_fill(page, role, name, text, nth=nth)
+
+    async def select_option(
+        name: str,
+        role: str = "combobox",
+        label: Optional[str] = None,
+        value: Optional[str] = None,
+        nth: Optional[int] = None,
+    ):
+        return await do_select_option(page, role, name, value=value, label=label, nth=nth)
+
+    async def set_checkbox(role: str, name: str, checked: bool = True, nth: Optional[int] = None):
+        return await do_set_checkbox(page, role, name, checked=checked, nth=nth)
+
+    async def upload_file(
+        file_path: str,
+        name: Optional[str] = None,
+        role: Optional[str] = "textbox",
+        nth: Optional[int] = None,
+    ):
+        return await do_upload_file(page, role, name, file_path=file_path, nth=nth)
+
+    async def wait_for(
+        role: Optional[str] = None,
+        name: Optional[str] = None,
+        url_contains: Optional[str] = None,
+        text_contains: Optional[str] = None,
+        seconds: float = 10.0,
+    ):
+        return await do_wait_for(
+            page,
+            role=role,
+            name=name,
+            url_contains=url_contains,
+            text_contains=text_contains,
+            seconds=seconds,
+        )
+
+    async def scroll_to(role: str, name: str, nth: Optional[int] = None):
+        return await do_scroll_to(page, role, name, nth=nth)
+
+    async def read_form():
+        return await do_read_form(page)
+
+    async def list_tabs():
+        return await do_list_tabs(page)
 
     async def type_text(text: str):
         return await handle_type(page, text)
@@ -238,13 +363,92 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
         StructuredTool.from_function(
             coroutine=click,
             name="click",
-            description="Click an element by its ARIA role and accessible name (e.g. button 'Submit', link 'Home').",
+            description=(
+                "Click an element by its ARIA role and accessible name (e.g. button 'Submit', link 'Home'). "
+                "If the result reports ambiguous_target, repeat the call with nth= to pick one. "
+                "If it reports element_not_found, the message lists the targets that do exist: use one of those."
+            ),
             args_schema=ClickInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=fill,
+            name="fill",
+            description=(
+                "PREFERRED way to enter text. Put a value into a specific field named by role and "
+                "accessible name, e.g. fill(role='textbox', name='Email', text='a@b.com'). The value is "
+                "read back afterwards, so a readonly or masked field reports failure instead of a false "
+                "success. Use this rather than `type`, which cannot say which field it means."
+            ),
+            args_schema=FillInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=select_option,
+            name="select_option",
+            description=(
+                "Choose an option in a dropdown (a native <select>). Prefer label= with the visible option "
+                "text. Clicking a dropdown or its options does not work; use this. If the option does not "
+                "exist the result lists the ones that do."
+            ),
+            args_schema=SelectOptionInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=set_checkbox,
+            name="set_checkbox",
+            description=(
+                "Set a checkbox, radio button or switch to an explicit state, e.g. "
+                "set_checkbox(role='radio', name='Spring 2026', checked=True). Prefer this over click for "
+                "these controls: it is idempotent and confirms the resulting state, whereas a click toggles "
+                "and a retry can silently undo the previous one."
+            ),
+            args_schema=SetCheckboxInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=upload_file,
+            name="upload_file",
+            description=(
+                "Attach a local file to a file input, e.g. a resume or cover letter. Pass the absolute path "
+                "on the agent host. Do not try to type a path into a file field."
+            ),
+            args_schema=UploadFileInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=wait_for,
+            name="wait_for",
+            description=(
+                "Wait for something observable: an element (role+name), a URL substring, or visible text. "
+                "Prefer this over `wait`, which just sleeps for a guessed duration."
+            ),
+            args_schema=WaitForInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=read_form,
+            name="read_form",
+            description=(
+                "List every field on the page with its current state: filled or empty, checked or unchecked, "
+                "selected option, attached file, and whether it is required or readonly. Use this to find out "
+                "what is still missing before submitting a form."
+            ),
+            args_schema=NoArgsInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=scroll_to,
+            name="scroll_to",
+            description="Scroll a specific element into view by role and accessible name.",
+            args_schema=ScrollToInput,
+        ),
+        StructuredTool.from_function(
+            coroutine=list_tabs,
+            name="list_tabs",
+            description="List open browser tabs with their index, title and URL.",
+            args_schema=NoArgsInput,
         ),
         StructuredTool.from_function(
             coroutine=type_text,
             name="type",
-            description="Type text into the currently focused input field.",
+            description=(
+                "LEGACY: type into whatever is currently focused. Prefer `fill`, which names the field. "
+                "Only use this when the field genuinely has no accessible name."
+            ),
             args_schema=TypeInput,
         ),
         StructuredTool.from_function(

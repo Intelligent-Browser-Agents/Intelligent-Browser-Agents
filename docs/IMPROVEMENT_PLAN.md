@@ -298,6 +298,51 @@ An agent that acts on the user's behalf with their saved credentials and card is
 
 ## Phase 2: rebuild the action layer around addressable targets
 
+**Status: core complete.** Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Tools offered to the model | 11 | **19** |
+| Can address a duplicate label | no, `.first` by DOM order | **yes, `nth=` after an `ambiguous_target` result** |
+| Field targeting | value classified against 7 selector lists | **`fill(role, name, text)`** |
+| Dropdowns | impossible | **`select_option`** |
+| Checkbox / radio state | blind toggle, never read | **`set_checkbox`, idempotent and verified** |
+| Resume upload | impossible | **`upload_file`** |
+| "Which fields are empty?" | unanswerable | **`read_form`** |
+| Waiting | blind `sleep` | **`wait_for` element / URL / text** |
+| Post-condition checks | none | **`verified` flag on every result** |
+| Miss diagnostics | "element not found" | **lists the targets that do exist** |
+| Absent dropdown option | 8s timeout, no detail | **0.03s, lists the real options** |
+| `handlers.py` | 1186 lines | **426 lines** |
+| Tests | 177 offline | **177 offline + 89 browser, incl. 36 new** |
+
+The new layer lives in `execution/targeting.py` (resolution) and
+`execution/actions.py` (primitives), tested offline against
+`backend/tests/fixtures/job_application.html`, a form with two selects, a radio
+group, checkboxes, a file input, a readonly field, a late-appearing control, and
+two buttons that deliberately share the name "Save". An end-to-end test fills
+every field type and submits, asserting `verified` on each step.
+
+Deliberate contract changes:
+
+- `handle_click` no longer uses `force=True` by default. Forcing dispatched at
+  coordinates regardless of overlays, so a cookie banner covering a button
+  produced a success with nothing happening.
+- The typed value is no longer echoed in any result message. One legacy test
+  asserted the opposite; that assertion *was* the leak.
+- `type` still exists but types into the focused element only. It no longer
+  guesses a field, and no longer returns invented `target_*` metadata.
+
+Still outstanding from this phase, deferred rather than done:
+
+- Downloads (`expect_download`) and the file-chooser event are not handled.
+- Dialogs are still auto-accepted in `app.py:159`, which auto-confirms
+  `confirm("Submit your application?")` and defeats the sensitive-action gate.
+- `handle_search` still carries hardcoded Google/DuckDuckGo/Bing selectors, and
+  `handle_navigate` still reports HTTP 4xx/5xx as success.
+- Date pickers and type-then-select autocomplete have no dedicated primitive.
+
+
 This is the highest-value change in the plan.
 Today the model decides *what* to type and the handler guesses *where*, using the value's shape.
 A 40-field job application cannot be filled that way.

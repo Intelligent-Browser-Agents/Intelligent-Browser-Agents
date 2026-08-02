@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Apply - Software Engineer</title>
+<h1>Software Engineer application</h1>
+
+<!-- Deliberately ambiguous button names: the old .first-plus-substring
+     resolution could not address any of these reliably. -->
+<nav>
+  <button type="button">Save</button>
+  <a href="#help">Help</a>
+</nav>
+
+<form id="app">
+  <label for="full-name">Full name</label>
+  <input id="full-name" name="full_name" type="text">
+
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email">
+
+  <label for="phone">Phone</label>
+  <input id="phone" name="phone" type="text" value="000">
+
+  <!-- Named only via `value`, which the old iframe walk dropped entirely. -->
+  <label for="country">Country</label>
+  <select id="country" name="country">
+    <option value="">Select one</option>
+    <option value="us">United States</option>
+    <option value="ca">Canada</option>
+  </select>
+
+  <label for="degree">Highest degree</label>
+  <select id="degree" name="degree">
+    <option value="bs">Bachelors</option>
+    <option value="ms">Masters</option>
+  </select>
+
+  <fieldset>
+    <legend>Work authorization</legend>
+    <input type="radio" id="auth-yes" name="auth" value="yes">
+    <label for="auth-yes">Authorized to work</label>
+    <input type="radio" id="auth-no" name="auth" value="no">
+    <label for="auth-no">Not authorized</label>
+  </fieldset>
+
+  <input type="checkbox" id="terms" name="terms">
+  <label for="terms">I accept the terms</label>
+
+  <input type="checkbox" id="subscribe" name="subscribe" checked>
+  <label for="subscribe">Send me job alerts</label>
+
+  <label for="resume">Resume</label>
+  <input id="resume" name="resume" type="file">
+
+  <label for="cover">Cover letter</label>
+  <textarea id="cover" name="cover"></textarea>
+
+  <!-- A readonly field: fill() must not claim success on it. -->
+  <label for="req-id">Requisition</label>
+  <input id="req-id" name="req_id" type="text" value="REQ-4417" readonly>
+
+  <!-- Same accessible name as the nav button above. -->
+  <button type="button" id="save-draft">Save</button>
+  <button type="submit" id="submit">Submit application</button>
+</form>
+
+<p id="status"></p>
+
+<script>
+  // Reveal a confirmation only after a real submit, so tests can assert an
+  // observable post-condition rather than trusting the click's own result.
+  document.getElementById('app').addEventListener('submit', function (e) {
+    e.preventDefault();
+    document.getElementById('status').textContent = 'Application received';
+  });
+
+  // A control that appears late, for wait_for.
+  setTimeout(function () {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Continue to review';
+    document.body.appendChild(b);
+  }, 700);
+</script>

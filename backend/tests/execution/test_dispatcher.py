@@ -66,10 +66,14 @@ async def test_dispatch_type(page):
     assert result.args["text"] == "test input"
     assert result.status == "success"
     assert result.error_type == "none"
-    assert "test input" in result.message
-    assert result.args.get("target_description")
-    assert "target_role" in result.args
-    assert "target_name" in result.args
+    # The typed value is deliberately NOT echoed in the message: it reaches the
+    # model's context and the run log, and it may be a password. Only the length
+    # is reported. This assertion used to require the opposite.
+    assert "test input" not in result.message
+    assert "character(s)" in result.message
+    # The old handler also returned target_description/target_role/target_name
+    # because it had *guessed* which field to use. `fill` names its target in the
+    # request instead, so there is nothing to report back.
 
 
 @pytest.mark.asyncio

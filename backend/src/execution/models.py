@@ -31,11 +31,75 @@ class ActionArgs(BaseModel):
     seconds: Optional[float] = None
     max_chars: Optional[int] = 15000
 
+    # Disambiguator for a role/name pair that matches more than one element.
+    # Without it the only options were "take the first match" (a coin flip
+    # decided by DOM order) or fail, so duplicate labels were unaddressable.
+    nth: Optional[int] = None
+
+    # set_checkbox / select_option / upload_file
+    checked: Optional[bool] = None
+    value: Optional[str] = None
+    label: Optional[str] = None
+    document_id: Optional[str] = None
+
+    # wait_for
+    url_contains: Optional[str] = None
+    text_contains: Optional[str] = None
+
+    # switch_tab
+    index: Optional[int] = None
+
+    # fill
+    clear: Optional[bool] = True
+
+
+ACTION_NAMES = (
+    "navigate",
+    "click",
+    "fill",
+    "type",
+    "select_option",
+    "set_checkbox",
+    "upload_file",
+    "search",
+    "scroll",
+    "scroll_to",
+    "press_key",
+    "wait",
+    "wait_for",
+    "extract_content",
+    "read_form",
+    "list_tabs",
+    "switch_tab",
+    "close_tab",
+    "go_back",
+)
+
 
 class Action(BaseModel):
     """Validated action specification from LLM translator."""
 
-    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait", "extract_content"]
+    action: Literal[
+        "navigate",
+        "click",
+        "fill",
+        "type",
+        "select_option",
+        "set_checkbox",
+        "upload_file",
+        "search",
+        "scroll",
+        "scroll_to",
+        "press_key",
+        "wait",
+        "wait_for",
+        "extract_content",
+        "read_form",
+        "list_tabs",
+        "switch_tab",
+        "close_tab",
+        "go_back",
+    ]
     args: ActionArgs
 
 
@@ -79,6 +143,18 @@ class ExecutionOutput(BaseModel):
         "none",
         "element_not_found",
         "ambiguous_step",
+        # A role/name pair matched several elements. Distinct from not-found: the
+        # target exists, the request just was not specific enough.
+        "ambiguous_target",
+        "invalid_role",
+        # The action ran but the post-condition check disagreed, e.g. fill() wrote
+        # a value that did not stick because the field was readonly or masked.
+        "verification_failed",
+        "not_interactable",
+        "timeout",
+        # A 4xx/5xx response. navigate used to report these as success because
+        # page.goto does not raise on HTTP errors.
+        "http_error",
         "tool_limit",
         "navigation_blocked",
         "unknown"
@@ -97,4 +173,13 @@ class ExecutionOutput(BaseModel):
     extracted_text: Optional[str] = Field(
         default=None,
         description="When action is extract_content, the main text extracted from the page"
+    )
+    verified: bool = Field(
+        default=False,
+        description=(
+            "True when the handler confirmed the effect by reading state back "
+            "(field value, checked state, selected option, URL or DOM change). "
+            "A handler that cannot confirm its own effect reports False rather "
+            "than letting the verifier infer success from a bare 'success'."
+        ),
     )

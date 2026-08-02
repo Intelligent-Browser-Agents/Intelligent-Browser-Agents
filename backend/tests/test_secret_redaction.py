@@ -111,8 +111,24 @@ def test_handle_type_success_message_does_not_contain_the_typed_value():
     from execution import handlers
 
     source = inspect.getsource(handlers.handle_type)
+    # The value must never be interpolated into the message; only its length.
     assert "Typed '{text}'" not in source
-    assert "f\"Typed {len(text)} character(s)" in source
+    assert "{text}" not in source.split("message=")[-1]
+    assert "character(s)" in source
+
+
+def test_fill_success_message_does_not_contain_the_typed_value():
+    """`fill` carries passwords too, so its messages must report length only."""
+    import inspect
+
+    from execution import actions
+
+    source = inspect.getsource(actions.do_fill)
+    assert "character(s)" in source
+    # No message line may interpolate the raw value.
+    for line in source.splitlines():
+        if "message" in line or "f\"" in line:
+            assert "{value}" not in line, f"raw value interpolated: {line.strip()}"
 
 
 def test_server_does_not_log_hitl_reply_contents():

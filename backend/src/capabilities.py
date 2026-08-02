@@ -15,6 +15,18 @@ EXECUTOR_CAPABILITIES = frozenset(
     {
         "navigate",
         "click",
+        "fill",
+        "select_option",
+        "set_checkbox",
+        "upload_file",
+        "wait_for",
+        "read_form",
+        "scroll_to",
+        "list_tabs",
+        "switch_tab",
+        "close_tab",
+        "go_back",
+        # Legacy, target-free. Still dispatched, but `fill` and `wait_for` are preferred.
         "type",
         "search",
         "scroll",
@@ -25,6 +37,12 @@ EXECUTOR_CAPABILITIES = frozenset(
 )
 
 # Map unsupported natural-language phrases (substring match, longest first) to a short rewrite hint.
+#
+# The upload rules used to rewrite "upload a file" into "click the file input and
+# use the system file chooser when prompted", which nothing implemented, so a plan
+# step was rewritten into an instruction the executor could never carry out.
+# Uploads, dropdowns and checkboxes are now real primitives and are no longer
+# rewritten away.
 _CAPABILITY_REWRITE_RULES: List[Tuple[str, str]] = [
     ("copy to clipboard", "Extract the needed text or value using extract_content (clipboard is not available)."),
     ("to clipboard", "using extract_content instead of clipboard"),
@@ -35,8 +53,6 @@ _CAPABILITY_REWRITE_RULES: List[Tuple[str, str]] = [
     ("hover ", "click to focus the element if needed; "),
     ("drag and drop", "use click and type interactions to achieve the same outcome; "),
     ("drag ", "use click interactions to reposition or select; "),
-    ("upload a file", "click the file input and use the system file chooser when prompted; "),
-    ("upload ", "click the upload control and complete the dialog; "),
     ("download ", "navigate or click the download control, then use extract_content if you need the file text; "),
     ("paste ", "type the intended content into the focused field; "),
     ("select all", "focus the field and use press_key or type as appropriate; "),

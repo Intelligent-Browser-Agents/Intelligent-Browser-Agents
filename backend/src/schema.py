@@ -70,6 +70,18 @@ class ExecutionArgs(BaseModel):
     url: Optional[str] = Field(default=None, description="URL for navigation actions.")
     role: Optional[str] = Field(default=None, description="ARIA role for element targeting.")
     name: Optional[str] = Field(default=None, description="Accessible name for element targeting.")
+    nth: Optional[int] = Field(
+        default=None,
+        description="0-based index, only needed when a role/name pair matches several elements.",
+    )
+    checked: Optional[bool] = Field(default=None, description="Desired state for set_checkbox.")
+    value: Optional[str] = Field(default=None, description="Option value for select_option.")
+    label: Optional[str] = Field(default=None, description="Visible option text for select_option.")
+    document_id: Optional[str] = Field(default=None, description="Path of the file for upload_file.")
+    url_contains: Optional[str] = Field(default=None, description="URL substring for wait_for.")
+    text_contains: Optional[str] = Field(default=None, description="Visible text for wait_for.")
+    index: Optional[int] = Field(default=None, description="Tab index for switch_tab / close_tab.")
+    clear: Optional[bool] = Field(default=True, description="Whether fill clears the field first.")
     text: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("text", "query"),
@@ -83,12 +95,19 @@ class ExecutionArgs(BaseModel):
 
 
 class ExecutionResult(BaseModel):
-    action: Literal["navigate", "click", "type", "search", "scroll", "press_key", "wait", "extract_content"]
+    action: Literal[
+        "navigate", "click", "fill", "select_option", "set_checkbox", "upload_file",
+        "wait_for", "read_form", "scroll_to", "list_tabs", "switch_tab", "close_tab",
+        "go_back",
+        # Legacy, target-free actions.
+        "type", "search", "scroll", "press_key", "wait", "extract_content",
+    ]
     args: ExecutionArgs
     status: Literal["success", "failure"]
     error_type: Literal[
-        "none", "element_not_found", "ambiguous_step",
-        "tool_limit", "navigation_blocked", "unknown"
+        "none", "element_not_found", "ambiguous_step", "ambiguous_target",
+        "invalid_role", "verification_failed", "not_interactable", "timeout",
+        "http_error", "tool_limit", "navigation_blocked", "unknown"
     ] = "none"
     message: str
 
@@ -97,6 +116,17 @@ class ExecutionResult(BaseModel):
         required = {
             "navigate": ["url"],
             "click": ["role", "name"],
+            "fill": ["role", "name", "text"],
+            "select_option": ["name"],
+            "set_checkbox": ["role", "name"],
+            "upload_file": ["document_id"],
+            "wait_for": [],
+            "read_form": [],
+            "scroll_to": ["role", "name"],
+            "list_tabs": [],
+            "switch_tab": [],
+            "close_tab": [],
+            "go_back": [],
             "type": ["text"],
             "search": ["text"],
             "scroll": ["direction"],
