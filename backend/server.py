@@ -53,6 +53,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import sys
 import subprocess
 import threading
+import uuid
 
 import asyncio
 import json
@@ -1146,6 +1147,13 @@ async def stream_endpoint(websocket: WebSocket):
 
     port = await PORT_POOL.get()
 
+    # A fresh identity per run, and a stable identity per user for browser
+    # session (storage_state) reuse across runs. Sending run_id to the client
+    # up front is what a future "resume this run" endpoint would key on; today
+    # nothing consumes it yet beyond appearing in the stream.
+    run_id = str(uuid.uuid4())
+    await websocket.send_json({"type": "run_started", "run_id": run_id})
+
     current_env = os.environ.copy()
     current_env["PYTHONUNBUFFERED"] = "1"
     current_env["PYTHONIOENCODING"] = "utf-8"
@@ -1155,7 +1163,13 @@ async def stream_endpoint(websocket: WebSocket):
     # 1. Launch Agent with stdin pipe for credentials and HITL replies
     def start_process():
         return subprocess.Popen(
-            [python_path, "src/app.py", "--port", str(port), "--prompt", prompt],
+            [
+                python_path, "src/app.py",
+                "--port", str(port),
+                "--prompt", prompt,
+                "--run_id", run_id,
+                "--session_key", str(user_id),
+            ],
             env=current_env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

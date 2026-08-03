@@ -17,6 +17,12 @@ chrome_profile/
 screenshots/
 *.pdf
 
+# Per-user browser session cookies/localStorage and LangGraph checkpoint
+# state (Phase 4 session persistence / durable checkpointing). Both can hold
+# live authentication material and must never be tracked.
+backend/.browser_sessions/
+backend/.checkpoints/
+
 # Python
 __pycache__/
 *.py[cod]

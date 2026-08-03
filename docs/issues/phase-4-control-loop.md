@@ -1,6 +1,6 @@
 # Issue: Phase 4 - fix the agentic control loop
 
-Status: **open**
+Status: **mostly complete** - two items handed off, see `docs/issues/CODEX_HANDOFF.md`
 Branch: `Edwin-after-grad`
 Plan reference: `docs/IMPROVEMENT_PLAN.md`, section "Phase 4: fix the agentic control loop"
 Opened: 2026-08-02
@@ -46,3 +46,9 @@ Its footprint (per `git status` at the time this issue was opened): `backend/src
 ## Log
 
 - 2026-08-02: opened; implementation started.
+- 2026-08-02: all 15 Phase 4 items landed except work-item *population* (the
+  deterministic advancement half is done) and the three deferred wires listed
+  above, which were re-confirmed still open now that Phase 3 has landed.
+  Offline suite green (194 passed, 4 xfailed). Remaining work handed off in
+  `docs/issues/CODEX_HANDOFF.md`, which also carries three confirmed defects
+  in Phase 3's snapshot code found by review and re-verified as still present.
