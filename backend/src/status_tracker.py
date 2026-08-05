@@ -328,12 +328,6 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
         "status": action_status or "unknown",
         "message": (action_msg or "")[:200],
     }
-    ev_args = event.get("args")
-    ev_args = ev_args if isinstance(ev_args, dict) else {}
-    for k in ("target_name", "target_role", "target_description"):
-        v = ev_args.get(k)
-        if v is not None and str(v).strip():
-            last_action[k] = str(v)[:300]
     signals["last_action"] = last_action
 
     if (
@@ -344,6 +338,8 @@ def _update_executor(signals: dict, state: dict, result: dict) -> None:
         signals["blocking_issue"] = "Sensitive action confirmation required before proceeding."
 
     if (action_status or "").lower() == "success":
+        ev_args = event.get("args")
+        ev_args = ev_args if isinstance(ev_args, dict) else {}
         _feed_field_progress(
             signals,
             state,

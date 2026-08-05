@@ -16,7 +16,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from state import ProjectState, get_mission_goal
 from schema import FallbackStrategy, infer_step_intent
 from models import Models
-from prompt_loader import get_fallback_prompt
+from prompt_loader import get_fallback_prompt, load_site_notes
 
 
 class Fallback:
@@ -152,6 +152,12 @@ class Fallback:
         )
 
         mission_status = self._clip_text(state.get("mission_status") or "", 2000)
+        site_notes = load_site_notes(current_url)
+        site_notes_block = (
+            f"SITE_NOTES (guidance specific to the current site):\n{site_notes}\n"
+            if site_notes
+            else ""
+        )
         context = f"""
 MAIN_GOAL: {user_intent}
 
@@ -179,6 +185,7 @@ MISSION_STATUS:
 
 {loop_analysis_block}
 
+{site_notes_block}
 Diagnose the failure and propose a recovery. Use update_type: revise_step with proposed_step for a single revised instruction; use insert_step_before with insert_step to add a prerequisite; use request_context if user input is needed; use abort only if the goal cannot be continued. If SCREENSHOT_SIGNAL says enabled, use screenshot evidence only as a last-resort tie-breaker for visual blockers/occlusion.
 """
 

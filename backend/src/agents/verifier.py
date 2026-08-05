@@ -17,7 +17,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from state import ProjectState, get_mission_goal
 from schema import VerificationResult, last_execution_event_to_executor_log
 from models import Models
-from prompt_loader import get_verification_prompt
+from prompt_loader import get_verification_prompt, load_site_notes
 
 
 class Verifier:
@@ -119,7 +119,9 @@ class Verifier:
                 last_execution = last_execution_structured
 
         last_exec_lower = (last_execution_structured or "").lower()
-        recent_executor_history = "\n\n".join(recent_executor_logs[-2:]) if recent_executor_logs else ""
+        # Three entries, matching the prompt's repeated-read-only-actions rule;
+        # a 3-action pattern cannot be observed in a 2-entry window.
+        recent_executor_history = "\n\n".join(recent_executor_logs[-3:]) if recent_executor_logs else ""
         recent_executor_history = self._clip_text(recent_executor_history, 2600)
 
         # ── Structural signals ────────────────────────────────────────────
@@ -130,9 +132,9 @@ class Verifier:
             else "[executor] status: failure" in last_exec_lower
         )
         # The Phase 2 action layer sets `verified` from post-condition readback
-        # (input_value, is_checked, URL/DOM digest). The executor does not
-        # forward it into last_execution_event yet; treat it as tri-state so
-        # the wire lights up as soon as the producer side lands.
+        # (input_value, is_checked, URL/DOM digest). The executor forwards it on
+        # the action path; it is None only for pre-execution failures (invalid
+        # tool call, timeout), so keep the tri-state handling.
         event_verified = event.get("verified") if isinstance(event.get("verified"), bool) else None
         extracted_present = bool(event.get("extracted_content_present"))
         url_changed, dom_changed = self._page_delta(state)
@@ -244,6 +246,12 @@ class Verifier:
                     "Do NOT flag MFA/2FA issues based on old history.\n"
                 )
 
+        site_notes = load_site_notes(current_url)
+        site_notes_block = (
+            f"\nSITE_NOTES (completion semantics specific to the current site):\n{site_notes}\n"
+            if site_notes
+            else ""
+        )
         verified_display = "unknown" if event_verified is None else str(event_verified)
         fp_display = (
             f"{fp_done}/{fp_required} required fields captured"
@@ -275,7 +283,7 @@ CURRENT_URL (after action): {current_url}
 
 MISSION_STATUS:
 {mission_status}
-
+{site_notes_block}
 Use the EXECUTION_OUTPUT and especially AFTER_STATE (page content) as evidence. If the page content or action result shows the step was satisfied (e.g. the right page loaded, the target was clicked, or the required information is visible), set verdict=success and step_complete=true. Do not mark failure with "insufficient_evidence" if AFTER_STATE is present and supports success.
 A successful action that did not finish the whole step is verdict=success with step_complete=false.
 goal_complete=true requires PLAN_POSITION to be the final step AND the overall MAIN_GOAL to be visibly achieved.
@@ -330,7 +338,7 @@ goal_complete=true requires PLAN_POSITION to be the final step AND the overall M
             verdict_is_success = (result.verdict or "").strip().lower() == "success"
             if step_complete:
                 next_step_attempts = 0
-            elif needs_fallback and error_type in {"blocked", "tool_limit"}:
+            elif needs_fallback and error_type == "blocked":
                 next_step_attempts = 0
             elif verdict_is_success:
                 # verdict=success with step_complete=False means progress

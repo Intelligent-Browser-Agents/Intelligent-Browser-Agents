@@ -825,6 +825,36 @@ def test_status_tracker_sets_sensitive_confirmation_blocking_issue():
     assert signals.get("blocking_issue") == "Sensitive action confirmation required before proceeding."
 
 
+def test_status_tracker_survives_a_successful_executor_action():
+    """Regression: the success branch feeds ev_args from the structured event
+    into _feed_field_progress. A cleanup once deleted the ev_args assignment
+    while the call site kept using it, so every SUCCESSFUL action raised
+    NameError inside the node wrapper and killed the run; the only test at the
+    time used Status: failure and never entered the branch."""
+    signals = {}
+    state = {"current_task": "Fill in the applicant's email address."}
+    result = {
+        "reasoning_log": [
+            "[Executor] Action: fill\n"
+            "[Executor] Args: role=textbox, name=Email, text=me@example.com\n"
+            "[Executor] Status: success\n"
+            "[Executor] Message: Filled 'Email' and confirmed by readback."
+        ],
+        "last_execution_event": {
+            "action": "fill",
+            "args": {"role": "textbox", "name": "Email", "text": "me@example.com"},
+            "status": "success",
+            "error_type": None,
+            "message": "Filled 'Email' and confirmed by readback.",
+            "verified": True,
+        },
+    }
+
+    tracker._update_executor(signals, state, result)
+
+    assert signals.get("last_action", {}).get("status") == "success"
+
+
 def test_verifier_completes_generic_field_step_without_any_task_keyword_special_casing():
     """The replacement for the deleted email-compose keyword classifiers:
     completion comes from the field_progress tracker (fed by read_form /

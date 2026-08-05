@@ -19,7 +19,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from schema import ExecutionResult, LastExecutionEvent
 from state import ProjectState
 from models import Models
-from prompt_loader import get_execution_prompt, get_execution_tools_prompt
+from prompt_loader import get_execution_prompt, get_execution_tools_prompt, load_site_notes
 from autonomy import assess_action
 from dom_extraction import dom_extractor
 from dom_extraction.snapshot import SNAPSHOT_SECTION_MAX_CHARS, capture_page_snapshot
@@ -83,6 +83,15 @@ class Executor:
         if page is None:
             raise RuntimeError("[ERROR]: Executor called without a Playwright page!")
 
+        # Pages that already exist before this action. The new-tab auto-adopt in
+        # _finish_from_result compares against this so it only adopts tabs the
+        # action itself opened; without it, any pre-existing later tab would be
+        # re-adopted on the next success, undoing an explicit switch_tab.
+        try:
+            self.runtime["pages_before_action"] = list(page.context.pages)
+        except Exception:
+            self.runtime["pages_before_action"] = []
+
         # Refreshed each turn so redaction covers whatever is in the vault now.
         self._secret_values = self._collect_secret_values(state)
 
@@ -109,6 +118,7 @@ class Executor:
         )
         field_priority_block = self._build_field_priority_context(dom_snapshot, current_task, state)
         status_context_block = self._build_execution_status_context(state, current_task, step_attempts)
+        site_notes_block = self._build_site_notes_context(current_url)
 
         context = f"""
         MAIN_GOAL: {user_intent}
@@ -129,6 +139,7 @@ class Executor:
         {recent_actions_block}
         {adaptive_guidance_block}
         {status_context_block}
+        {site_notes_block}
 
         Use exactly one of the available tools to perform this plan step. If the step names a specific site/domain, navigate there directly instead of going through a search engine first. For open-web discovery when no target site is known, prefer duckduckgo.com or bing.com over google.com unless explicitly required.
         """
@@ -143,7 +154,7 @@ class Executor:
         ]
 
         # Prefer LangChain tool-calling path
-        tools = get_browser_tools(page)
+        tools = get_browser_tools(page, runtime=self.runtime)
         llm_with_tools = self.llm_chat.bind_tools(tools)
         tool_map = {t.name: t for t in tools}
 
@@ -198,13 +209,14 @@ class Executor:
                 )
             args = self._normalize_tool_args(name, args, current_task)
 
-            # Deterministic credential enforcement for login-form typing.
+            # Deterministic credential enforcement for login-form entry.
             # The LLM may hallucinate placeholder credentials (e.g. user@example.com /
-            # Password123). For `type` during a login step, we overwrite the
-            # tool arg with the *actual* saved credentials for the best-matching
-            # service, based on whether the tool arg looks "email-like"
-            # (contains '@') or "password-like" (does not).
-            if name == "type" and isinstance(args, dict) and isinstance(args.get("text"), str):
+            # Password123). For `fill` or `type` during a login step, we overwrite
+            # the text arg with the *actual* saved credentials for the best-matching
+            # service. `fill` names its field, so the field's accessible name decides
+            # which credential it gets; the legacy `type` has no target, so we fall
+            # back to whether the value looks "email-like" (contains '@').
+            if name in {"fill", "type"} and isinstance(args, dict) and isinstance(args.get("text"), str):
                 if self._should_enforce_saved_credentials_for_typing(current_task):
                     creds = state.get("user_credentials") or {}
                     match = self._find_matching_service(creds, current_task, current_url)
@@ -212,8 +224,22 @@ class Executor:
                         expected_username = (match.get("username") or match.get("email") or "").strip()
                         expected_password = (match.get("password") or "").strip()
                         if expected_username and expected_password:
-                            looks_emailish = "@" in args.get("text", "")
-                            args["text"] = expected_username if looks_emailish else expected_password
+                            field_name = str(args.get("name") or "").lower()
+                            if name == "fill":
+                                # The field is named, so only credential-shaped
+                                # fields are overwritten. A fill on any other
+                                # field (OTP code, phone, company) keeps the
+                                # model's value: forcing the password into a
+                                # visible non-password field would leak it.
+                                if "password" in field_name:
+                                    args["text"] = expected_password
+                                elif re.search(r"user|email|login|account|\bid\b|\bnid\b", field_name):
+                                    args["text"] = expected_username
+                            else:
+                                # Legacy `type` has no target; infer from the
+                                # value's shape.
+                                looks_emailish = "@" in args.get("text", "")
+                                args["text"] = expected_username if looks_emailish else expected_password
 
             missing_required = await self._required_empty_fields_before_finalization(
                 page,
@@ -355,29 +381,20 @@ class Executor:
                         error_type=validated.error_type,
                     ),
                 }
+            # Forward the whole arg set. This used to copy only the legacy
+            # fields, silently dropping nth/label/value/checked/document_id and
+            # friends, which made select_option and upload_file unusable through
+            # the structured-output path no matter what the model emitted.
+            full_args = validated.args.model_dump()
+            full_args["max_chars"] = full_args.get("max_chars") or 15000
             tool_action = Action(
                 action=validated.action,
-                args=ActionArgs(
-                    url=validated.args.url,
-                    role=validated.args.role,
-                    name=validated.args.name,
-                    text=validated.args.text,
-                    direction=validated.args.direction,
-                    key=validated.args.key,
-                    seconds=validated.args.seconds,
-                    max_chars=getattr(validated.args, "max_chars", None) or 15000,
-                ),
+                args=ActionArgs(**full_args),
             )
 
-            validated_args = {
-                "url": validated.args.url,
-                "role": validated.args.role,
-                "name": validated.args.name,
-                "text": validated.args.text,
-                "direction": validated.args.direction,
-                "key": validated.args.key,
-                "seconds": validated.args.seconds,
-            }
+            validated_args = validated.args.model_dump(
+                exclude_none=True, exclude_defaults=True
+            )
 
             consume_sensitive_approval = False
             decision = assess_action(
@@ -421,7 +438,7 @@ class Executor:
                     clear_sensitive_approval=consume_sensitive_approval,
                 )
 
-            result = await dispatch_action(page, tool_action)
+            result = await dispatch_action(page, tool_action, runtime=self.runtime)
             print(
                 f"[executor - {result.action} result]: ",
                 self._execution_output_for_log(result),
@@ -908,27 +925,6 @@ class Executor:
         if not cls._is_data_entry_task(current_task):
             return ""
 
-        recent_name = ""
-        last_type_ok = False
-        if isinstance(state, dict):
-            sig = state.get("status_signals") or {}
-            la = sig.get("last_action") if isinstance(sig.get("last_action"), dict) else {}
-            if (la.get("type") or "").lower() == "type" and (la.get("status") or "").lower() == "success":
-                last_type_ok = True
-                recent_name = (la.get("target_name") or "").strip().lower()
-
-        def _recent_target_penalty(role: str, name: str) -> int:
-            """Push recently typed-to controls down so the next action picks a different field."""
-            if not last_type_ok or not recent_name:
-                return 0
-            nm = name.strip().lower()
-            rn = recent_name
-            if not nm or not rn:
-                return 0
-            if rn == nm or (len(rn) >= 3 and rn in nm) or (len(nm) >= 3 and nm in rn):
-                return 40
-            return 0
-
         fields: list[tuple[str, str]] = []
         controls: list[tuple[str, str]] = []
         seen = set()
@@ -953,14 +949,13 @@ class Executor:
             return ""
 
         task_keywords = cls._task_keywords(current_task)
-        scored_fields: list[tuple[int, int, str, str]] = []
+        scored_fields: list[tuple[int, str, str]] = []
         for role, name in fields:
             overlap = len(task_keywords & cls._name_keywords(name))
-            penalty = _recent_target_penalty(role, name)
-            scored_fields.append((overlap, penalty, role, name))
-        scored_fields.sort(key=lambda item: (-item[0], item[1], item[3].lower()))
-        relevant_fields = [(r, n) for score, pen, r, n in scored_fields if score > 0]
-        shown_fields = (relevant_fields or [(r, n) for _, _, r, n in scored_fields])[:8]
+            scored_fields.append((overlap, role, name))
+        scored_fields.sort(key=lambda item: (-item[0], item[2].lower()))
+        relevant_fields = [(r, n) for score, r, n in scored_fields if score > 0]
+        shown_fields = (relevant_fields or [(r, n) for _, r, n in scored_fields])[:8]
         shown_controls = controls[:6]
 
         field_lines = "\n".join(f"- {r}: {n}" for r, n in shown_fields) if shown_fields else "- none detected"
@@ -976,12 +971,17 @@ class Executor:
             "Visible actionable controls:\n"
             f"{control_lines}"
         )
-        if last_type_ok and recent_name:
-            text += (
-                f"\nLast successful `type` used a control whose accessible name/label resembles: «{recent_name}». "
-                "If PLAN_STEP now requires a different slot (e.g. title/subject vs address vs body), choose a different field from the list above.\n"
-            )
         return cls._clip_text(text, 1200)
+
+    @classmethod
+    def _build_site_notes_context(cls, current_url: str) -> str:
+        """Per-domain guidance, injected only when the current host matches."""
+        notes = load_site_notes(current_url)
+        if not notes:
+            return ""
+        return cls._clip_text(
+            f"\n\nSITE_NOTES (guidance specific to the current site):\n{notes}", 1500
+        )
 
     @staticmethod
     def _clean_tool_string(value: str) -> str:
@@ -1005,12 +1005,23 @@ class Executor:
         result_error_type = result.error_type
         result_message = result.message
 
-        # Handle links that open in a new tab/window: switch to the new page
-        if result_status == "success":
+        # Handle links that open in a new tab/window: adopt a tab the action
+        # itself opened. Never second-guess an explicit tab-management action:
+        # switch_tab and close_tab already retargeted self.runtime["page"].
+        # Comparing against pages_before_action keeps this from re-adopting a
+        # pre-existing later tab, which would undo an explicit switch_tab on
+        # the very next success.
+        if result_status == "success" and result.action in {"switch_tab", "close_tab"}:
+            page = self.runtime.get("page") or page
+        elif result_status == "success":
             try:
-                pages = page.context.pages
-                if len(pages) > 1 and pages[-1] != page:
-                    new_page = pages[-1]
+                pages_before = self.runtime.get("pages_before_action") or []
+                opened = [
+                    p for p in page.context.pages
+                    if p not in pages_before and p != page
+                ]
+                if opened:
+                    new_page = opened[-1]
                     await new_page.wait_for_load_state("domcontentloaded", timeout=8000)
                     self.runtime["page"] = new_page
                     page = new_page
@@ -1605,17 +1616,17 @@ class Executor:
                 username = match.get('username', '')
                 password = match.get('password', '')
                 parts.append(
-                    f"SERVICE_CREDENTIALS (use these EXACT values — do NOT make up values):\n"
+                    f"SERVICE_CREDENTIALS (use these EXACT values - do NOT make up values):\n"
                     f"  Username/Email: {username}\n"
                     f"  Password: {password}\n\n"
                     f"FIELD MATCHING RULES:\n"
-                    f"  - Look at DOM_SNAPSHOT for visible input fields (textbox, input, password field, etc.).\n"
-                    f"  - Match each field to the correct credential by its label/name/placeholder "
-                    f"(e.g. 'Email', 'Username', 'NID' → type the Username value; 'Password' → type the Password value).\n"
-                    f"  - Fill ONE field per turn: `type` the matching value into the currently focused or next unfilled field.\n"
+                    f"  - Look at DOM_SNAPSHOT for visible input fields (textbox, password field, etc.).\n"
+                    f"  - Match each field to the correct credential by its accessible name/label "
+                    f"(e.g. 'Email', 'Username', 'User ID' → the Username value; 'Password' → the Password value).\n"
+                    f"  - Fill ONE field per turn: `fill(role, name, text)` with the matching value.\n"
                     f"  - After all visible fields are filled (check PREVIOUS_ACTIONS), click the submit/sign-in/next button.\n"
-                    f"  - If only ONE input field is visible (e.g. Microsoft login), fill it first, then click Next; "
-                    f"the system will re-invoke you for the next field on the new page."
+                    f"  - Some logins show ONE field per page (username first, password after 'Next'); "
+                    f"fill the visible field, click Next, and the system will re-invoke you on the new page."
                 )
 
         if is_form_step:
@@ -1647,7 +1658,7 @@ class Executor:
 
         if not parts:
             return ""
-        text = "\n\nUSER_CREDENTIALS (available for auto-fill — use `type` to enter these values):\n" + "\n".join(parts)
+        text = "\n\nUSER_CREDENTIALS (available for auto-fill - enter these values with `fill`):\n" + "\n".join(parts)
         return self._clip_text(text, 1300)
 
     @staticmethod
@@ -1756,13 +1767,19 @@ class Executor:
             "url",
             "role",
             "name",
+            "nth",
             "text",
+            "checked",
+            "value",
+            "label",
+            "document_id",
+            "url_contains",
+            "text_contains",
+            "index",
+            "section",
             "direction",
             "key",
             "seconds",
-            "target_description",
-            "target_role",
-            "target_name",
         ]:
             value = args.get(key) if isinstance(args, dict) else None
             if value is not None and str(value).strip() != "":

@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
@@ -156,7 +156,7 @@ async def test_click_missing_target_returns_structured_failure(monkeypatch):
 
     was_dispatched = {"called": False}
 
-    async def fake_dispatch(page, action):
+    async def fake_dispatch(page, action, runtime=None):
         was_dispatched["called"] = True
         raise AssertionError("dispatch_action should not be called for invalid click args")
 
@@ -208,7 +208,7 @@ async def test_search_with_text_reaches_dispatch(monkeypatch):
 
     captured = {"action": None}
 
-    async def fake_dispatch(dispatch_page, action):
+    async def fake_dispatch(dispatch_page, action, runtime=None):
         captured["action"] = action
         dispatch_page.url = "https://ucf.edu/search/?q=academics"
         return ExecutionOutput(
@@ -247,7 +247,7 @@ async def test_search_text_is_recovered_from_current_task(monkeypatch):
 
     captured = {"action": None}
 
-    async def fake_dispatch(dispatch_page, action):
+    async def fake_dispatch(dispatch_page, action, runtime=None):
         captured["action"] = action
         dispatch_page.url = "https://ucf.edu/search/?q=academics"
         return ExecutionOutput(
@@ -291,7 +291,7 @@ async def test_search_text_is_recovered_from_plan_context(monkeypatch):
 
     captured = {"action": None}
 
-    async def fake_dispatch(dispatch_page, action):
+    async def fake_dispatch(dispatch_page, action, runtime=None):
         captured["action"] = action
         return ExecutionOutput(
             action="search",
@@ -334,7 +334,7 @@ async def test_search_recovery_prefers_quoted_query_from_context(monkeypatch):
 
     captured = {"action": None}
 
-    async def fake_dispatch(dispatch_page, action):
+    async def fake_dispatch(dispatch_page, action, runtime=None):
         captured["action"] = action
         return ExecutionOutput(
             action="search",
@@ -385,7 +385,7 @@ async def test_click_target_is_recovered_from_dom_for_search_task(monkeypatch):
 
     captured = {"action": None}
 
-    async def fake_dispatch(dispatch_page, action):
+    async def fake_dispatch(dispatch_page, action, runtime=None):
         captured["action"] = action
         return ExecutionOutput(
             action="click",
@@ -421,7 +421,7 @@ async def test_model_failure_skips_dispatch(monkeypatch):
     )
     executor, _ = build_executor(response)
 
-    async def fake_dispatch(page, action):
+    async def fake_dispatch(page, action, runtime=None):
         raise AssertionError("dispatch_action should be skipped when model returns failure")
 
     monkeypatch.setattr(executor_module, "dispatch_action", fake_dispatch)
@@ -454,7 +454,7 @@ async def test_prompt_uses_real_interactive_dom_snapshot(monkeypatch):
     llm = DummyLLM(response)
     executor, _ = build_executor(response, page=page, llm=llm)
 
-    async def fake_dispatch(page, action):
+    async def fake_dispatch(page, action, runtime=None):
         return ExecutionOutput(
             action="wait",
             args={"seconds": 0.1},

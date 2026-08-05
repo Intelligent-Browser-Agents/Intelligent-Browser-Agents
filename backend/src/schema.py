@@ -96,7 +96,12 @@ class ExecutionArgs(BaseModel):
     checked: Optional[bool] = Field(default=None, description="Desired state for set_checkbox.")
     value: Optional[str] = Field(default=None, description="Option value for select_option.")
     label: Optional[str] = Field(default=None, description="Visible option text for select_option.")
-    document_id: Optional[str] = Field(default=None, description="Path of the file for upload_file.")
+    document_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("document_id", "file_path"),
+        serialization_alias="document_id",
+        description="Path of the file for upload_file. Accepts `file_path` as an alias, matching the tool-call argument name.",
+    )
     url_contains: Optional[str] = Field(default=None, description="URL substring for wait_for.")
     text_contains: Optional[str] = Field(default=None, description="Visible text for wait_for.")
     index: Optional[int] = Field(default=None, description="Tab index for switch_tab / close_tab.")

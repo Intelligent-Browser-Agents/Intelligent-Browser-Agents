@@ -470,6 +470,31 @@ The executor was the last of the three files to be cleaned.
 
 ## Phase 5: prompts
 
+**Status: complete.** Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Prompt inputs vs reality | every Inputs section wrong: `ALLOWED_TOOLS` and `BEFORE_STATE` promised but never supplied; 20+ real context blocks undocumented | every promised label is supplied by the consuming code, contract-tested |
+| Site/compose rules in generic prompts | 12 verifier rules, the planner's step recipe, the fallback's repair heuristics, ~42% of `execution_tools.prompt.md` | none; distilled into `prompts/site_notes/<host>.md`, injected only when the current host matches |
+| Executor JSON-mode contract | 8 of 20 actions, 6 of 12 error types, 8 of 18 args | full sets, matched to `ExecutionResult` exactly |
+| Snapshot pagination (`read_page`) | documented nowhere | explained in both executor prompts |
+| Tab management | `switch_tab`/`close_tab` implemented but never offered to the model; the newest-page auto-adopt would undo an explicit switch | registered as tools; auto-adoption skips explicit tab actions |
+| JSON-path arg forwarding | `nth`/`label`/`value`/`checked`/`document_id` silently dropped before dispatch | full `ExecutionArgs` forwarded |
+| Credential enforcement | intercepted `type` only, so the prompts' own fill-first guidance bypassed it | covers `fill` and `type`, routed by field name |
+| `work_items` | suppressed by the planner prompt's "output exactly one of the following" | documented; the model can populate the Phase 4 work queue |
+| Structured HITL guidance | `requested_fields` hardcoded to `["confirmation"]` | one short label per missing item |
+| Prompt-to-code drift protection | none | `test_prompt_contracts.py`: output fields, enum values, input labels, tool names, fence parity, in both directions |
+| Job-application domain knowledge | scattered remnants in generic prompts | `.agents/skills/job-application/SKILL.md` |
+| Tests | 198 offline | **248 offline** |
+
+Notes against the item list below:
+
+- Item 4's `go_back` mismatch had already been fixed from the code side (the action is registered), so the prompt's claim was kept and is now true.
+- The dead `target_name`/`target_role`/`target_description` plumbing (readers with no writers since the field-guessing handler was deleted) was removed rather than documented: executor log rendering, the field-priority penalty, and the status-tracker copy.
+- The verifier's history window was widened from 2 to 3 entries so its own repeated-actions rule is observable.
+- The verifier's `tool_limit` retry-budget exemption was deleted: `VerificationResult.error_type` cannot carry that value, so the branch was unreachable.
+- Code-side site-specific heuristics in `fallback.py` (a Booking.com modal signature, mail-specific realign tokens) are noted for a later cleanup; they are behavior, not prompt text, and carry test risk this phase did not need.
+
 1. Strip the markdown scaffolding from `fallback.prompt.md` and close the unterminated fences in it and `verification.prompt.md`.
 2. Remove site-specific rules from all six prompts. `verification.prompt.md:39-65` encodes Outlook and Gmail compose semantics; `orchestration.prompt.md:36` prescribes an email-specific step recipe in the generic planner. Move anything genuinely site-shaped into optional per-domain "site notes" loaded only when the current host matches, so a Gmail rule cannot affect a Workday run.
 3. Rewrite `execution_tools.prompt.md` around the Phase 2 action set. About half of its current content is email compose and one university portal's SSO flow.

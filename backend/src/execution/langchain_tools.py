@@ -14,6 +14,7 @@ from playwright.async_api import Page
 
 from .actions import (
     do_click,
+    do_close_tab,
     do_fill,
     do_list_tabs,
     do_read_form,
@@ -21,6 +22,7 @@ from .actions import (
     do_scroll_to,
     do_select_option,
     do_set_checkbox,
+    do_switch_tab,
     do_upload_file,
     do_wait_for,
 )
@@ -115,6 +117,11 @@ class SwitchTabInput(BaseModel):
     index: int = Field(description="0-based tab index from list_tabs")
 
 
+class CloseTabInput(BaseModel):
+    """Input for close_tab tool."""
+    index: int = Field(description="0-based tab index from list_tabs")
+
+
 class NoArgsInput(BaseModel):
     """For tools that take no arguments."""
     pass
@@ -183,10 +190,15 @@ class ReadPageInput(BaseModel):
 # Tool factory: build tools bound to a Playwright page
 # -----------------------------------------------------------------------------
 
-def get_browser_tools(page: Page) -> list[StructuredTool]:
+def get_browser_tools(page: Page, runtime: Optional[dict] = None) -> list[StructuredTool]:
     """
     Return a list of LangChain tools that execute browser actions using the given page.
     Use this with llm.bind_tools(tools) so the executor can use tool_calls.
+
+    `runtime` is the caller's mutable runtime dict. switch_tab and close_tab
+    change which page subsequent actions run against, so their wrappers write
+    the new page into runtime["page"]; without a runtime those two tools are
+    not offered, because a switch the caller never sees is a silent no-op.
     """
     async def navigate(url: str):
         return await handle_navigate(page, url)
@@ -302,7 +314,42 @@ def get_browser_tools(page: Page) -> list[StructuredTool]:
     async def go_back():
         return await handle_go_back(page)
 
-    return [
+    async def switch_tab(index: int):
+        output, new_page = await do_switch_tab(page, index)
+        if new_page is not None and runtime is not None:
+            runtime["page"] = new_page
+        return output
+
+    async def close_tab(index: int):
+        output, new_page = await do_close_tab(page, index)
+        if new_page is not None and runtime is not None:
+            runtime["page"] = new_page
+        return output
+
+    tab_management_tools = []
+    if runtime is not None:
+        tab_management_tools = [
+            StructuredTool.from_function(
+                coroutine=switch_tab,
+                name="switch_tab",
+                description=(
+                    "Switch to another open tab by its 0-based index from list_tabs. Subsequent "
+                    "actions run against that tab."
+                ),
+                args_schema=SwitchTabInput,
+            ),
+            StructuredTool.from_function(
+                coroutine=close_tab,
+                name="close_tab",
+                description=(
+                    "Close an open tab by its 0-based index from list_tabs. Refuses to close the "
+                    "only tab. Use to get rid of popups or ads that opened in a new tab."
+                ),
+                args_schema=CloseTabInput,
+            ),
+        ]
+
+    return tab_management_tools + [
         StructuredTool.from_function(
             coroutine=navigate,
             name="navigate",

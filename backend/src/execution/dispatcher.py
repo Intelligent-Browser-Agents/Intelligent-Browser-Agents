@@ -34,13 +34,17 @@ from .handlers import (
 )
 
 
-async def dispatch_action(page: Page, action: Action) -> ExecutionOutput:
+async def dispatch_action(page: Page, action: Action, runtime: dict | None = None) -> ExecutionOutput:
     """
     Route action to appropriate handler based on action type.
 
     Args:
         page: Playwright page instance
         action: Validated action object containing action type and arguments
+        runtime: Optional caller-owned runtime dict. switch_tab and close_tab
+            change which page subsequent actions run against; when a runtime is
+            given, the new page is written into runtime["page"]. Without one,
+            a tab switch cannot outlive this call.
 
     Returns:
         ExecutionOutput with execution result, status, and timing information
@@ -59,7 +63,9 @@ async def dispatch_action(page: Page, action: Action) -> ExecutionOutput:
     # handlers return (output, new_page) and are dispatched separately below.
     if action.action in ("switch_tab", "close_tab"):
         handler = do_switch_tab if action.action == "switch_tab" else do_close_tab
-        output, _new_page = await handler(page, a.index)
+        output, new_page = await handler(page, a.index)
+        if new_page is not None and runtime is not None:
+            runtime["page"] = new_page
         return output
 
     handlers = {
@@ -67,7 +73,10 @@ async def dispatch_action(page: Page, action: Action) -> ExecutionOutput:
         # Element-addressed actions. Each names its target and verifies its effect.
         "click": lambda: do_click(page, a.role, a.name, nth=a.nth),
         "fill": lambda: do_fill(page, a.role, a.name, a.text, nth=a.nth, clear=True if a.clear is None else a.clear),
-        "select_option": lambda: do_select_option(page, a.role, a.name, value=a.value, label=a.label, nth=a.nth),
+        # role defaults to combobox for parity with the tool-mode schema
+        # (SelectOptionInput); without it a role-less JSON call dies on
+        # invalid_role while the identical tool call works.
+        "select_option": lambda: do_select_option(page, a.role or "combobox", a.name, value=a.value, label=a.label, nth=a.nth),
         "set_checkbox": lambda: do_set_checkbox(page, a.role, a.name, checked=True if a.checked is None else a.checked, nth=a.nth),
         "upload_file": lambda: do_upload_file(page, a.role, a.name, file_path=a.document_id or a.value, nth=a.nth),
         "scroll_to": lambda: do_scroll_to(page, a.role, a.name, nth=a.nth),
