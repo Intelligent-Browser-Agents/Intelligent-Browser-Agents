@@ -16,6 +16,18 @@ from urllib.parse import urlparse
 # Aligned with: prompts/orchestration.prompt.md
 # =============================================================================
 
+class WorkItem(BaseModel):
+    """One deterministic outer-loop item for a bulk task."""
+
+    description: str = Field(
+        description="Human-readable description of the item to work on."
+    )
+    url: Optional[str] = Field(
+        default=None,
+        description="Optional URL to start from for this item.",
+    )
+
+
 class OrchestratorPlan(BaseModel):
     """
     Schema for the Orchestration Agent's plan output.
@@ -34,6 +46,13 @@ class OrchestratorPlan(BaseModel):
     steps: List[str] = Field(
         default_factory=list,
         description="Ordered list of 3-8 high-level steps to achieve the goal. Empty if needs_clarification is true."
+    )
+    work_items: List[WorkItem] = Field(
+        default_factory=list,
+        description=(
+            "Optional deterministic outer-loop items for bulk tasks such as applying to several jobs. "
+            "Each item should include at least a description and may also include a url."
+        ),
     )
 
 
@@ -177,6 +196,7 @@ class LastExecutionEvent(BaseModel):
     error_type: Optional[str] = None
     message: str = ""
     extracted_content_present: bool = False
+    verified: Optional[bool] = None
 
 
 class StepIntent(str, Enum):

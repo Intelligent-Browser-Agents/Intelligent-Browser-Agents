@@ -59,6 +59,7 @@ def _stub_for_schema(schema):
             clarifying_questions=[],
             goal="stubbed goal",
             steps=["stubbed step 1", "stubbed step 2", "stubbed step 3"],
+            work_items=[],
         )
     if name == "OrchestratorDecision":
         return schema(reasoning="stubbed reasoning", action="advance", task_refinement=None)

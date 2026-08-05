@@ -209,6 +209,13 @@ class Orchestrator:
 
         first_task = normalized_steps[0] if normalized_steps else "No steps generated"
         mission_goal = (plan.goal or "").strip()
+        raw_work_items = getattr(plan, "work_items", None) or []
+        work_items = []
+        for item in raw_work_items:
+            if hasattr(item, "model_dump"):
+                item = item.model_dump(exclude_none=True)
+            if isinstance(item, dict) and str(item.get("description") or "").strip():
+                work_items.append(item)
         out = {
             "number_of_transactions": state.get("number_of_transactions", 0) + 1,
             "current_plan": normalized_steps,
@@ -225,6 +232,8 @@ class Orchestrator:
             "goal_retry_cycles": 0,
             "handoff_interaction": False,
             "recovery_context": None,
+            "work_items": work_items or None,
+            "current_item_index": 0,
         }
         if mission_goal:
             out["mission_goal"] = mission_goal
