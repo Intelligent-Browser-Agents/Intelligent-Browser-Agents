@@ -13,6 +13,7 @@ import userLogIcon from "../../assets/icons/agents/user.png";
 import verificationAgentIcon from "../../assets/icons/agents/verification.png";
 import "./Dashboard.css";
 
+import ThinkingStream, { ThinkingChatBlock } from "../components/ThinkingStream";
 import { api, buildWebSocketUrl, clearToken, getToken } from "../lib/api";
 
 // === COMPONENTS ===
@@ -277,6 +278,7 @@ export default function Dashboard() {
   const [activeChatId, setActiveChatId] = useState(conversations[0].id);
   const [showUserCredentials, setShowUserCredentials] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [thoughtsTab, setThoughtsTab] = useState("thinking");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [firstname, setFirstname] = useState("");
 
@@ -447,6 +449,8 @@ export default function Dashboard() {
           logs: [],
           chatMessages: [],
           status: "running",
+          startedAt: Date.now(),
+          finishedAt: null,
         },
       ],
     }));
@@ -580,7 +584,7 @@ export default function Dashboard() {
       ...prev,
       [chatId]: (prev[chatId] || []).map((session) =>
         session.id === sessionId
-          ? { ...session, status: "finished" }
+          ? { ...session, status: "finished", finishedAt: Date.now() }
           : session
       ),
     }));
@@ -1181,7 +1185,7 @@ export default function Dashboard() {
     const container = thoughtsStreamRef.current;
     if (!container) return;
     container.scrollTop = container.scrollHeight;
-  }, [thoughtSession?.id, thoughtSession?.logs.length]);
+  }, [thoughtSession?.id, thoughtSession?.logs.length, thoughtsTab]);
 
   const browserIsInteractive = Boolean(runningSession && liveFrame && isHITL);
   const browserStatusTone = browserIsInteractive ? "interactive" : runningSession ? "locked" : "idle";
@@ -1340,20 +1344,19 @@ export default function Dashboard() {
                         <div className="transcript-stack">
                           <div className="chat-user transcript-bubble">{session.prompt}</div>
 
-                          {session.chatMessages.length > 0 ? (
-                            session.chatMessages.map((msg, index) => (
-                              <div
-                                key={msg.id || `${session.id}-chat-${index}`}
-                                className={msg.isUser ? "chat-user transcript-bubble" : "chat-system transcript-bubble"}
-                              >
-                                {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
-                              </div>
-                            ))
-                          ) : session.status === "running" ? (
-                            <div className="transcript-awaiting">
-                              Waiting for agent response...
+                          {/* Live thinking trace, in the style of the ChatGPT /
+                              Claude chat transcript. Replaces the old static
+                              "Waiting for agent response..." placeholder. */}
+                          <ThinkingChatBlock session={session} />
+
+                          {session.chatMessages.map((msg, index) => (
+                            <div
+                              key={msg.id || `${session.id}-chat-${index}`}
+                              className={msg.isUser ? "chat-user transcript-bubble" : "chat-system transcript-bubble"}
+                            >
+                              {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
                             </div>
-                          ) : null}
+                          ))}
                         </div>
                       </section>
                     ))}
@@ -1390,8 +1393,8 @@ export default function Dashboard() {
           <aside className="dashboard-card dashboard-thoughts-panel">
             <div className="panel-heading thoughts-panel-heading">
               <div>
-                <p className="panel-kicker">Logs</p>
-                <h2>Agent Logs</h2>
+                <p className="panel-kicker">Reasoning</p>
+                <h2>Agent Thinking</h2>
               </div>
               {thoughtSession?.status === "running" ? (
                 <div className="thinking-indicator" aria-live="polite">
@@ -1403,6 +1406,27 @@ export default function Dashboard() {
               ) : null}
             </div>
 
+            <div className="thoughts-tabs" role="tablist" aria-label="Agent activity view">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={thoughtsTab === "thinking"}
+                className={`thoughts-tab ${thoughtsTab === "thinking" ? "active" : ""}`}
+                onClick={() => setThoughtsTab("thinking")}
+              >
+                Thinking
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={thoughtsTab === "logs"}
+                className={`thoughts-tab ${thoughtsTab === "logs" ? "active" : ""}`}
+                onClick={() => setThoughtsTab("logs")}
+              >
+                Logs
+              </button>
+            </div>
+
             <div className="thoughts-meta">
               {thoughtSession ? (
                 <>
@@ -1410,54 +1434,68 @@ export default function Dashboard() {
                   <p className="thoughts-prompt">{thoughtSession.prompt}</p>
                 </>
               ) : (
-                <p className="thoughts-prompt">Logs will appear here.</p>
+                <p className="thoughts-prompt">
+                  {thoughtsTab === "thinking"
+                    ? "The agent's thinking will appear here."
+                    : "Logs will appear here."}
+                </p>
               )}
             </div>
 
-            <div className="thoughts-stream" ref={thoughtsStreamRef}>
-              {thoughtSession ? (
-                thoughtSession.logs.length > 0 ? (
-                  groupAgentLogs(thoughtSession.logs).map((group, groupIndex) => (
-                    <div key={`${thoughtSession.id}-thought-group-${groupIndex}`} className="thought-line">
-                      <span className="thought-line-number">{String(group.startLineIndex + 1).padStart(2, "0")}</span>
-                      <div className="thought-line-body">
-                        {group.icon ? (
-                          <div className="thought-line-group">
-                            <div className="thought-line-group-header">
-                              <img className="thought-line-icon" src={group.icon} alt={group.alt} />
-                            </div>
-                            <ul className="thought-line-list">
-                              {group.items.map((item, itemIndex) => (
-                                <li key={`${thoughtSession.id}-thought-group-${groupIndex}-item-${itemIndex}`} className="thought-line-text">
-                                  {item}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : (
-                          group.items.map((item, itemIndex) => (
-                            <span
-                              key={`${thoughtSession.id}-thought-group-${groupIndex}-item-${itemIndex}`}
-                              className="thought-line-text"
-                            >
-                              {item}
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="thoughts-empty-state">
-                    {thoughtSession.status === "running"
-                      ? "Waiting for logs..."
-                      : "No more logs."}
-                  </div>
-                )
+            {thoughtsTab === "thinking" ? (
+              thoughtSession ? (
+                <ThinkingStream key={thoughtSession.id} session={thoughtSession} />
               ) : (
-                <div className="thoughts-empty-state">Start a run to view logs.</div>
-              )}
-            </div>
+                <div className="thoughts-stream">
+                  <div className="thoughts-empty-state">Start a run to watch the agent think.</div>
+                </div>
+              )
+            ) : (
+              <div className="thoughts-stream" ref={thoughtsStreamRef}>
+                {thoughtSession ? (
+                  thoughtSession.logs.length > 0 ? (
+                    groupAgentLogs(thoughtSession.logs).map((group, groupIndex) => (
+                      <div key={`${thoughtSession.id}-thought-group-${groupIndex}`} className="thought-line">
+                        <span className="thought-line-number">{String(group.startLineIndex + 1).padStart(2, "0")}</span>
+                        <div className="thought-line-body">
+                          {group.icon ? (
+                            <div className="thought-line-group">
+                              <div className="thought-line-group-header">
+                                <img className="thought-line-icon" src={group.icon} alt={group.alt} />
+                              </div>
+                              <ul className="thought-line-list">
+                                {group.items.map((item, itemIndex) => (
+                                  <li key={`${thoughtSession.id}-thought-group-${groupIndex}-item-${itemIndex}`} className="thought-line-text">
+                                    {item}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            group.items.map((item, itemIndex) => (
+                              <span
+                                key={`${thoughtSession.id}-thought-group-${groupIndex}-item-${itemIndex}`}
+                                className="thought-line-text"
+                              >
+                                {item}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="thoughts-empty-state">
+                      {thoughtSession.status === "running"
+                        ? "Waiting for logs..."
+                        : "No more logs."}
+                    </div>
+                  )
+                ) : (
+                  <div className="thoughts-empty-state">Start a run to view logs.</div>
+                )}
+              </div>
+            )}
           </aside>
         </div>
       </main>

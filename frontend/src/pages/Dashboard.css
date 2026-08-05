@@ -459,15 +459,6 @@
   max-width: min(82%, 760px);
 }
 
-.transcript-awaiting {
-  padding: 12px 14px;
-  border: 1px dashed rgba(106, 181, 223, 0.46);
-  border-radius: 16px;
-  background: rgba(103, 195, 239, 0.08);
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-}
-
 .chat-system,
 .chat-user {
   width: fit-content;
@@ -611,6 +602,39 @@
   border: 1px solid rgba(45, 181, 93, 0.22);
   background: rgba(45, 181, 93, 0.12);
   color: #22814a;
+}
+
+.thoughts-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 12px 20px 0;
+}
+
+.thoughts-tab {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid rgba(154, 217, 245, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #4a7186;
+  cursor: pointer;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.thoughts-tab:hover {
+  border-color: #67c2ee;
+  background: #f3fbff;
+}
+
+.thoughts-tab.active {
+  border-color: rgba(62, 169, 222, 0.55);
+  background: rgba(62, 169, 222, 0.14);
+  color: #1f7fab;
 }
 
 .thoughts-meta {

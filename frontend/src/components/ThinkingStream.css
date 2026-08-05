@@ -1,0 +1,370 @@
+/* Animated agent-thinking view. Sits inside .dashboard-thoughts-panel and
+   shares its pastel palette with Dashboard.css. */
+
+.thinking-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Per-phase accent color, applied to the status orb and section labels. */
+.phase-setup { --phase-color: #89a7b8; }
+.phase-orchestrating { --phase-color: #3ea9de; }
+.phase-executing { --phase-color: #2db55d; }
+.phase-verifying { --phase-color: #8a6fd8; }
+.phase-recovering { --phase-color: #d76542; }
+.phase-waiting { --phase-color: #d99a2b; }
+.phase-responding { --phase-color: #2bb5a0; }
+.phase-done { --phase-color: #2db55d; }
+
+/* ── Status line ─────────────────────────────────────────────────────── */
+
+.thinking-statusline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(154, 217, 245, 0.5);
+}
+
+.thinking-orb {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--phase-color, #89a7b8);
+}
+
+.thinking-orb.live {
+  animation: thinking-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(62, 169, 222, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(62, 169, 222, 0); }
+}
+
+.thinking-status-text {
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #4a7186;
+}
+
+.thinking-shimmer {
+  background: linear-gradient(
+    90deg,
+    #6e93a6 0%,
+    #6e93a6 35%,
+    #21a3e4 50%,
+    #6e93a6 65%,
+    #6e93a6 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinking-shimmer-sweep 2.4s linear infinite;
+}
+
+@keyframes thinking-shimmer-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -80% 0; }
+}
+
+.thinking-elapsed {
+  margin-left: auto;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary, #5a7b8d);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Feed ────────────────────────────────────────────────────────────── */
+
+.thinking-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 20px 20px;
+  mask-image: linear-gradient(180deg, transparent 0, #000 14px);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 14px);
+}
+
+.thinking-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.thinking-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(58, 178, 229, 0.26);
+}
+
+.thinking-item {
+  animation: thinking-item-in 0.35s ease both;
+}
+
+@keyframes thinking-item-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.thinking-view.static .thinking-item {
+  animation: none;
+}
+
+.thinking-word {
+  opacity: 0;
+  animation: thinking-word-in 0.5s ease both;
+}
+
+@keyframes thinking-word-in {
+  from { opacity: 0; filter: blur(2px); }
+  to { opacity: 1; filter: blur(0); }
+}
+
+/* ── Sections (phase transitions) ────────────────────────────────────── */
+
+.thinking-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.thinking-section:first-child {
+  margin-top: 0;
+}
+
+.thinking-section-label {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--phase-color, #3ea9de);
+  white-space: nowrap;
+}
+
+.thinking-section::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(154, 217, 245, 0.55);
+}
+
+/* ── Thoughts ────────────────────────────────────────────────────────── */
+
+.thinking-thought {
+  margin: 0;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: #3c6377;
+  word-break: break-word;
+}
+
+.thinking-thought.tone-success { color: #22814a; }
+.thinking-thought.tone-warn { color: #a2711d; }
+.thinking-thought.tone-error { color: #b3452e; }
+
+/* ── Plan checklist ──────────────────────────────────────────────────── */
+
+.thinking-plan {
+  list-style: none;
+  margin: 2px 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgba(154, 217, 245, 0.5);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.thinking-plan li {
+  display: flex;
+  gap: 8px;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #35576a;
+}
+
+.thinking-plan li.current {
+  color: #1f7fab;
+  font-weight: 600;
+}
+
+.thinking-plan-num {
+  flex: 0 0 auto;
+  min-width: 18px;
+  margin-top: 1px;
+  text-align: right;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.72rem;
+  color: #3ea9de;
+}
+
+.thinking-plan-text {
+  min-width: 0;
+}
+
+/* ── In-chat thinking block (transcript variant) ─────────────────────── */
+
+.thinking-chatblock {
+  border: 1px solid rgba(154, 217, 245, 0.5);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+}
+
+.thinking-chatblock-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.thinking-chatblock-header:hover {
+  background: rgba(103, 195, 239, 0.08);
+}
+
+.thinking-chatblock-header:focus {
+  outline: none;
+}
+
+.thinking-chatblock-header:focus-visible {
+  outline: 2px solid rgba(62, 169, 222, 0.55);
+  outline-offset: -2px;
+}
+
+.thinking-chatblock-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #4a7186;
+}
+
+.thinking-chevron {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-right: 2px solid #6f96aa;
+  border-bottom: 2px solid #6f96aa;
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease;
+}
+
+.thinking-chevron.open {
+  transform: rotate(45deg);
+}
+
+.thinking-chatblock-body {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 8px 14px 12px;
+  border-top: 1px dashed rgba(154, 217, 245, 0.55);
+}
+
+.thinking-chatblock-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.thinking-chatblock-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(58, 178, 229, 0.26);
+}
+
+.thinking-chatblock.static .thinking-item {
+  animation: none;
+}
+
+/* ── Live cursor, skeleton, empty state ──────────────────────────────── */
+
+.thinking-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  margin: -4px 0 0 2px;
+  border-radius: 2px;
+  background: var(--accent-strong, #3ea9de);
+  animation: thinking-blink 1.1s steps(1) infinite;
+}
+
+@keyframes thinking-blink {
+  50% { opacity: 0; }
+}
+
+.thinking-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px;
+}
+
+.thinking-skeleton-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(103, 195, 239, 0.14) 25%,
+    rgba(103, 195, 239, 0.34) 50%,
+    rgba(103, 195, 239, 0.14) 75%
+  );
+  background-size: 200% 100%;
+  animation: thinking-shimmer-sweep 1.6s linear infinite;
+}
+
+.thinking-empty {
+  margin: auto 0;
+  padding: 16px;
+  border: 1px dashed rgba(154, 217, 245, 0.5);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--text-secondary, #5a7b8d);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+/* ── Accessibility ───────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-item,
+  .thinking-word,
+  .thinking-orb.live,
+  .thinking-shimmer,
+  .thinking-skeleton-bar,
+  .thinking-cursor {
+    animation: none !important;
+  }
+
+  .thinking-word {
+    opacity: 1;
+  }
+
+  .thinking-shimmer {
+    color: #4a7186;
+    background: none;
+  }
+}

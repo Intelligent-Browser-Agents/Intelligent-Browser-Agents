@@ -34,7 +34,8 @@ Start the backend first, then open the URL Vite prints (usually
 ## Layout
 
 - `src/pages/` - `Login`, `Register`, `ForgotPassword`, `Dashboard`, `About`, each with a sibling CSS file.
-- `src/components/` - `ProtectedRoute` (route guard) and `UserCredentialsCard`.
+- `src/components/` - `ProtectedRoute` (route guard), `UserCredentialsCard`, and `ThinkingStream` (animated thinking views).
+- `src/lib/` - `api.js` (REST/WS helpers) and `thinking.js` (log-to-thought derivation).
 - `src/App.jsx` - route table.
 - `assets/` - agent icons and the HITL notification sound, imported directly by `Dashboard.jsx`.
 
@@ -50,6 +51,29 @@ types: `FRAME` (base64 JPEG browser frame), `STATUS`, `LOG`, `CLARIFICATION`
 
 There is currently no reconnect logic, no stop button, and no run persistence
 across a page refresh. Phases 6 and 7 of the improvement plan cover these.
+
+## Thinking view
+
+The run logs also drive an animated "thinking" surface, in the style of the
+ChatGPT / Claude thinking UIs. Everything is derived client-side from the
+existing `LOG`/`STATUS` messages; there is no dedicated backend channel.
+
+- `src/lib/thinking.js` parses raw log lines into a curated feed: `[NODE]:`
+  banners become phase sections, `[Decision]`/`[Executor]`/`[Verifier]`/
+  `[Fallback]`/`[Interaction]` entries become plain-English thoughts, plan
+  printouts become a checklist (reprints collapse into "Now on step N"), and
+  bookkeeping noise is dropped.
+- `src/components/ThinkingStream.jsx` renders two surfaces from that feed:
+  - `ThinkingChatBlock` - a collapsible block inside each chat run whose header
+    shows "Thinking…" while the agent reasons and "Executing: [task]" while it
+    acts, then collapses to "Thought for Xs" when the run ends;
+  - `ThinkingStream` (default export) - the full-height Thinking tab in the
+    right-hand panel, next to the raw Logs tab.
+- New thoughts fade in word by word; `prefers-reduced-motion` disables all of
+  the animation.
+
+The issue that introduced this is
+[docs/issues/thinking-stream-ui.md](../docs/issues/thinking-stream-ui.md).
 
 ## Known gaps
 
