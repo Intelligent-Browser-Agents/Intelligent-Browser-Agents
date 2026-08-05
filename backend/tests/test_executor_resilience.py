@@ -518,7 +518,9 @@ def test_dom_cache_context_prefers_diff_summary_when_two_snapshots_exist():
 def test_dom_snapshot_budget_for_listing_tasks_is_moderate_and_bounded():
     budget = Executor._dom_snapshot_budget("Select a hotel from the booking results listing.")
 
-    assert budget == 5000
+    # Phase 3 removed the site-specific listing heuristic so section numbers are
+    # stable across every page shape, not special-cased for one travel DOM.
+    assert budget == 3500
 
 
 def test_recovery_screenshot_capture_gate_requires_retry_or_high_signal_error():

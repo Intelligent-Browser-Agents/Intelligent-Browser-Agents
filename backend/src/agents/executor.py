@@ -20,8 +20,9 @@ from schema import ExecutionResult, LastExecutionEvent
 from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt, get_execution_tools_prompt
+from autonomy import assess_action
 from dom_extraction import dom_extractor
-from dom_extraction.snapshot import SNAPSHOT_LINE, capture_page_snapshot
+from dom_extraction.snapshot import SNAPSHOT_SECTION_MAX_CHARS, capture_page_snapshot
 
 
 # Wall-clock ceilings for a single executor step. Both paths that can block are
@@ -52,6 +53,7 @@ class Executor:
         message: str,
         error_type: str | None,
         extracted_content_present: bool = False,
+        verified: bool | None = None,
     ) -> dict:
         """Single source of truth for schema.LastExecutionEvent in state."""
         args_dict: dict = {}
@@ -70,45 +72,8 @@ class Executor:
             error_type=error_type,
             message=message or "",
             extracted_content_present=extracted_content_present,
+            verified=verified,
         ).model_dump()
-
-    _SENSITIVE_TARGET_TOKENS = (
-        "buy",
-        "purchase",
-        "place order",
-        "checkout",
-        "pay",
-        "payment",
-        "transfer",
-        "wire",
-        "delete",
-        "remove",
-        "cancel subscription",
-        "authorize",
-        "approve",
-        "confirm",
-        "submit",
-    )
-
-    _SENSITIVE_TASK_TOKENS = (
-        "buy",
-        "purchase",
-        "checkout",
-        "payment",
-        "pay",
-        "transfer",
-        "wire",
-        "delete",
-        "remove",
-        "close account",
-        "cancel subscription",
-        "submit application",
-        "final submission",
-        "send the email",
-        "send email",
-        "authorize",
-        "approve",
-    )
 
     _RECOVERY_SCREENSHOT_MAX_BYTES = 220_000
     _RECOVERY_SCREENSHOT_MAX_DATA_URL_CHARS = 420_000
@@ -137,7 +102,6 @@ class Executor:
         credentials_block = self._build_credentials_context(state, current_task, current_url)
         recent_actions_block = self._build_recent_actions(state)
         adaptive_guidance_block = self._build_adaptive_guidance(state, current_task)
-        compose_checklist_block = self._build_compose_checklist(state, current_task)
         dom_cache_block = (
             self._build_dom_cache_context(state)
             if self._should_include_dom_cache_context(state, current_task)
@@ -164,7 +128,6 @@ class Executor:
         {credentials_block}
         {recent_actions_block}
         {adaptive_guidance_block}
-        {compose_checklist_block}
         {status_context_block}
 
         Use exactly one of the available tools to perform this plan step. If the step names a specific site/domain, navigate there directly instead of going through a search engine first. For open-web discovery when no target site is known, prefer duckduckgo.com or bing.com over google.com unless explicitly required.
@@ -251,49 +214,22 @@ class Executor:
                         if expected_username and expected_password:
                             looks_emailish = "@" in args.get("text", "")
                             args["text"] = expected_username if looks_emailish else expected_password
-                args = self._prefer_compose_draft_text(state, current_task, args)
 
-            if (
-                self._is_email_compose_recipient_task(current_task)
-                and self._is_recipient_picker_focus_click(name, args)
-                and self._has_visible_inline_recipient_lane(dom_snapshot)
-            ):
+            missing_required = await self._required_empty_fields_before_finalization(
+                page,
+                state,
+                name,
+                args,
+            )
+            if missing_required:
                 return self._return_failure(
                     state,
                     current_url,
                     action=name,
                     args=args,
                     message=(
-                        "Inline recipient input is already visible; avoid opening To/contacts picker. "
-                        "Focus the editable recipient field and type the address directly."
-                    ),
-                    error_type="ambiguous_step",
-                )
-
-            if self._is_compose_finalization_action(name, args, current_task):
-                missing = self._missing_compose_fields(state)
-                if missing:
-                    return self._return_failure(
-                        state,
-                        current_url,
-                        action=name,
-                        args=args,
-                        message=(
-                            "Compose prerequisites not complete before finalization. "
-                            f"Missing fields: {', '.join(missing)}"
-                        ),
-                        error_type="ambiguous_step",
-                    )
-
-            if self._is_compose_wrong_lane_action(name, args, current_task, state):
-                return self._return_failure(
-                    state,
-                    current_url,
-                    action=name,
-                    args=args,
-                    message=(
-                        "Compose action targets recipient flow while current content objective "
-                        "still requires message body entry. Redirect to body-field interaction."
+                        "Cannot finalize yet. Required fields are still incomplete: "
+                        f"{', '.join(missing_required)}"
                     ),
                     error_type="ambiguous_step",
                 )
@@ -307,7 +243,13 @@ class Executor:
                 )
 
             consume_sensitive_approval = False
-            sensitive_reason = self._sensitive_action_reason(name, args, current_task)
+            decision = assess_action(
+                name,
+                args if isinstance(args, dict) else {},
+                policy=state.get("autonomy_policy"),
+                url=state.get("current_url"),
+            )
+            sensitive_reason = str(decision.get("reason") or "") if decision.get("mode") == "confirm" else None
             if sensitive_reason:
                 signature = self._action_signature(name, args)
                 if not self._is_sensitive_action_approved(state, signature):
@@ -436,12 +378,15 @@ class Executor:
                 "key": validated.args.key,
                 "seconds": validated.args.seconds,
             }
-            if validated.action == "type":
-                validated_args = self._prefer_compose_draft_text(state, current_task, validated_args)
-                validated.args.text = validated_args.get("text")
 
             consume_sensitive_approval = False
-            sensitive_reason = self._sensitive_action_reason(validated.action, validated_args, current_task)
+            decision = assess_action(
+                validated.action,
+                validated_args,
+                policy=state.get("autonomy_policy"),
+                url=state.get("current_url"),
+            )
+            sensitive_reason = str(decision.get("reason") or "") if decision.get("mode") == "confirm" else None
             if sensitive_reason:
                 signature = self._action_signature(validated.action, validated_args)
                 if not self._is_sensitive_action_approved(state, signature):
@@ -455,6 +400,26 @@ class Executor:
                         action_signature=signature,
                     )
                 consume_sensitive_approval = True
+
+            missing_required = await self._required_empty_fields_before_finalization(
+                page,
+                state,
+                validated.action,
+                validated_args,
+            )
+            if missing_required:
+                return self._return_failure(
+                    state,
+                    current_url,
+                    action=validated.action,
+                    args=validated_args,
+                    message=(
+                        "Cannot finalize yet. Required fields are still incomplete: "
+                        f"{', '.join(missing_required)}"
+                    ),
+                    error_type="ambiguous_step",
+                    clear_sensitive_approval=consume_sensitive_approval,
+                )
 
             result = await dispatch_action(page, tool_action)
             print(
@@ -608,31 +573,9 @@ class Executor:
 
     @classmethod
     def _sensitive_action_reason(cls, action: str | None, args: dict, current_task: str) -> str | None:
-        action_l = (action or "").strip().lower()
-        role = (args.get("role") or "").strip().lower() if isinstance(args, dict) else ""
-        name = (args.get("name") or "").strip().lower() if isinstance(args, dict) else ""
-        key = (args.get("key") or "").strip().lower() if isinstance(args, dict) else ""
-        task_l = (current_task or "").strip().lower()
-        combined = f"{task_l}\n{name}"
-
-        has_sensitive_task = any(tok in task_l for tok in cls._SENSITIVE_TASK_TOKENS)
-        has_sensitive_target = any(tok in name for tok in cls._SENSITIVE_TARGET_TOKENS)
-        communication_send = (
-            "send" in name
-            and any(tok in task_l for tok in ("email", "mail", "message", "application"))
-        )
-
-        if action_l == "click" and role in {"button", "link", "menuitem", "tab"}:
-            if has_sensitive_task and has_sensitive_target:
-                return "This looks like a high-impact submit/confirm action"
-            if communication_send:
-                return "This sends user-authored content and may be irreversible"
-            if has_sensitive_task and any(tok in combined for tok in ("submit", "confirm", "approve", "authorize")):
-                return "This confirms a high-impact operation"
-
-        if action_l == "press_key" and key in {"enter", "return"} and has_sensitive_task:
-            return "Enter/Return may finalize a high-impact operation on this step"
-
+        decision = assess_action(action or "", args if isinstance(args, dict) else {}, policy=None, url=None)
+        if decision.get("mode") == "confirm":
+            return str(decision.get("reason") or "This action requires explicit confirmation")
         return None
 
     @staticmethod
@@ -778,22 +721,6 @@ class Executor:
         return normalized
 
     @staticmethod
-    def _is_email_compose_recipient_task(current_task: str) -> bool:
-        text = (current_task or "").lower()
-        return (
-            any(token in text for token in (
-                "compose",
-                "draft",
-                "new mail",
-                "recipient",
-                "to field",
-                "address the email to",
-                "addressed to",
-            ))
-            and any(token in text for token in ("email", "mail", "message", "@"))
-        )
-
-    @staticmethod
     def _is_finalization_task(current_task: str) -> bool:
         text = (current_task or "").lower()
         return any(token in text for token in (
@@ -837,225 +764,61 @@ class Executor:
         return any(token in text for token in allow_tokens)
 
     @staticmethod
-    def _is_compose_task(current_task: str) -> bool:
-        text = (current_task or "").lower()
-        return any(tok in text for tok in ("email", "mail", "draft", "compose", "recipient", "subject", "message"))
-
-    def _is_compose_finalization_action(self, action_name: str | None, args: dict, current_task: str) -> bool:
-        if action_name != "click" or not isinstance(args, dict):
-            return False
-        if not self._is_compose_task(current_task):
-            return False
-        name = (args.get("name") or "").strip().lower()
-        role = (args.get("role") or "").strip().lower()
-        finalization_names = ("send", "send now", "review", "continue", "finish")
-        return role in ("button", "menuitem", "tab") and any(n in name for n in finalization_names)
-
-    @staticmethod
-    def _missing_compose_fields(state: ProjectState) -> list[str]:
-        signals = state.get("status_signals") or {}
-        compose_fields = signals.get("compose_fields") or {}
-        required = ("recipient", "subject", "body")
-        return [key for key in required if not bool(compose_fields.get(key, False))]
-
-    def _build_compose_checklist(self, state: ProjectState, current_task: str) -> str:
-        if not self._is_compose_task(current_task):
-            return ""
-        signals = state.get("status_signals") or {}
-        compose_fields = signals.get("compose_fields") or {}
-        compose_draft = signals.get("compose_draft") or {}
-        recipient_done = bool(compose_fields.get("recipient", False))
-        subject_done = bool(compose_fields.get("subject", False))
-        body_done = bool(compose_fields.get("body", False))
-        draft_subject = (compose_draft.get("subject") or "").strip()
-        draft_body = (compose_draft.get("body") or "").strip()
-        draft_body_preview = draft_body[:140] + ("..." if len(draft_body) > 140 else "")
-        missing = [
-            name for name, done in (
-                ("recipient", recipient_done),
-                ("subject", subject_done),
-                ("body", body_done),
-            ) if not done
-        ]
-        next_required = missing[0] if missing else "none"
-        consistency_note = (
-            "If you type subject/body again, reuse the locked draft text exactly to keep email content consistent."
-            if draft_subject or draft_body
-            else "No locked draft text yet; once typed, keep it stable across retries."
-        )
-        gate_note = (
-            "Do not choose finalization actions (Send/Review/Continue) until all required compose fields are done."
-            if missing else
-            "All compose prerequisites appear complete; finalization actions are allowed if the current step asks for them."
-        )
-        return (
-            "\n\nCOMPOSE_FIELD_STATUS:\n"
-            f"- recipient: {'done' if recipient_done else 'pending'}\n"
-            f"- subject: {'done' if subject_done else 'pending'}\n"
-            f"- body: {'done' if body_done else 'pending'}\n"
-            f"- locked_subject: {draft_subject or 'none'}\n"
-            f"- locked_body_preview: {draft_body_preview or 'none'}\n"
-            f"- missing_fields: {', '.join(missing) if missing else 'none'}\n"
-            f"- next_required_field: {next_required}\n"
-            f"- consistency_rule: {consistency_note}\n"
-            f"- rule: {gate_note}"
-        )[:900]
-
-    def _prefer_compose_draft_text(self, state: ProjectState, current_task: str, args: dict) -> dict:
-        if not isinstance(args, dict):
-            return args
-        raw_text = args.get("text")
-        if not isinstance(raw_text, str) or not raw_text.strip():
-            return args
-        if not self._is_compose_task(current_task):
-            return args
-
-        signals = state.get("status_signals") or {}
-        compose_fields = signals.get("compose_fields") or {}
-        compose_draft = signals.get("compose_draft") or {}
-
-        subject_done = bool(compose_fields.get("subject", False))
-        body_done = bool(compose_fields.get("body", False))
-        draft_subject = (compose_draft.get("subject") or "").strip()
-        draft_body = (compose_draft.get("body") or "").strip()
-        typed = raw_text.strip()
-
-        if self._compose_content_required(current_task):
-            if not subject_done and draft_subject and self._is_materially_different_text(typed, draft_subject):
-                args["text"] = draft_subject
-                return args
-            if subject_done and not body_done and draft_body and self._is_materially_different_text(typed, draft_body):
-                args["text"] = draft_body
-                return args
-
-        if self._is_finalization_task(current_task) and draft_body and self._is_materially_different_text(typed, draft_body):
-            args["text"] = draft_body
-            return args
-
-        return args
-
-    @staticmethod
-    def _is_materially_different_text(left: str, right: str) -> bool:
-        def _normalize(value: str) -> str:
-            text = re.sub(r"\s+", " ", (value or "").strip().lower())
-            text = re.sub(r"[^a-z0-9 ]+", "", text)
-            return text
-
-        a = _normalize(left)
-        b = _normalize(right)
-        if not a or not b:
-            return False
-        if a == b:
-            return False
-        if a in b or b in a:
-            return False
-        return True
-
-    @staticmethod
-    def _compose_content_required(current_task: str) -> bool:
-        task = (current_task or "").lower()
-        return any(tok in task for tok in ("subject", "message", "body", "content"))
-
-    @staticmethod
-    def _is_recipient_lane_target(action_name: str | None, args: dict) -> bool:
+    def _is_finalization_action(action_name: str | None, args: dict) -> bool:
         if not isinstance(args, dict):
             return False
-        role = (args.get("role") or "").strip().lower()
-        name = (args.get("name") or "").strip().lower()
-        text = (args.get("text") or "").strip().lower()
-
-        recipient_tokens = (
-            "to",
-            "recipient",
-            "recipients",
-            "search my contacts",
-            "search for email",
-            "address book",
-            "add recipients",
-            "people",
-        )
-        if action_name == "click" and any(tok in name for tok in recipient_tokens):
-            return True
-        if action_name == "click" and role in {"searchbox", "combobox"}:
-            return True
-        if action_name == "type" and "@" in text:
-            return True
-        return False
-
-    def _is_compose_wrong_lane_action(self, action_name: str | None, args: dict, current_task: str, state: ProjectState) -> bool:
-        if not self._is_compose_task(current_task):
-            return False
-        if not self._compose_content_required(current_task):
-            return False
-
-        missing = self._missing_compose_fields(state)
-        missing_set = set(missing)
-        body_pending = "body" in missing_set
-        recipient_pending = "recipient" in missing_set
-
-        if not body_pending or recipient_pending:
-            return False
-        return self._is_recipient_lane_target(action_name, args)
-
-    @staticmethod
-    def _is_recipient_picker_focus_click(action_name: str | None, args: dict) -> bool:
-        if action_name != "click" or not isinstance(args, dict):
-            return False
-        role = (args.get("role") or "").strip().lower()
-        name = (args.get("name") or "").strip().lower()
-        if not role and not name:
-            return False
-
-        picker_tokens = (
-            "to",
-            "recipient",
-            "add recipients",
-            "people",
-            "address book",
-            "contacts",
-            "directory",
-            "search my contacts",
-        )
-        if role in {"button", "link", "tab", "menuitem"} and any(tok in name for tok in picker_tokens):
-            return True
-        if role in {"searchbox", "combobox"} and any(tok in name for tok in ("contacts", "directory", "address book", "search my contacts")):
-            return True
+        action_name = (action_name or "").strip().lower()
+        if action_name == "click":
+            role = (args.get("role") or "").strip().lower()
+            return role in {"button", "menuitem", "tab", "link"}
+        if action_name == "press_key":
+            key = (args.get("key") or "").strip().lower()
+            return key in {"enter", "return"}
         return False
 
     @staticmethod
-    def _has_visible_inline_recipient_lane(dom_snapshot: str) -> bool:
-        if not dom_snapshot:
-            return False
-        recipient_tokens = (
-            "to",
-            "recipient",
-            "add recipients",
-            "search for email",
-            "email address",
-        )
-        for raw in (dom_snapshot or "").splitlines():
-            m = SNAPSHOT_LINE.search(raw.strip().lower())
-            if not m:
+    def _missing_required_field_names(form_report: str) -> list[str]:
+        names: list[str] = []
+        seen: set[str] = set()
+        for raw in (form_report or "").splitlines():
+            line = raw.strip()
+            if "required" not in line:
                 continue
-            role = (m.group("role") or "").strip().lower()
-            name = (m.group("name") or "").strip().lower()
-            if role in {"textbox", "combobox"} and any(tok in name for tok in recipient_tokens):
-                return True
-        return False
+            if not any(token in line for token in (": empty", ": no file", ": unchecked")):
+                continue
+            match = re.search(r'"([^"]+)"', line)
+            if not match:
+                continue
+            name = match.group(1).strip()
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+        return names
+
+    async def _required_empty_fields_before_finalization(
+        self,
+        page,
+        state: ProjectState,
+        action_name: str | None,
+        args: dict,
+    ) -> list[str]:
+        if (state.get("step_intent") or "").strip().lower() != "finalize":
+            return []
+        if not self._is_finalization_action(action_name, args):
+            return []
+        try:
+            from execution.actions import do_read_form
+
+            result = await do_read_form(page)
+        except Exception:
+            return []
+        if getattr(result, "status", "failure") != "success":
+            return []
+        return self._missing_required_field_names(getattr(result, "extracted_text", "") or "")
 
     @staticmethod
     def _dom_snapshot_budget(current_task: str) -> int:
-        task = (current_task or "").lower()
-        listing_tokens = (
-            "result", "results", "listing", "listings", "hotel", "property", "room", "booking", "show prices",
-        )
-        data_entry_tokens = (
-            "compose", "draft", "recipient", "subject", "message", "body",
-            "fill", "form", "login", "sign in", "password", "username",
-        )
-        if any(tok in task for tok in listing_tokens):
-            return 5000
-        return 5200 if any(tok in task for tok in data_entry_tokens) else 3500
+        return SNAPSHOT_SECTION_MAX_CHARS
 
     @staticmethod
     def _split_dom_cache_snapshot(snapshot: str) -> tuple[str, list[str]]:
@@ -1116,7 +879,7 @@ class Executor:
     def _is_data_entry_task(current_task: str) -> bool:
         text = (current_task or "").lower()
         return bool(re.search(
-            r"\b(fill|enter|type|write|input|provide|set|update|complete|compose|draft|"
+            r"\b(fill|enter|type|write|input|provide|set|update|complete|"
             r"log\s*in|sign\s*in|authenticate|credentials?)\b",
             text,
         ))
@@ -1170,7 +933,7 @@ class Executor:
         controls: list[tuple[str, str]] = []
         seen = set()
         for line in (dom_snapshot or "").splitlines():
-            m = SNAPSHOT_LINE.search(line.strip())
+            m = re.search(r'\[role="(?P<role>[^"]+)"\]\s+"(?P<name>[^"]+)"', line.strip())
             if not m:
                 continue
             role = (m.group("role") or "").strip().lower()
@@ -1266,14 +1029,17 @@ class Executor:
             new_url = page.url
         after_state = ""
         try:
-            after_state = await self._get_real_dom_snapshot(page, max_chars=2200)
+            after_state = await self._get_real_dom_snapshot(page, max_chars=SNAPSHOT_SECTION_MAX_CHARS)
         except Exception:
             after_state = f"[URL after action: {new_url}]"
 
         # For extract_content, show the extracted text to the verifier
         extracted = getattr(result, "extracted_text", None)
         if extracted and result.action == "extract_content":
-            after_state = f"EXTRACTED_TEXT:\n{extracted.strip()[:2200]}\n\nDOM_SNAPSHOT:\n{after_state}"
+            after_state = (
+                f"EXTRACTED_TEXT:\n{extracted.strip()[:SNAPSHOT_SECTION_MAX_CHARS]}\n\n"
+                f"DOM_SNAPSHOT:\n{after_state}"
+            )
 
         execution_log = self._build_execution_log(
             action=result.action,
@@ -1297,7 +1063,9 @@ class Executor:
                 message=result_message,
                 error_type=result_error_type,
                 extracted_content_present=extracted_present,
+                verified=result.verified,
             ),
+            "last_page_snapshot": after_state,
         }
         if extracted and isinstance(extracted, str) and extracted.strip():
             out["extracted_content"] = [extracted.strip()]
@@ -1778,15 +1546,6 @@ class Executor:
             f"- login_phase: {login_phase}",
             f"- blocking_issue: {blocking_issue or 'none'}",
         ]
-
-        if self._is_compose_task(current_task):
-            compose_fields = signals.get("compose_fields") or {}
-            lines.extend([
-                "- compose_fields:",
-                f"  - recipient: {'done' if compose_fields.get('recipient') else 'pending'}",
-                f"  - subject: {'done' if compose_fields.get('subject') else 'pending'}",
-                f"  - body: {'done' if compose_fields.get('body') else 'pending'}",
-            ])
 
         # Include mission status only when retries/blockers suggest it is needed.
         if step_attempts >= 2 or blocking_issue:

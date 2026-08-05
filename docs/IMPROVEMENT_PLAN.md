@@ -428,6 +428,28 @@ Deliberate deviations from the item list below:
 
 ## Phase 4: fix the agentic control loop
 
+**Status: complete.** Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Planner page context | fabricated `_get_simulated_page_context` | **real Phase 3 snapshot** |
+| Goal storage | clarified goal logged then discarded | **stored once as `mission_goal` and reused everywhere** |
+| Plan mutation | recovery decorated step text while `current_plan` stayed frozen | **fallback rewrites `current_plan` and can replan** |
+| Work queue | bulk tasks had no outer-loop representation | **planner can emit `work_items`; orchestrator advances them deterministically** |
+| Verifier evidence | AFTER_STATE stripped into logs | **post-action snapshot stored in `last_page_snapshot` and `verified` forwarded structurally** |
+| Completion logic | verifier special-cased compose, mailbox, and finalization keywords | **structural evidence only** |
+| Safety gate | sensitive actions gated by token lists | **autonomy policy** |
+| Executor form gate | email-specific executor gate blocked job-application Continue / Review / Send / Finish | **deleted; finalization now only blocks on observable required empty fields** |
+| Progress tracking | two competing field trackers, one compose-shaped | **one field-progress tracker fed by `read_form()` and verified field writes** |
+| HITL resume | interaction re-ran before interrupts and consumed replies by call order | **memoized interaction output with correlation ids** |
+| Run identity and persistence | fixed thread id and in-memory checkpoints | **per-run UUID, sqlite checkpoint support, resumable state contract** |
+
+The executor was the last of the three files to be cleaned.
+
+`verifier.py` and `status_tracker.py` had already lost the compose-specific branches.
+
+`executor.py` now matches them.
+
 1. **Give the planner the real page.** Delete `_get_simulated_page_context` and pass the Phase 3 snapshot.
 2. **Store the clarified goal.** `plan.goal` is currently written into a log line and thrown away. Put it in state as `mission_goal` and use it as `MAIN_GOAL` everywhere. Strip the `USER REQUEST: ` prefix once at the source in `app.py` rather than in one agent out of four.
 3. **Make the plan mutable.** Implement `revise_step`, `insert_step_before`, and a `replan` path that actually write `current_plan`. Today `FallbackStrategy.update_type` promises `insert_step_before` in both the schema and the prompt, and the code merely decorates `current_task` with a `[Then continue objective: ...]` marker.

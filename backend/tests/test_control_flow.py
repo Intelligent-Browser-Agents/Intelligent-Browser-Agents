@@ -4,20 +4,10 @@ from agents.orchestrator import Orchestrator
 from agents.verifier import Verifier
 from agents.executor import Executor
 from agents.interaction import InteractionAgent
+from execution.models import ExecutionOutput
+from schema import OrchestratorPlan
 import state as state_reducers
 import status_tracker as tracker
-
-
-# Marks assertions on the email-compose keyword classifiers. These encode the
-# correct behaviour (a subject/body task is not a recipient task; "write an email"
-# should not count "email" as a field to fill), but the current keyword matching
-# gets it wrong. The classifiers are removed in Phase 2/4 of
-# docs/IMPROVEMENT_PLAN.md; strict xfail flips to a failure once that lands, which
-# is the reminder to delete the marker.
-compose_keyword_bug = pytest.mark.xfail(
-    reason="over-broad compose keyword match; classifier removed in Phase 2/4 of docs/IMPROVEMENT_PLAN.md",
-    strict=True,
-)
 
 
 @pytest.mark.llm
@@ -363,6 +353,63 @@ def test_orchestrator_work_queue_finishes_mission_after_last_item():
     assert out["item_results"][0]["status"] == "completed"
 
 
+def test_orchestrator_create_plan_populates_work_items_from_bulk_request():
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator.planning_prompt = "test"
+
+    class _Planner:
+        def invoke(self, _messages):
+            return type("Plan", (), {
+                "needs_clarification": False,
+                "clarifying_questions": [],
+                "goal": "Apply to three job postings",
+                "steps": [
+                    "Open the application page.",
+                    "Fill the application form.",
+                    "Submit the application.",
+                ],
+                "work_items": [
+                    {"description": "Apply to Acme", "url": "https://jobs.example.com/acme"},
+                    {"description": "Apply to Bravo", "url": "https://jobs.example.com/bravo"},
+                    {"description": "Apply to Charlie", "url": "https://jobs.example.com/charlie"},
+                ],
+            })()
+
+    orchestrator.planner = _Planner()
+    state = {
+        "messages": [{
+            "role": "user",
+            "content": (
+                "apply to these 3 job postings: "
+                "https://jobs.example.com/acme, "
+                "https://jobs.example.com/bravo, "
+                "https://jobs.example.com/charlie"
+            ),
+        }],
+        "current_url": "about:blank",
+        "number_of_transactions": 0,
+        "dom_cache": [],
+        "last_page_snapshot": "",
+    }
+
+    out = orchestrator._create_plan("apply to these 3 job postings", state)
+
+    assert len(out["work_items"]) == 3
+    assert out["current_item_index"] == 0
+    assert out["work_items"][0]["url"] == "https://jobs.example.com/acme"
+    assert out["current_task"] == "Open the application page."
+
+
+def test_orchestrator_plan_schema_uses_typed_work_items_not_freeform_dicts():
+    schema = OrchestratorPlan.model_json_schema()
+    work_items = schema["properties"]["work_items"]
+    item_ref = work_items["items"]["$ref"]
+    assert item_ref == "#/$defs/WorkItem"
+    item_schema = schema["$defs"]["WorkItem"]
+    assert item_schema["properties"]["description"]["type"] == "string"
+    assert item_schema["properties"]["url"]["anyOf"][0]["type"] == "string"
+
+
 def test_executor_anti_bot_ignores_oauth_pkce_challenge_params():
     executor = Executor.__new__(Executor)
     microsoft_oauth_url = (
@@ -383,127 +430,95 @@ def test_executor_anti_bot_detects_google_sorry_page():
     assert executor._is_anti_bot_page(google_sorry_url) is True
 
 
-def test_executor_detects_compose_recipient_task_from_address_phrase():
-    assert Executor._is_email_compose_recipient_task(
-        "Address the email to inesculent@gmail.com."
-    ) is True
-
-
-@compose_keyword_bug
-def test_executor_detects_non_recipient_compose_content_task():
-    assert Executor._is_email_compose_recipient_task(
-        "Draft an appropriate subject line and email message content."
-    ) is False
-
-
-def test_executor_allows_save_click_during_recipient_step_after_dehardcoding():
+def test_executor_allows_save_click_during_data_entry_step():
     executor = Executor.__new__(Executor)
     normalized = executor._normalize_tool_args(
         "click",
         {"role": "button", "name": "Save"},
-        "Address the email to inesculent@gmail.com.",
+        "Save the job application draft.",
     )
     assert normalized == {"role": "button", "name": "Save"}
 
 
-def test_executor_detects_compose_finalization_click_for_send_button():
+def test_executor_missing_required_field_names_parses_generic_form_report():
     executor = Executor.__new__(Executor)
-
-    assert executor._is_compose_finalization_action(
-        "click",
-        {"role": "button", "name": "Send"},
-        "Draft an appropriate subject line and email message content.",
-    ) is True
-
-
-def test_executor_does_not_treat_non_compose_click_as_finalization():
-    executor = Executor.__new__(Executor)
-
-    assert executor._is_compose_finalization_action(
-        "click",
-        {"role": "button", "name": "Send"},
-        "Search for housing options.",
-    ) is False
-
-
-def test_executor_missing_compose_fields_reports_unfilled_required_fields():
-    state = {
-        "status_signals": {
-            "compose_fields": {
-                "recipient": True,
-                "subject": False,
-                "body": False,
-            }
-        }
-    }
-
-    assert Executor._missing_compose_fields(state) == ["subject", "body"]
-
-
-def test_executor_marks_recipient_lane_as_wrong_during_content_step_when_body_pending():
-    executor = Executor.__new__(Executor)
-    state = {
-        "status_signals": {
-            "compose_fields": {
-                "recipient": True,
-                "subject": True,
-                "body": False,
-            }
-        }
-    }
-
-    assert executor._is_compose_wrong_lane_action(
-        "click",
-        {"role": "button", "name": "To"},
-        "Draft an appropriate subject line and email content about a cool fact about an animal.",
-        state,
-    ) is True
-
-
-def test_executor_allows_recipient_lane_when_recipient_still_pending():
-    executor = Executor.__new__(Executor)
-    state = {
-        "status_signals": {
-            "compose_fields": {
-                "recipient": False,
-                "subject": False,
-                "body": False,
-            }
-        }
-    }
-
-    assert executor._is_compose_wrong_lane_action(
-        "click",
-        {"role": "button", "name": "To"},
-        "Fill in the recipient as inesculent@gmail.com.",
-        state,
-    ) is False
-
-
-def test_executor_detects_recipient_picker_focus_click_controls():
-    assert Executor._is_recipient_picker_focus_click(
-        "click", {"role": "button", "name": "To"}
-    ) is True
-    assert Executor._is_recipient_picker_focus_click(
-        "click", {"role": "searchbox", "name": "Search my contacts"}
-    ) is True
-    assert Executor._is_recipient_picker_focus_click(
-        "click", {"role": "textbox", "name": "To"}
-    ) is False
-
-
-def test_executor_detects_visible_inline_recipient_lane_from_dom_snapshot():
-    dom = "\n".join([
-        '[role="textbox"] "To"',
-        '[role="textbox"] "Subject"',
+    report = "\n".join([
+        '6 field(s), 3 still empty.',
+        '- text "Full name": filled (12 chars) [required]',
+        '- email "Email": empty [required]',
+        '- textarea "Message to hiring manager": empty',
+        '- file "Resume": no file [required]',
+        '- checkbox "I accept the terms": unchecked [required]',
     ])
-    assert Executor._has_visible_inline_recipient_lane(dom) is True
 
-    dom_no_lane = "\n".join([
-        '[role="button"] "To"',
-        '[role="button"] "Add recipients"',
-    ])
-    assert Executor._has_visible_inline_recipient_lane(dom_no_lane) is False
+    assert executor._missing_required_field_names(report) == [
+        "Email",
+        "Resume",
+        "I accept the terms",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_executor_does_not_block_continue_review_send_finish_for_job_message_step(monkeypatch):
+    """Regression for the August 3, 2026 reproduction where a job-application
+    step mentioning a message field caused Continue, Review, Send, and Finish
+    to deadlock behind the deleted email-specific gate."""
+    executor = Executor.__new__(Executor)
+    page = object()
+    state = {
+        "step_intent": "interact",
+        "current_task": "Enter your message to the hiring manager, then continue",
+    }
+
+    class _ReadFormResult:
+        status = "success"
+        extracted_text = '3 field(s), 0 still empty.\n- textarea "Message to hiring manager": empty'
+
+    async def fake_read_form(_page):
+        return _ReadFormResult()
+
+    monkeypatch.setattr("execution.actions.do_read_form", fake_read_form)
+
+    for name in ("Continue", "Review", "Send", "Finish"):
+        blocked = await executor._required_empty_fields_before_finalization(
+            page,
+            state,
+            "click",
+            {"role": "button", "name": name},
+        )
+        assert blocked == []
+
+
+@pytest.mark.asyncio
+async def test_executor_blocks_finalize_when_required_fields_are_empty(monkeypatch):
+    executor = Executor.__new__(Executor)
+    page = object()
+    state = {
+        "step_intent": "finalize",
+        "current_task": "Submit the job application.",
+    }
+
+    class _ReadFormResult:
+        status = "success"
+        extracted_text = "\n".join([
+            "4 field(s), 2 still empty.",
+            '- email "Email": empty [required]',
+            '- file "Resume": no file [required]',
+            '- text "Full name": filled (11 chars) [required]',
+        ])
+
+    async def fake_read_form(_page):
+        return _ReadFormResult()
+
+    monkeypatch.setattr("execution.actions.do_read_form", fake_read_form)
+
+    blocked = await executor._required_empty_fields_before_finalization(
+        page,
+        state,
+        "click",
+        {"role": "button", "name": "Submit application"},
+    )
+    assert blocked == ["Email", "Resume"]
 
 
 def test_executor_sensitive_action_reason_for_send_click():
@@ -524,6 +539,24 @@ def test_executor_sensitive_action_reason_skips_non_sensitive_click():
     assert reason is None
 
 
+def test_executor_sensitive_action_reason_uses_autonomy_policy_not_submit_token():
+    reason = Executor._sensitive_action_reason(
+        "click",
+        {"role": "button", "name": "Continue"},
+        "Submit the job application.",
+    )
+    assert reason is None
+
+
+def test_executor_sensitive_action_reason_uses_autonomy_policy_for_submission_button():
+    reason = Executor._sensitive_action_reason(
+        "click",
+        {"role": "button", "name": "Submit application"},
+        "Continue with the application.",
+    )
+    assert isinstance(reason, str) and reason
+
+
 def test_executor_sensitive_action_approval_requires_exact_signature():
     approved_signature = Executor._action_signature("click", {"role": "button", "name": "Send"})
     other_signature = Executor._action_signature("click", {"role": "button", "name": "Submit"})
@@ -538,30 +571,50 @@ def test_executor_sensitive_action_approval_requires_exact_signature():
     assert Executor._is_sensitive_action_approved(state, other_signature) is False
 
 
-def test_executor_prefers_locked_compose_body_draft_text():
+@pytest.mark.asyncio
+async def test_executor_finish_from_result_publishes_snapshot_and_verified_flag(monkeypatch):
     executor = Executor.__new__(Executor)
-    state = {
-        "status_signals": {
-            "compose_fields": {
-                "recipient": True,
-                "subject": True,
-                "body": False,
-            },
-            "compose_draft": {
-                "subject": "Cool cat fact",
-                "body": "Cats sleep for around 12 to 16 hours each day.",
-            },
-        }
-    }
-    args = {"text": "Octopuses have three hearts and blue blood."}
+    executor.runtime = {}
+    executor._secret_values = ()
 
-    adjusted = executor._prefer_compose_draft_text(
-        state,
-        "Draft an appropriate subject line and email content about a cool fact about an animal.",
-        args,
+    async def fake_snapshot(_page, max_chars=0, section=1):
+        return f"[snapshot max={max_chars} section={section}]"
+
+    monkeypatch.setattr(executor, "_get_real_dom_snapshot", fake_snapshot)
+    monkeypatch.setattr(executor, "_is_anti_bot_page", lambda _url: False)
+    monkeypatch.setattr(executor, "_should_capture_recovery_screenshot", lambda **_kwargs: False)
+    monkeypatch.setattr(executor, "_build_execution_log", lambda **kwargs: f"log:{kwargs['status']}")
+
+    class _DomExtractor:
+        @staticmethod
+        async def get_page_text(_page, max_chars=3500):
+            return "Visible text"
+
+    monkeypatch.setattr("agents.executor.dom_extractor", _DomExtractor)
+
+    page = type("Page", (), {
+        "url": "https://jobs.example.com/apply",
+        "context": type("Context", (), {"pages": []})(),
+    })()
+    result = ExecutionOutput(
+        action="click",
+        args={"role": "button", "name": "Continue"},
+        status="success",
+        error_type="none",
+        message="Clicked Continue",
+        execution_time_ms=12,
+        verified=True,
     )
 
-    assert adjusted["text"] == "Cats sleep for around 12 to 16 hours each day."
+    out = await executor._finish_from_result(
+        state={"number_of_transactions": 4},
+        page=page,
+        current_url="https://jobs.example.com/apply",
+        result=result,
+    )
+
+    assert out["last_page_snapshot"] == "[snapshot max=3500 section=1]"
+    assert out["last_execution_event"]["verified"] is True
 
 
 def test_interaction_parses_sensitive_confirmation_yes_no_unclear():
