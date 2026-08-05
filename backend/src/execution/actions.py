@@ -26,6 +26,7 @@ from typing import Optional
 
 from playwright.async_api import Error as PlaywrightError, Page
 
+from dom_extraction.snapshot import SNAPSHOT_SECTION_MAX_CHARS
 from .models import ExecutionOutput
 from .targeting import (
     CHECKABLE_ROLES,
@@ -672,8 +673,8 @@ async def do_read_page(page: Page, section: int = 1) -> ExecutionOutput:
         return _fail("read_page", args, f"Could not snapshot the page: {str(exc).splitlines()[0]}", "unknown", start)
 
     wanted = max(1, int(section or 1))
-    total = snapshot.section_count(max_chars=4000)
-    body = snapshot.render(max_chars=4000, section=wanted)
+    total = snapshot.section_count(max_chars=SNAPSHOT_SECTION_MAX_CHARS)
+    body = snapshot.render(max_chars=SNAPSHOT_SECTION_MAX_CHARS, section=wanted)
     shown = min(wanted, total)
     message = f"Section {shown} of {total} ({len(snapshot.elements)} elements total)."
     if wanted > total:

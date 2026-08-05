@@ -58,6 +58,7 @@ _MAX_ELEMENTS = 400
 _MAX_OPTIONS_SHOWN = 8
 _MAX_LINE_CHARS = 240
 _ARIA_TIMEOUT_MS = 8000
+SNAPSHOT_SECTION_MAX_CHARS = 3500
 
 
 def unique_frames(page: Page) -> list[Frame]:
@@ -109,6 +110,30 @@ def _unescape(name: str) -> str:
     return re.sub(r'\\(.)', r'\1', name or "")
 
 
+def _unwrap_single_quoted_key(row: str) -> str:
+    """Undo YAML single-quote wrapping around a whole aria row key."""
+    if not row.startswith("- "):
+        return row
+    body = row[2:].lstrip()
+    padding = row[2:len(row) - len(body)]
+    if not body.startswith("'"):
+        return row
+
+    i = 1
+    inner: list[str] = []
+    while i < len(body):
+        char = body[i]
+        if char == "'":
+            if i + 1 < len(body) and body[i + 1] == "'":
+                inner.append("'")
+                i += 2
+                continue
+            return f"- {padding}{''.join(inner)}{body[i + 1:]}"
+        inner.append(char)
+        i += 1
+    return row
+
+
 def parse_aria_yaml(yaml_text: str) -> list[AriaNode]:
     """Parse aria_snapshot YAML into a node tree.
 
@@ -140,7 +165,7 @@ def parse_aria_yaml(yaml_text: str) -> list[AriaNode]:
         if stripped[1:].lstrip().startswith("/"):
             continue
 
-        match = _ARIA_ROW.match(stripped)
+        match = _ARIA_ROW.match(_unwrap_single_quoted_key(stripped))
         if not match:
             continue
 
@@ -446,10 +471,10 @@ class PageSnapshot:
             used += cost
         return sections
 
-    def section_count(self, max_chars: int = 3500) -> int:
+    def section_count(self, max_chars: int = SNAPSHOT_SECTION_MAX_CHARS) -> int:
         return max(1, len(self._sections(max_chars)))
 
-    def render(self, max_chars: int = 3500, section: int = 1) -> str:
+    def render(self, max_chars: int = SNAPSHOT_SECTION_MAX_CHARS, section: int = 1) -> str:
         """One section of the snapshot, honest about what it does not include.
 
         The previous pipeline truncated at `max_chars` in DOM order with a bare
@@ -492,6 +517,19 @@ class PageSnapshot:
 
 
 def _flatten_aria_nodes(nodes: list[AriaNode], out: list[PageElement], limit: int) -> None:
+    def collect_options(node: AriaNode, options: list[str]) -> str:
+        selected = ""
+        for child in node.children:
+            if child.role == "option" and child.name:
+                options.append(child.name)
+                if child.attrs.get("selected"):
+                    selected = child.name
+            else:
+                nested = collect_options(child, options)
+                if nested and not selected:
+                    selected = nested
+        return selected
+
     for node in nodes:
         if len(out) >= limit:
             return
@@ -507,11 +545,7 @@ def _flatten_aria_nodes(nodes: list[AriaNode], out: list[PageElement], limit: in
         options: list[str] = []
         selected = ""
         if role in {"combobox", "listbox"}:
-            for child in node.children:
-                if child.role == "option" and child.name:
-                    options.append(child.name)
-                    if child.attrs.get("selected"):
-                        selected = child.name
+            selected = collect_options(node, options)
 
         keep = bool(node.name) or role in UNNAMED_KEEP_ROLES
         if keep:

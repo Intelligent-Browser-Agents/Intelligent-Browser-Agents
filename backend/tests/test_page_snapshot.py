@@ -112,6 +112,20 @@ def test_parser_unescapes_quoted_names():
     assert nodes[0].name == 'Say "hello"'
 
 
+@pytest.mark.parametrize("name", [
+    "Step 2: Continue",
+    "Apt #",
+    "{City}",
+    "Use `preferred` name",
+])
+def test_parser_handles_single_quoted_yaml_keys(name):
+    yaml_text = f"- 'button \"{name}\"'"
+    nodes = parse_aria_yaml(yaml_text)
+    assert len(nodes) == 1
+    assert nodes[0].role == "button"
+    assert nodes[0].name == name
+
+
 def test_parser_is_safe_on_empty_input():
     assert parse_aria_yaml("") == []
     assert parse_aria_yaml(None) == []
@@ -138,6 +152,21 @@ def test_option_rows_are_folded_into_their_combobox():
     assert '[role="option"]' not in rendered
     country_line = next(l for l in rendered.splitlines() if '"Country"' in l)
     assert "Pick*" in country_line and "United States" in country_line
+
+
+def test_grouped_listbox_options_are_folded_into_the_listbox():
+    yaml_text = """
+- listbox "Locations":
+  - group "Popular cities":
+    - option "Orlando" [selected]
+    - option "Tampa"
+"""
+    rendered = _snapshot_from_yaml(yaml_text).render(max_chars=8000)
+    line = next(l for l in rendered.splitlines() if '"Locations"' in l)
+    assert "Orlando*" in line
+    assert "Tampa" in line
+    assert '[role="option"] "Orlando"' not in rendered
+    assert '[role="group"]' not in rendered
 
 
 def test_uninteresting_and_unnamed_rows_are_dropped_but_children_kept():
@@ -343,6 +372,7 @@ async def test_fixture_snapshot_meets_the_acceptance_criterion(page):
     assert '"Phone" [filled]' in rendered
     assert '"Requisition" [readonly] [filled]' in rendered
     assert '"Resume" [file input] [no file]' in rendered
+    assert '[role="textbox"] "Message to hiring manager"' in rendered
     assert '"I accept the terms" [unchecked]' in rendered
     assert '"Send me job alerts" [checked]' in rendered
     assert '"Authorized to work" [unchecked]' in rendered
@@ -435,6 +465,27 @@ async def test_read_page_action_serves_later_sections(page):
 
 
 @pytest.mark.browser
+async def test_read_page_uses_the_same_section_boundaries_the_snapshot_advertises(page):
+    from execution.actions import do_read_page
+
+    await page.goto(FIXTURE_URL)
+    await page.evaluate(
+        "() => { for (let i = 0; i < 120; i++) { const input = document.createElement('input');"
+        " input.type = 'text'; input.setAttribute('aria-label', 'Extra field ' + i);"
+        " document.body.appendChild(input); } }"
+    )
+
+    snapshot = await capture_page_snapshot(page)
+    advertised_first = snapshot.render(max_chars=3500, section=1)
+    advertised_second = snapshot.render(max_chars=3500, section=2)
+    action_second = await do_read_page(page, section=2)
+
+    assert action_second.status == "success"
+    assert advertised_first.endswith("read_page(section=2) to see them.]")
+    assert (action_second.extracted_text or "") == advertised_second
+
+
+@pytest.mark.browser
 async def test_read_form_sees_shadow_and_labelledby_fields(page):
     """read_form uses the same collector as the snapshot, so the inventory now
     covers the composed tree instead of stopping at shadow boundaries."""
@@ -444,4 +495,5 @@ async def test_read_form_sees_shadow_and_labelledby_fields(page):
     body = (await do_read_form(page)).extracted_text or ""
     assert "Referral code" in body
     assert "Expected salary" in body
+    assert "Message to hiring manager" in body
     assert "csrf" not in body.lower()
