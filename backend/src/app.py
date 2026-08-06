@@ -335,8 +335,13 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None, ru
             args=[f"--remote-debugging-port={video_port}"],
         )
         print(f"Browser launched on port {video_port}. Waiting for frontend connection...", flush=True)
-        context_kwargs = {"storage_state": storage_state_path} if has_saved_session else {}
+        # Explicit viewport: frame geometry and the live view's coordinate
+        # mapping must not depend on a Playwright default that happens to be
+        # 1280x720 today. The streaming relay reports the real size in a
+        # VIEWPORT message either way.
+        context_kwargs = {"viewport": {"width": 1280, "height": 720}}
         if has_saved_session:
+            context_kwargs["storage_state"] = storage_state_path
             print(f"Restoring saved browser session for {session_key}.", flush=True)
         context = await browser.new_context(**context_kwargs)
         page = await context.new_page()

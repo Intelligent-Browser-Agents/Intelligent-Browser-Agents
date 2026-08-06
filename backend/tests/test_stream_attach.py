@@ -1,14 +1,17 @@
-"""
-CDP attach tests for the live browser view.
+"""Live-view relay tests.
 
-The debugging port starts accepting connections as soon as Chromium boots, which
-is before `src/app.py` calls `new_context()` / `new_page()`. The server attached
-on the first successful TCP connect and did `browser.contexts[0].pages[0]`, which
-raised `IndexError: list index out of range` whenever it won that race, costing
-the run its live view.
+Two generations of bugs are pinned here.
 
-Separately, a failed port probe used to fall straight through to cleanup, which
-closed the WebSocket and terminated an otherwise healthy agent run.
+The original attach raced Chromium's boot: `browser.contexts[0].pages[0]`
+raised IndexError when the debugging port opened before the agent's page
+existed, and a failed port probe closed the WebSocket and killed a healthy run.
+
+The second generation was the Windows no-video bug: the server attached with
+Playwright, whose driver is a subprocess, and uvicorn under --reload on Windows
+runs a SelectorEventLoop that cannot spawn subprocesses. The live view died
+with NotImplementedError while the agent ran fine. The relay speaks raw CDP
+over a WebSocket instead, which must work on ANY event loop
+(docs/issues/phase-6-streaming.md).
 """
 
 import asyncio
@@ -17,6 +20,23 @@ import inspect
 import pytest
 
 import server
+from cdp_stream import ScreencastRelay
+
+
+class _Collector:
+    """Fake frontend socket: records binary frames and JSON messages."""
+
+    def __init__(self) -> None:
+        self.frames: list[bytes] = []
+        self.messages: list[dict] = []
+        self.first_frame = asyncio.Event()
+
+    async def send_bytes(self, data: bytes) -> None:
+        self.frames.append(data)
+        self.first_frame.set()
+
+    async def send_json(self, msg: dict) -> None:
+        self.messages.append(msg)
 
 
 async def _sleep_then(coro_factory, delay):
@@ -25,62 +45,101 @@ async def _sleep_then(coro_factory, delay):
 
 
 @pytest.mark.browser
-async def test_attach_waits_for_a_page_that_appears_late():
-    """Reproduces the original race: attach before the agent opens its page."""
+async def test_relay_streams_binary_frames_from_a_late_appearing_page():
+    """Reproduces the original race: the relay starts before the agent opens
+    its page, then must attach, announce VIEWPORT, and deliver binary JPEG."""
     from playwright.async_api import async_playwright
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True, args=["--remote-debugging-port=9231"]
         )
-        try:
-            async def open_page():
-                context = await browser.new_context()
-                return await context.new_page()
-
-            # The page only exists after 1.5s; the attach starts immediately.
-            late = asyncio.create_task(_sleep_then(open_page, 1.5))
-
-            attached_browser, context, page = await server.attach_to_agent_page(
-                p, 9231, timeout=20
-            )
-            await late
-
-            assert page is not None, "attach gave up before the agent's page appeared"
-            assert context is not None
-            # Proves the handle is usable, which is what the old IndexError prevented.
-            client = await context.new_cdp_session(page)
-            await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
-            await client.send("Page.stopScreencast")
-        finally:
-            await browser.close()
-
-
-@pytest.mark.browser
-async def test_attach_finds_a_page_that_already_exists():
-    from playwright.async_api import async_playwright
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True, args=["--remote-debugging-port=9232"]
+        collector = _Collector()
+        relay = ScreencastRelay(
+            port=9231,
+            send_bytes=collector.send_bytes,
+            send_json=collector.send_json,
         )
         try:
-            context = await browser.new_context()
-            await context.new_page()
-            _, ctx, page = await server.attach_to_agent_page(p, 9232, timeout=20)
-            assert page is not None
-            assert ctx is not None
+            async def open_page():
+                context = await browser.new_context(
+                    viewport={"width": 1280, "height": 720}
+                )
+                page = await context.new_page()
+                await page.goto("data:text/html,<h1>stream me</h1>")
+                return page
+
+            late = asyncio.create_task(_sleep_then(open_page, 1.5))
+
+            started = await relay.start(timeout=20)
+            assert started, "relay gave up before the agent's page appeared"
+            await late
+
+            await asyncio.wait_for(collector.first_frame.wait(), timeout=15)
+            # Binary JPEG, not base64-in-JSON: JPEG magic is FF D8.
+            assert collector.frames[0][:2] == b"\xff\xd8"
+            # The real geometry was announced before the first frame.
+            viewports = [m for m in collector.messages if m.get("type") == "VIEWPORT"]
+            assert viewports, "no VIEWPORT message before the first frame"
+            assert viewports[0]["width"] > 0 and viewports[0]["height"] > 0
+
+            # A STREAM, not a single frame. The first relay version deadlocked
+            # on its own screencast ack (sent from the read loop, awaiting a
+            # reply only that loop could deliver), which let exactly one frame
+            # through and stalled - a static page hid it. Drive repaints and
+            # require a sustained flow.
+            page = await late
+            for i in range(6):
+                await page.evaluate(f"document.body.textContent = 'repaint {i}'")
+                await asyncio.sleep(0.25)
+            deadline = asyncio.get_event_loop().time() + 10
+            while len(collector.frames) < 3 and asyncio.get_event_loop().time() < deadline:
+                await page.evaluate("document.body.textContent += '.'")
+                await asyncio.sleep(0.25)
+            assert len(collector.frames) >= 3, (
+                f"only {len(collector.frames)} frame(s) arrived; the stream stalled"
+            )
         finally:
+            await relay.close()
             await browser.close()
 
 
-async def test_attach_gives_up_cleanly_when_nothing_is_listening():
-    """Must return a None triple rather than raising, so the run survives."""
-    from playwright.async_api import async_playwright
+async def test_relay_gives_up_cleanly_when_nothing_is_listening():
+    """Must return False rather than raising, so the run survives."""
+    relay = ScreencastRelay(
+        port=9899,
+        send_bytes=lambda b: asyncio.sleep(0),
+        send_json=lambda m: asyncio.sleep(0),
+    )
+    assert await relay.start(timeout=1.0) is False
+    await relay.close()
 
-    async with async_playwright() as p:
-        result = await server.attach_to_agent_page(p, 9899, timeout=1.0)
-        assert result == (None, None, None)
+
+def test_regression_relay_works_on_a_selector_event_loop():
+    """The Windows bug: Playwright's attach needed asyncio subprocess support,
+    which SelectorEventLoop lacks on Windows, so the live view silently died
+    under `uvicorn --reload`. The raw-CDP relay must run on a selector loop
+    without NotImplementedError; giving up on a dead port is fine."""
+    loop = asyncio.SelectorEventLoop()
+    try:
+        relay = ScreencastRelay(
+            port=9898,
+            send_bytes=lambda b: asyncio.sleep(0),
+            send_json=lambda m: asyncio.sleep(0),
+        )
+        started = loop.run_until_complete(relay.start(timeout=0.6))
+        assert started is False
+        loop.run_until_complete(relay.close())
+    finally:
+        loop.close()
+
+
+def test_regression_server_does_not_import_playwright():
+    """The stream path must never again depend on spawning a subprocess.
+    Playwright in server.py is how the Windows no-video bug happened."""
+    source = inspect.getsource(server)
+    assert "async_playwright" not in source
+    assert "from playwright" not in source
 
 
 def test_regression_no_unguarded_index_into_contexts_or_pages():
@@ -88,24 +147,17 @@ def test_regression_no_unguarded_index_into_contexts_or_pages():
     source = inspect.getsource(server.stream_endpoint)
     assert "contexts[0]" not in source
     assert "pages[0]" not in source
-    assert "attach_to_agent_page" in source
+    assert "ScreencastRelay(" in source
 
 
-def test_regression_missing_debug_port_does_not_kill_the_run():
-    """A failed port probe used to close the socket and terminate the agent."""
+def test_regression_missing_live_view_does_not_kill_the_run():
+    """A failed attach used to close the socket and terminate the agent. The
+    no-live-view branch must keep waiting on the process instead."""
     source = inspect.getsource(server.stream_endpoint)
-    # The no-port branch must keep waiting on the process instead of falling through.
-    assert "Debug port" in source
-    branch = source.split("Debug port", 1)[1]
+    assert "No page target appeared" in source
+    branch = source.split("No page target appeared", 1)[1]
+    assert "Live browser view unavailable" in branch
     assert "_wait_for_process_or_disconnect" in branch
-
-
-def test_stream_view_unavailable_keeps_the_socket_open():
-    source = inspect.getsource(server.stream_endpoint)
-    assert "except StreamViewUnavailable:" in source
-    handler = source.split("except StreamViewUnavailable:", 1)[1]
-    # The agent keeps running; only the video is gone.
-    assert "_wait_for_process_or_disconnect" in handler.split("except NotImplementedError")[0]
 
 
 def test_stream_logs_why_it_ended():

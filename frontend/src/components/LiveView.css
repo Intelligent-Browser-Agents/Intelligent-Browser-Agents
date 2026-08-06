@@ -1,0 +1,43 @@
+.live-view {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.live-view-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  outline: none;
+  touch-action: none;
+}
+
+.live-view-running .live-view-canvas {
+  cursor: crosshair;
+}
+
+.live-view-captured .live-view-canvas {
+  box-shadow: 0 0 0 2px var(--accent, #4f8cff);
+}
+
+.live-view-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  background: rgba(10, 14, 24, 0.72);
+  color: rgba(240, 244, 255, 0.85);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.live-view:hover .live-view-hint,
+.live-view-captured .live-view-hint {
+  opacity: 1;
+}

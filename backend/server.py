@@ -15,8 +15,7 @@ as a command-line argument.
 
 # FastAPI framework, Requests for anything but GET
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-from playwright.async_api import async_playwright
-import socket
+from cdp_stream import ScreencastRelay
 
 # ForJWT Gen
 import jwt
@@ -894,74 +893,6 @@ async def delete_credentials(user_id: int = Depends(require_user)):
     return {"ok": True, "error": ""}
 
 
-async def wait_for_port(port: int, timeout: float = 10.0):
-    """Poll a loopback port until something accepts a connection."""
-    loop = asyncio.get_running_loop()
-    start_time = loop.time()
-    while loop.time() - start_time < timeout:
-        try:
-            probe = await loop.run_in_executor(
-                None, lambda: socket.create_connection(("127.0.0.1", port), timeout=0.5)
-            )
-            probe.close()
-            return True
-        except OSError:
-            # A bare `except:` here also swallowed KeyboardInterrupt and
-            # SystemExit, so the loop could not be cancelled during startup.
-            await asyncio.sleep(0.5)
-    return False
-
-
-class StreamViewUnavailable(RuntimeError):
-    """The agent's browser could not be attached for the live view.
-
-    The agent itself is unaffected and keeps running; only the video feed is lost.
-    """
-
-
-async def attach_to_agent_page(playwright, port: int, timeout: float = 20.0):
-    """Attach over CDP once the agent has actually opened its page.
-
-    The debugging port accepts connections as soon as Chromium boots, which is
-    before `src/app.py` calls `new_context()` / `new_page()`. Attaching on the
-    first successful TCP connect therefore raced the agent: Chromium reports one
-    context with zero pages, so `browser.contexts[0].pages[0]` raised
-    `IndexError: list index out of range` and the run lost its live view for the
-    rest of the session.
-
-    Retries until some context has a page.
-
-    Returns (browser, context, page), or (None, None, None) if it never appears.
-    """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    last_error = "no context with a page appeared"
-
-    while loop.time() < deadline:
-        browser = None
-        try:
-            browser = await playwright.chromium.connect_over_cdp(f"http://localhost:{port}")
-        except Exception as exc:
-            last_error = f"connect_over_cdp failed: {type(exc).__name__}"
-            await asyncio.sleep(0.25)
-            continue
-
-        for context in browser.contexts:
-            if context.pages:
-                return browser, context, context.pages[0]
-
-        # Connected, but the page does not exist yet. Drop this connection and
-        # retry rather than indexing into an empty list.
-        try:
-            await browser.close()
-        except Exception:
-            pass
-        await asyncio.sleep(0.25)
-
-    print(f"[STREAM] Could not attach to the agent browser on port {port}: {last_error}")
-    return None, None, None
-
-
 HITL_PREFIX = "@@HITL@@"
 
 import json as _json
@@ -1096,15 +1027,6 @@ async def hitl_reply(request: Request, user_id: int = Depends(require_user)):
     await queue.put({"content": user_input})
     return {"status": "ok"}
 
-async def _switch_to_new_page(new_page, start_screencast_fn):
-    """Wait for a popup/new-tab page to load, then switch screencast to it."""
-    try:
-        await new_page.wait_for_load_state("domcontentloaded", timeout=10000)
-        await start_screencast_fn(new_page)
-    except Exception as exc:
-        print(f"[screencast] Failed to switch to new tab: {exc}")
-
-
 @app.websocket("/ws/stream")
 async def stream_endpoint(websocket: WebSocket):
     """Run an agent task and stream logs, HITL prompts, and browser frames.
@@ -1216,57 +1138,16 @@ async def stream_endpoint(websocket: WebSocket):
     HITL_REPLY_QUEUES[user_id] = reply_queue
     HITL_ACCEPTING[user_id] = False
 
-    # Mutable ref so the listener can dispatch CDP input events once the
-    # session is established (set after browser connects).
-    cdp_session_ref = {"client": None}
+    # Mutable ref so the listener can dispatch input events once the relay is
+    # attached (set after the browser comes up). Input handling itself lives in
+    # cdp_stream.ScreencastRelay.
+    relay_ref = {"relay": None}
 
     async def _dispatch_cdp_input(msg: dict):
-        """Forward a browser input event from the frontend to the CDP session."""
-        client = cdp_session_ref.get("client")
-        if client is None:
-            return
-        try:
-            input_type = msg.get("inputType")  # "mouse" or "key"
-            if input_type == "mouse":
-                await client.send("Input.dispatchMouseEvent", {
-                    "type": msg.get("action", "mousePressed"),
-                    "x": msg.get("x", 0),
-                    "y": msg.get("y", 0),
-                    "button": msg.get("button", "left"),
-                    "clickCount": msg.get("clickCount", 1),
-                })
-            elif input_type == "key":
-                action = msg.get("action", "keyDown")
-                key = msg.get("key", "")
-                code = msg.get("code", "")
-                key_code = msg.get("keyCode", 0)
-                modifiers = msg.get("modifiers", 0)
-
-                params = {
-                    "type": action,
-                    "key": key,
-                    "code": code,
-                    "windowsVirtualKeyCode": key_code,
-                    "nativeVirtualKeyCode": key_code,
-                    "modifiers": modifiers,
-                }
-                if action == "char":
-                    params["text"] = msg.get("text", key)
-                    params["unmodifiedText"] = msg.get("unmodifiedText", key)
-                elif action in ("keyDown", "rawKeyDown"):
-                    params["text"] = msg.get("text", "")
-
-                await client.send("Input.dispatchKeyEvent", params)
-            elif input_type == "scroll":
-                await client.send("Input.dispatchMouseEvent", {
-                    "type": "mouseWheel",
-                    "x": msg.get("x", 0),
-                    "y": msg.get("y", 0),
-                    "deltaX": msg.get("deltaX", 0),
-                    "deltaY": msg.get("deltaY", 0),
-                })
-        except Exception as e:
-            print(f"[INPUT] CDP dispatch error: {e}")
+        """Forward a browser input event from the frontend to the live view."""
+        relay = relay_ref.get("relay")
+        if relay is not None:
+            await relay.dispatch_input(msg)
 
     # ── Listener: reads messages the frontend sends back through this WebSocket ──
     async def ws_reply_listener():
@@ -1418,49 +1299,34 @@ async def stream_endpoint(websocket: WebSocket):
     log_task = asyncio.create_task(log_consumer())
 
     try:
-        # 3. Wait for Browser
+        # 3. Attach to the agent's browser over raw CDP and stream it.
+        # No Playwright here: the driver subprocess it spawns cannot start
+        # under the SelectorEventLoop uvicorn uses on Windows with --reload,
+        # which is how the live view silently died on Windows while the agent
+        # kept running (docs/issues/phase-6-streaming.md).
         await websocket.send_json({"type": "STATUS", "content": "Warming up browser..."})
-        if await wait_for_port(port):
+        relay = ScreencastRelay(
+            port=port,
+            send_bytes=websocket.send_bytes,
+            send_json=websocket.send_json,
+        )
+        relay_ref["relay"] = relay
+
+        async def _drop_stream_on_send_failure():
+            await relay.send_failed.wait()
+            stream_disconnect_event.set()
+
+        send_failure_task = asyncio.create_task(_drop_stream_on_send_failure())
+        try:
+            started = False
             try:
-                async with async_playwright() as p:
-                    browser, context, page = await attach_to_agent_page(p, port)
-                    if page is None:
-                        raise StreamViewUnavailable()
-                    client = await context.new_cdp_session(page)
-                    cdp_session_ref["client"] = client
-
-                    async def on_frame(payload):
-                        cur_client = cdp_session_ref.get("client")
-                        try:
-                            await websocket.send_json({"type": "FRAME", "data": payload['data']})
-                            await cur_client.send("Page.screencastFrameAck", {"sessionId": payload['sessionId']})
-                        except Exception:
-                            stream_disconnect_event.set()
-
-                    async def start_screencast_on(target_page):
-                        """Switch screencast + CDP input to a new page."""
-                        old_client = cdp_session_ref.get("client")
-                        if old_client:
-                            try:
-                                await old_client.send("Page.stopScreencast")
-                            except Exception:
-                                pass
-                        new_client = await context.new_cdp_session(target_page)
-                        cdp_session_ref["client"] = new_client
-                        new_client.on("Page.screencastFrame", on_frame)
-                        await new_client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
-
-                    client.on("Page.screencastFrame", on_frame)
-                    await client.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
-
-                    context.on("page", lambda new_page: asyncio.ensure_future(
-                        _switch_to_new_page(new_page, start_screencast_on)
-                    ))
-
-                    await _wait_for_process_or_disconnect(process, stream_disconnect_event)
-            except StreamViewUnavailable:
-                # The agent is fine; only the live view failed. Keep the socket open
-                # so logs and HITL prompts still reach the user.
+                started = await relay.start()
+            except Exception as exc:
+                print(f"[STREAM] Live view attach failed: {type(exc).__name__}: {exc}")
+            if not started:
+                # The agent is fine; only the live view failed. Keep the socket
+                # open so logs and HITL prompts still reach the user.
+                print(f"[STREAM] No page target appeared on port {port}; continuing without the live view.")
                 try:
                     await websocket.send_json({
                         "type": "STATUS",
@@ -1468,33 +1334,11 @@ async def stream_endpoint(websocket: WebSocket):
                     })
                 except Exception:
                     pass
-                await _wait_for_process_or_disconnect(process, stream_disconnect_event)
-            except NotImplementedError:
-                await websocket.send_json({
-                    "type": "STATUS",
-                    "content": "Video streaming not available on this platform; continuing with logs only.",
-                })
-                await _wait_for_process_or_disconnect(process, stream_disconnect_event)
-            except Exception as exc:
-                print(f"[STREAM] Browser/screencast error: {exc}")
-                try:
-                    await websocket.send_json({
-                        "type": "STATUS",
-                        "content": "Browser video disconnected; agent still running.",
-                    })
-                except Exception:
-                    pass
-                await _wait_for_process_or_disconnect(process, stream_disconnect_event)
-        else:
-            # The debugging port never opened. Previously this fell straight through
-            # to cleanup, which closed the socket and killed a perfectly healthy
-            # agent run. Keep streaming logs and HITL prompts instead.
-            print(f"[STREAM] Debug port {port} never opened; continuing without the live view.")
-            await websocket.send_json({
-                "type": "STATUS",
-                "content": "Live browser view unavailable; the agent is still running.",
-            })
             await _wait_for_process_or_disconnect(process, stream_disconnect_event)
+        finally:
+            send_failure_task.cancel()
+            relay_ref["relay"] = None
+            await relay.close()
 
     finally:
         # 5. Cleanup

@@ -506,6 +506,32 @@ Notes against the item list below:
 
 The user called this out specifically, and it is also the most visible quality signal in the product.
 
+**Status: complete.** Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Windows live view under `uvicorn --reload` | zero frames ever; Playwright's driver subprocess cannot start on the SelectorEventLoop uvicorn uses with --reload on win32, and the NotImplementedError was swallowed into a one-line status | binary frames and VIEWPORT within seconds, verified on the machine and server invocation that failed |
+| Server attach mechanism | a Playwright driver process per run, loop-type dependent | raw CDP over a WebSocket client (`backend/cdp_stream.py`), works on any event loop |
+| Frame transport | base64 JPEG inside JSON text (~33% overhead + parse per frame) | binary WebSocket messages |
+| Screencast bounds | format and quality only | `maxWidth` / `maxHeight` / `everyNthFrame` explicit |
+| Slow client | every frame queued | newest frame wins; acks decoupled from client sends |
+| Page switch | old CDP session never detached | old connection closed on every re-attach; watcher follows new targets and survivors |
+| Frame geometry | hardcoded 1280x720 in the frontend, correct only because no viewport was set anywhere | `VIEWPORT` message from screencast metadata; explicit `viewport` in `new_context()` |
+| Per-frame rendering | data-URL string in React state; every frame re-rendered the whole Dashboard and re-ran the O(n) log reduce | canvas via `createImageBitmap`, frames held in refs; zero re-renders per frame |
+| Takeover | only during a HITL pause; keyboard capture swallowed Tab/F5/Escape with no release; `char` events sent a character code as the virtual key code | any time during a run; click captures, Escape releases; move, drag, hover, right-click, wheel, and modifiers all forwarded; coordinates clamped on both ends |
+| Post-run evidence | live frame nulled on close, panel hidden | the last frame stays on the canvas |
+| Stream diagnostics | none | `STREAM_STATS` every 5s (frames received/sent, acks, attaches) |
+| Tests | Playwright-attach tests | 7 relay tests, including a real-Chromium sustained-stream test, a SelectorEventLoop regression, and a no-playwright-in-server pin |
+
+Two additional defects were found by end-to-end verification and fixed:
+
+- The relay's first version acked screencast frames from inside its own read loop while awaiting the reply, which deadlocked the stream after one frame (Chromium stops at its unacked in-flight window). The ack is now fire-and-forget, and the browser test requires a sustained multi-frame stream, which the original single-frame test could not catch.
+- `everyNthFrame=2` starved static pages entirely: the single frame a static page emits on screencast start never arrived. It is 1 now; backpressure belongs to newest-frame-wins, not frame skipping.
+
+One hypothesis was tested and refuted, for the record: Chromium's screencast survives same-document repaints and cross-origin navigations without re-issuing `startScreencast` (measured directly).
+Frame cadence is compositor-damage-driven on every platform: a static page produces a static image, and frames tick exactly when the page changes.
+This is identical on macOS; the Mac/Windows difference was the dead attach, not the cadence.
+
 1. **Backend.** Pass `maxWidth`, `maxHeight`, and `everyNthFrame` to `Page.startScreencast`. Send frames as binary WebSocket messages rather than base64 inside JSON, which removes about 33 percent of the bytes and the JSON parse per frame. Keep only the newest frame when the client is behind, rather than queueing. Detach the old CDP session on page switch. Send an explicit `VIEWPORT` message with the real frame dimensions.
 2. **Set a deterministic viewport** in `app.py`'s `new_context()` so frame geometry stops depending on a Playwright default.
 3. **Frontend.** Render into a `<canvas>` via `createImageBitmap(blob)` and drop the per-frame data-URL allocation. Move the live view into its own component holding the frame in a ref, so a frame no longer re-renders the Dashboard and no longer re-runs the O(n) log grouping reduce.

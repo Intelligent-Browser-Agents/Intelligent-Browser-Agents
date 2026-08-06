@@ -14,6 +14,7 @@ import verificationAgentIcon from "../../assets/icons/agents/verification.png";
 import "./Dashboard.css";
 
 import ThinkingStream, { ThinkingChatBlock } from "../components/ThinkingStream";
+import LiveView from "../components/LiveView";
 import { api, buildWebSocketUrl, clearToken, getToken } from "../lib/api";
 
 // === COMPONENTS ===
@@ -306,11 +307,13 @@ export default function Dashboard() {
   const activeChatIdRef = useRef(activeChatId);
 
   //Store live frames
-  const [liveFrame, setLiveFrame] = useState(null);
+  // Whether the current/last run produced a live stream. Frames themselves
+  // never touch state: LiveView paints binary frames into a canvas via refs,
+  // so streaming does not re-render the Dashboard.
+  const [hasStream, setHasStream] = useState(false);
   const socketRef = useRef(null);
   const [isHITL, setIsHITL] = useState(false);
   const isHITLRef = useRef(false);
-  const browserImgRef = useRef(null);
   const notificationAudioRef = useRef(null);
 
   const [isAgentRunning, setIsAgentRunning] = useState(false);
@@ -610,75 +613,6 @@ export default function Dashboard() {
     setIsHITL(nextState);
   };
 
-  const sendBrowserInput = (payload) => {
-    const socket = socketRef.current;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "INPUT", ...payload }));
-    }
-  };
-
-  const handleBrowserClick = (e) => {
-    const img = browserImgRef.current;
-    if (!img) return;
-    const rect = img.getBoundingClientRect();
-    const scaleX = 1280 / rect.width;
-    const scaleY = 720 / rect.height;
-    const x = Math.round((e.clientX - rect.left) * scaleX);
-    const y = Math.round((e.clientY - rect.top) * scaleY);
-    sendBrowserInput({ inputType: "mouse", action: "mousePressed", x, y, button: "left", clickCount: 1 });
-    sendBrowserInput({ inputType: "mouse", action: "mouseReleased", x, y, button: "left", clickCount: 1 });
-  };
-
-  const handleBrowserKeyDown = (e) => {
-    e.preventDefault();
-    const isPrintable = e.key.length === 1;
-    sendBrowserInput({
-      inputType: "key",
-      action: isPrintable ? "keyDown" : "rawKeyDown",
-      key: e.key,
-      code: e.code,
-      keyCode: e.keyCode,
-      modifiers:
-        (e.altKey ? 1 : 0) |
-        (e.ctrlKey ? 2 : 0) |
-        (e.metaKey ? 4 : 0) |
-        (e.shiftKey ? 8 : 0),
-    });
-    if (isPrintable) {
-      sendBrowserInput({
-        inputType: "key",
-        action: "char",
-        key: e.key,
-        code: e.code,
-        keyCode: e.key.charCodeAt(0),
-        text: e.key,
-        unmodifiedText: e.key,
-      });
-    }
-  };
-
-  const handleBrowserKeyUp = (e) => {
-    e.preventDefault();
-    sendBrowserInput({
-      inputType: "key",
-      action: "keyUp",
-      key: e.key,
-      code: e.code,
-      keyCode: e.keyCode,
-    });
-  };
-
-  const handleBrowserScroll = (e) => {
-    const img = browserImgRef.current;
-    if (!img) return;
-    const rect = img.getBoundingClientRect();
-    const scaleX = 1280 / rect.width;
-    const scaleY = 720 / rect.height;
-    const x = Math.round((e.clientX - rect.left) * scaleX);
-    const y = Math.round((e.clientY - rect.top) * scaleY);
-    sendBrowserInput({ inputType: "scroll", x, y, deltaX: e.deltaX, deltaY: e.deltaY });
-  };
-
   const sendThroughChatSocket = (text) => {
     const socket = chatSocketRef.current;
     if (!socket || !text.trim()) return;
@@ -744,6 +678,9 @@ export default function Dashboard() {
     // put the task text and the credential into every access log on the path. Both
     // now go in the first frame, and the run is keyed to the authenticated user.
     const socket = new WebSocket(buildWebSocketUrl("/ws/stream"));
+    // Frames arrive as binary JPEG; LiveView consumes them straight from the
+    // socket without base64 or JSON.
+    socket.binaryType = "arraybuffer";
     socketRef.current = socket;
 
     setIsAgentRunning(true);
@@ -762,6 +699,8 @@ export default function Dashboard() {
     };
 
     socket.onmessage = (event) => {
+      // Binary messages are video frames; LiveView has its own listener.
+      if (typeof event.data !== "string") return;
       let msg;
       try {
         msg = JSON.parse(event.data);
@@ -770,9 +709,7 @@ export default function Dashboard() {
         return;
       }
 
-      if (msg.type === "FRAME") {
-        setLiveFrame(`data:image/jpeg;base64,${msg.data}`);
-      } else if (msg.type === "STATUS") {
+      if (msg.type === "STATUS") {
         appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
@@ -804,7 +741,8 @@ export default function Dashboard() {
       markSessionFinished(selectedChatId, sessionId);
       if (socketRef.current !== socket) return;
 
-      setLiveFrame(null);
+      // hasStream is deliberately left alone: the last frame stays on the
+      // canvas as evidence of what the finished run did.
       setHitlState(false);
       setIsAgentRunning(false);
       setCurrentRunSessionId(null);
@@ -1187,21 +1125,24 @@ export default function Dashboard() {
     container.scrollTop = container.scrollHeight;
   }, [thoughtSession?.id, thoughtSession?.logs.length, thoughtsTab]);
 
-  const browserIsInteractive = Boolean(runningSession && liveFrame && isHITL);
+  // Takeover is allowed at any time during a run, not only in HITL pauses:
+  // the live view is the escape hatch for CAPTCHAs and widgets the agent
+  // cannot drive. isHITL still drives notifications and chat prompts.
+  const browserIsInteractive = Boolean(runningSession && hasStream);
   const browserStatusTone = browserIsInteractive ? "interactive" : runningSession ? "locked" : "idle";
   const browserStatusLabel = browserIsInteractive
-    ? "Interactive"
+    ? isHITL
+      ? "Action needed"
+      : "Interactive"
     : runningSession
-      ? liveFrame
-        ? "Locked"
-        : "Connecting"
+      ? "Connecting"
       : "Standby";
   const browserStatusDetail = browserIsInteractive
-    ? "You can interact"
+    ? isHITL
+      ? "The agent needs your help"
+      : "Click the view to take over"
     : runningSession
-      ? liveFrame
-        ? "Agent in control"
-        : "Waiting for stream"
+      ? "Waiting for stream"
       : "Ready";
 
   return (
@@ -1274,21 +1215,14 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {runningSession && liveFrame ? (
+                {(runningSession || hasStream) ? (
                   <div
                     className={`browser-frame-wrapper browser-frame-shell${browserIsInteractive ? " browser-interactive" : ""}`}
-                    tabIndex={browserIsInteractive ? 0 : -1}
-                    onClick={browserIsInteractive ? handleBrowserClick : undefined}
-                    onKeyDown={browserIsInteractive ? handleBrowserKeyDown : undefined}
-                    onKeyUp={browserIsInteractive ? handleBrowserKeyUp : undefined}
-                    onWheel={browserIsInteractive ? handleBrowserScroll : undefined}
                   >
-                    <img
-                      ref={browserImgRef}
-                      src={liveFrame}
-                      alt="Browser Stream"
-                      className="browser-frame"
-                      draggable={false}
+                    <LiveView
+                      socketRef={socketRef}
+                      runActive={Boolean(runningSession)}
+                      onStreamChange={setHasStream}
                     />
                   </div>
                 ) : (
