@@ -543,6 +543,30 @@ This is identical on macOS; the Mac/Windows difference was the dead attach, not 
 
 ## Phase 7: make the frontend a product
 
+**Status: complete** (expanded into a full HUMANi-branded overhaul at the user's request; see `docs/issues/phase-7-frontend.md`). Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Brand and theme | sky-cyan gradients, Consolas headings | HUMANi: flat SVG mark + wordmark, token-driven palette (`index.css`), no gradients outside two justified cases |
+| Stopping a run | type "stop" into chat and hope | Stop button on the live panel (`abort_run`) |
+| Run status | every ended run rendered "Complete" | `run_finished` message: succeeded / failed / aborted with exit reason; a close with no verdict renders failed |
+| Run persistence | in-memory only; refresh erased everything | `runs` table (prompt, status, exit reason, final response, item results, log tail) + `/api/runs` endpoints + History tab |
+| Result artifacts | live view nulled on close | final frame saved per run, served authenticated, shown in history |
+| Multi-run | one socket, one running flag | sockets and state keyed per session; HITL queues keyed per (user, run) so replies cannot cross runs |
+| HITL detection | `[NODE]: __INTERRUPT__` log substring | structured CLARIFICATION / HITL_CLOSED only |
+| HITL input | blank chat box | labeled form from `requested_fields`; one-click confirm for browser-interaction requests |
+| Log panel | sanitizer mangled tracebacks; autoscroll fought the user | untouched lines, STDERR distinct, autoscroll only at bottom, 1500-line cap |
+| Prompt input | single-line input, bare Enter submits | textarea, Shift+Enter newline, IME composition guard |
+| Documents | no file input anywhere | resume/cover-letter store (upload/replace/delete in Settings), paths ride the credential blob to `upload_file` |
+| Job queue | not representable in the UI | Batch composer: URL list in, per-item outcomes out (work-items mission) |
+| Settings | agentPrompt written and never read; two dead buttons | autonomy level (wired into `autonomy_policy` via the vault; `load_policy` was built in Phase 4 but never called - now it is), documents, working password change, working account deletion |
+| Modals | no role, no focus trap, no Escape, close-commits-changes | shared `Modal` component: `role="dialog"`, focus trap, Escape, explicit Cancel vs Save |
+| Environment config | same-origin only | `VITE_API_BASE` via `import.meta.env` |
+| Dead code | `UserCredentialsCard.jsx`, `App.css`, scaffold icons | removed (`axios` was already gone) |
+| Tests | 250 offline | **266 offline** (runs API, documents, per-run HITL routing) |
+
+Found and fixed along the way: `.browser-frame` still carried `pointer-events: none` from the `<img>` era, which swallowed real takeover clicks while Phase 6's synthetic-event verification passed - real-input verification is now part of the checklist.
+
 1. **Stop button.** The backend already implements abort and stop words; the word "abort" appears nowhere in the frontend. Today the only way to halt an agent mid-application is to type "stop" into the chat box and hope it matches. This is the single most important missing control.
 2. **Real run status.** `startAgentSession` hardcodes `status: "running"` and `markSessionFinished` only ever writes `"finished"`, so every terminated run renders as "Complete", including crashes. Add succeeded, failed, and aborted with an exit reason. For "apply to 20 jobs" the user must be able to see which applications actually submitted.
 3. **Persist runs server-side.** Conversations, logs, and sessions are in-memory only, so a refresh loses every transcript while the card number persists in `localStorage`. Add a runs table with prompt, status, timeline, artifacts, and an audit trail of what the agent did with the user's data.
