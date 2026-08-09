@@ -12,6 +12,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 from main import build_workflow
+from autonomy import load_policy
 import argparse
 import asyncio
 import json
@@ -307,7 +308,11 @@ async def main(prompt: str, video_port: int, credentials: dict | None = None, ru
         "screenshot": None,
         "screenshot_meta": None,
         "user_credentials": credentials or {},
-        "autonomy_policy": None,
+        # Resolved from the user's stored setting (rides the credential blob
+        # as "autonomyPolicy"), then env, then the confirm-irreversible
+        # default. This was hardcoded None, which silently discarded the
+        # per-user setting load_policy was built to honor.
+        "autonomy_policy": load_policy(credentials, os.environ),
         "mission_status": "",
         "status_signals": {},
         "last_execution_event": None,

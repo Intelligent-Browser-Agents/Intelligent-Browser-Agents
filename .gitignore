@@ -23,6 +23,11 @@ screenshots/
 backend/.browser_sessions/
 backend/.checkpoints/
 
+# Per-run screenshot artifacts and per-user uploaded documents (Phase 7).
+# Both are user data.
+backend/run_artifacts/
+backend/user_documents/
+
 # Python
 __pycache__/
 *.py[cod]

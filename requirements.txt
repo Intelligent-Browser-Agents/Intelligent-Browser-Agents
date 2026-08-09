@@ -11,6 +11,14 @@
 # Web server
 fastapi==0.135.1
 uvicorn[standard]==0.42.0
+# Multipart form parsing for document uploads (FastAPI UploadFile)
+python-multipart==0.0.32
+
+# Live-view streaming relay (backend/cdp_stream.py): DevTools HTTP discovery
+# and the raw CDP WebSocket client. websockets also ships with
+# uvicorn[standard], but the relay depends on it directly.
+httpx==0.28.1
+websockets==16.0
 
 # Auth, database, and credential-vault encryption
 bcrypt==5.0.0

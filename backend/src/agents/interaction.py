@@ -84,6 +84,11 @@ class InteractionAgent:
             "message": message,
             "correlation_id": InteractionAgent._correlation_id(state, "finish", message),
         }
+        # Per-item outcomes ride the finish payload so the server can persist
+        # them with the run and the UI can render a per-application report.
+        item_results = state.get("item_results") or []
+        if item_results:
+            payload["item_results"] = [r for r in item_results if isinstance(r, dict)]
         interrupt(payload)
 
     def __call__(self, state: ProjectState) -> dict:

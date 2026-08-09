@@ -1656,6 +1656,19 @@ class Executor:
                 if exp_lines:
                     parts.append("EXPERIENCE/EDUCATION:\n" + "\n".join(exp_lines))
 
+            documents = creds.get("userDocuments") or {}
+            if isinstance(documents, dict):
+                doc_lines = [
+                    f"  {label}: {path}"
+                    for label, path in documents.items()
+                    if isinstance(path, str) and path.strip()
+                ]
+                if doc_lines:
+                    parts.append(
+                        "DOCUMENTS (stored files; attach with upload_file(file_path=<path>)):\n"
+                        + "\n".join(doc_lines)
+                    )
+
         if not parts:
             return ""
         text = "\n\nUSER_CREDENTIALS (available for auto-fill - enter these values with `fill`):\n" + "\n".join(parts)

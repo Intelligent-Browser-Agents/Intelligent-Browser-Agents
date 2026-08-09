@@ -193,6 +193,11 @@ class ScreencastRelay:
         # sent small = the sender or the frontend socket is the bottleneck.
         self.stats = {"frames_received": 0, "frames_sent": 0, "acks_sent": 0, "attaches": 0}
 
+    @property
+    def latest_frame(self) -> Optional[bytes]:
+        """The newest JPEG received; the run's final frame once it ends."""
+        return self._latest_frame
+
     # ── lifecycle ────────────────────────────────────────────────────────
 
     async def start(self, timeout: float = 25.0) -> bool:

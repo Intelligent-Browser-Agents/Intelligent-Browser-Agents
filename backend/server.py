@@ -14,7 +14,8 @@ as a command-line argument.
 """
 
 # FastAPI framework, Requests for anything but GET
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse
 from cdp_stream import ScreencastRelay
 
 # ForJWT Gen
@@ -53,6 +54,7 @@ import sys
 import subprocess
 import threading
 import uuid
+from collections import deque
 
 import asyncio
 import json
@@ -187,7 +189,7 @@ def get_cursor(commit: bool = True):
 
 
 def init_schema() -> None:
-    """Create the credential vault table if it does not exist."""
+    """Create the credential vault and runs tables if they do not exist."""
     with get_cursor() as cursor:
         cursor.execute(
             """
@@ -198,11 +200,142 @@ def init_schema() -> None:
             );
             """
         )
+        # Runs are the product's unit of history: what was asked, how it
+        # ended, what it answered, and per-item outcomes for bulk missions.
+        # Full log transcripts stay out of the database; log_tail is for
+        # diagnosis and the screenshot artifact carries the visual evidence.
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id UUID PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                prompt TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                exit_reason TEXT NOT NULL DEFAULT '',
+                final_response TEXT NOT NULL DEFAULT '',
+                item_results JSONB NOT NULL DEFAULT '[]'::jsonb,
+                log_tail TEXT NOT NULL DEFAULT '',
+                has_screenshot BOOLEAN NOT NULL DEFAULT FALSE,
+                started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                finished_at TIMESTAMP WITH TIME ZONE
+            );
+            """
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS runs_user_started_idx"
+            " ON runs (user_id, started_at DESC);"
+        )
 
 
 """
-Authentication
+Run store
 """
+
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+RUN_ARTIFACTS_DIR = os.path.join(_BACKEND_DIR, "run_artifacts")
+RUN_LOG_TAIL_LINES = 250
+
+
+def insert_run(run_id: str, user_id: int, prompt: str) -> None:
+    with get_cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO runs (run_id, user_id, prompt) VALUES (%s, %s, %s);",
+            (run_id, user_id, prompt),
+        )
+
+
+def finish_run(
+    run_id: str,
+    status_value: str,
+    exit_reason: str,
+    final_response: str,
+    item_results: list,
+    log_tail: str,
+    has_screenshot: bool,
+) -> None:
+    with get_cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE runs
+            SET status = %s, exit_reason = %s, final_response = %s,
+                item_results = %s::jsonb, log_tail = %s, has_screenshot = %s,
+                finished_at = NOW()
+            WHERE run_id = %s;
+            """,
+            (
+                status_value,
+                exit_reason[:500],
+                final_response,
+                json.dumps(item_results or []),
+                log_tail,
+                has_screenshot,
+                run_id,
+            ),
+        )
+
+
+def _run_row_to_dict(row) -> dict:
+    return {
+        "run_id": str(row[0]),
+        "prompt": row[1],
+        "status": row[2],
+        "exit_reason": row[3],
+        "final_response": row[4],
+        "item_results": row[5] or [],
+        "has_screenshot": bool(row[6]),
+        "started_at": row[7].isoformat() if row[7] else None,
+        "finished_at": row[8].isoformat() if row[8] else None,
+    }
+
+
+_RUN_COLUMNS = (
+    "run_id, prompt, status, exit_reason, final_response,"
+    " item_results, has_screenshot, started_at, finished_at"
+)
+
+
+"""
+Document store (resume, cover letter)
+
+Files live on disk per user, outside the web root, and their paths ride the
+credential blob into the agent subprocess so `upload_file` can attach them.
+Two fixed slots keep the UX simple: one resume, one cover letter.
+"""
+
+USER_DOCUMENTS_DIR = os.path.join(_BACKEND_DIR, "user_documents")
+DOCUMENT_TYPES = ("resume", "cover_letter")
+DOCUMENT_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt", ".rtf")
+DOCUMENT_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _document_dir(user_id: int) -> str:
+    return os.path.join(USER_DOCUMENTS_DIR, str(int(user_id)))
+
+
+def _find_document(user_id: int, doc_type: str) -> str | None:
+    """Absolute path of the stored document, or None."""
+    directory = _document_dir(user_id)
+    if not os.path.isdir(directory):
+        return None
+    for ext in DOCUMENT_EXTENSIONS:
+        candidate = os.path.join(directory, f"{doc_type}{ext}")
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def list_user_documents(user_id: int) -> dict:
+    out = {}
+    for doc_type in DOCUMENT_TYPES:
+        path = _find_document(user_id, doc_type)
+        if path:
+            stat = os.stat(path)
+            out[doc_type] = {
+                "filename": os.path.basename(path),
+                "size": stat.st_size,
+                "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            }
+    return out
 
 
 def _token_secret() -> str:
@@ -893,17 +1026,150 @@ async def delete_credentials(user_id: int = Depends(require_user)):
     return {"ok": True, "error": ""}
 
 
+"""
+Runs API
+"""
+
+
+@app.get('/api/runs')
+async def list_runs(user_id: int = Depends(require_user)):
+    """The caller's run history, newest first."""
+    def query():
+        with get_cursor(commit=False) as cursor:
+            cursor.execute(
+                f"SELECT {_RUN_COLUMNS} FROM runs"
+                " WHERE user_id = %s ORDER BY started_at DESC LIMIT 50;",
+                (user_id,),
+            )
+            return cursor.fetchall()
+    rows = await asyncio.to_thread(query)
+    return {"runs": [_run_row_to_dict(r) for r in rows], "error": ""}
+
+
+def _load_owned_run(run_id: str, user_id: int):
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    with get_cursor(commit=False) as cursor:
+        cursor.execute(
+            f"SELECT {_RUN_COLUMNS}, log_tail FROM runs"
+            " WHERE run_id = %s AND user_id = %s;",
+            (run_id, user_id),
+        )
+        row = cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    return row
+
+
+@app.get('/api/runs/{run_id}')
+async def get_run(run_id: str, user_id: int = Depends(require_user)):
+    row = await asyncio.to_thread(_load_owned_run, run_id, user_id)
+    payload = _run_row_to_dict(row)
+    payload["log_tail"] = row[9]
+    return {"run": payload, "error": ""}
+
+
+@app.get('/api/runs/{run_id}/screenshot')
+async def get_run_screenshot(run_id: str, user_id: int = Depends(require_user)):
+    """The run's final frame, captured from the live stream at run end."""
+    await asyncio.to_thread(_load_owned_run, run_id, user_id)
+    path = os.path.join(RUN_ARTIFACTS_DIR, f"{run_id}.jpg")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No screenshot for this run.")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+"""
+Documents API
+"""
+
+
+@app.get('/api/documents')
+async def get_documents(user_id: int = Depends(require_user)):
+    return {"documents": list_user_documents(user_id), "error": ""}
+
+
+@app.post('/api/documents/{doc_type}')
+async def upload_document(doc_type: str, file: UploadFile = File(...), user_id: int = Depends(require_user)):
+    if doc_type not in DOCUMENT_TYPES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown document type.")
+    extension = os.path.splitext(file.filename or "")[1].lower()
+    if extension not in DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type. Use one of: {', '.join(DOCUMENT_EXTENSIONS)}",
+        )
+    content = await file.read()
+    if len(content) > DOCUMENT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="File is larger than 8 MB.",
+        )
+
+    def persist():
+        directory = _document_dir(user_id)
+        os.makedirs(directory, exist_ok=True)
+        # One slot per type: drop any previous file regardless of extension.
+        for old_ext in DOCUMENT_EXTENSIONS:
+            old = os.path.join(directory, f"{doc_type}{old_ext}")
+            if os.path.isfile(old):
+                os.remove(old)
+        with open(os.path.join(directory, f"{doc_type}{extension}"), "wb") as handle:
+            handle.write(content)
+
+    await asyncio.to_thread(persist)
+    return {"documents": list_user_documents(user_id), "error": ""}
+
+
+@app.delete('/api/documents/{doc_type}')
+async def delete_document(doc_type: str, user_id: int = Depends(require_user)):
+    if doc_type not in DOCUMENT_TYPES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown document type.")
+    path = _find_document(user_id, doc_type)
+    if path:
+        await asyncio.to_thread(os.remove, path)
+    return {"documents": list_user_documents(user_id), "error": ""}
+
+
 HITL_PREFIX = "@@HITL@@"
 
 import json as _json
 
-# Shared map: authenticated user_id → asyncio.Queue for HITL replies.
-# Keyed by the token subject, not by a client-supplied path parameter. The
-# frontend used to hash a browser-generated UUID into a fake "user_id", which
-# both collided across users and reset on every page reload.
-HITL_REPLY_QUEUES: dict[int, asyncio.Queue] = {}
+# Shared maps: (authenticated user_id, run_id) → asyncio.Queue / accepting flag.
+# Keyed per RUN, not just per user: with one key per user, a second concurrent
+# run overwrote the first run's queue and either run could eat the other's
+# replies. The user id still comes from the token subject, never from a
+# client-supplied parameter.
+HITL_REPLY_QUEUES: dict[tuple[int, str], asyncio.Queue] = {}
 # True only while we have sent CLARIFICATION and are waiting for stdin reply (user only).
-HITL_ACCEPTING: dict[int, bool] = {}
+HITL_ACCEPTING: dict[tuple[int, str], bool] = {}
+
+
+def _accepting_run_ids(user_id: int) -> list[str]:
+    """Run ids of this user's runs that are currently waiting for a reply."""
+    return [
+        rid for (uid, rid), accepting in HITL_ACCEPTING.items()
+        if uid == user_id and accepting
+    ]
+
+
+def _queue_for_reply(user_id: int, run_id: str | None) -> tuple[asyncio.Queue | None, str]:
+    """Resolve which run's queue a reply belongs to.
+
+    Out-of-band channels (the REST endpoint, the chat fallback socket) do not
+    carry a run id historically, so: an explicit run_id wins; otherwise the
+    reply goes to the single accepting run, and with several accepting runs it
+    is rejected rather than guessed.
+    """
+    if run_id:
+        queue = HITL_REPLY_QUEUES.get((user_id, run_id))
+        return queue, run_id if queue is not None else ""
+    accepting = _accepting_run_ids(user_id)
+    if len(accepting) == 1:
+        return HITL_REPLY_QUEUES.get((user_id, accepting[0])), accepting[0]
+    return None, ""
 
 USER_HITL_REPLY_TYPE = "user_hitl_reply"
 ABORT_RUN_TYPE = "abort_run"
@@ -1017,13 +1283,14 @@ async def hitl_reply(request: Request, user_id: int = Depends(require_user)):
     The user id comes from the token. It used to be a path parameter, so any
     caller could answer any running agent's clarification prompt.
     """
-    if not HITL_ACCEPTING.get(user_id):
-        return {"status": "error", "message": "No active clarification for this user."}
     body = await request.json()
     user_input = body.get("content", body.get("user_input", ""))
-    queue = HITL_REPLY_QUEUES.get(user_id)
-    if queue is None:
-        return {"status": "error", "message": "No agent is waiting for input for this user."}
+    requested_run = str(body.get("run_id") or "") or None
+    queue, resolved_run = _queue_for_reply(user_id, requested_run)
+    if queue is None or not HITL_ACCEPTING.get((user_id, resolved_run)):
+        if len(_accepting_run_ids(user_id)) > 1:
+            return {"status": "error", "message": "Several runs are waiting; include run_id."}
+        return {"status": "error", "message": "No active clarification for this user."}
     await queue.put({"content": user_input})
     return {"status": "ok"}
 
@@ -1075,6 +1342,27 @@ async def stream_endpoint(websocket: WebSocket):
     # nothing consumes it yet beyond appearing in the stream.
     run_id = str(uuid.uuid4())
     await websocket.send_json({"type": "run_started", "run_id": run_id})
+
+    # Stored documents (resume, cover letter) ride the credential blob so the
+    # agent's upload_file can attach them by path.
+    documents = {
+        doc_type: _find_document(user_id, doc_type)
+        for doc_type in DOCUMENT_TYPES
+        if _find_document(user_id, doc_type)
+    }
+    if documents:
+        credentials = {**credentials, "userDocuments": documents}
+
+    # The run is a first-class record from the moment it starts: a refresh
+    # must not erase what was asked or how it ended.
+    try:
+        await asyncio.to_thread(insert_run, run_id, user_id, prompt)
+    except Exception as exc:
+        print(f"[STREAM] Could not persist run row: {type(exc).__name__}")
+
+    # Outcome tracking for the run record and the run_finished message.
+    run_outcome = {"aborted": False, "final_response": "", "item_results": []}
+    log_ring: deque[str] = deque(maxlen=RUN_LOG_TAIL_LINES)
 
     current_env = os.environ.copy()
     current_env["PYTHONUNBUFFERED"] = "1"
@@ -1133,10 +1421,13 @@ async def stream_endpoint(websocket: WebSocket):
     threading.Thread(target=pipe_reader, args=(process.stdout, "STDOUT"), daemon=True).start()
     threading.Thread(target=pipe_reader, args=(process.stderr, "STDERR"), daemon=True).start()
 
-    # Register a shared reply queue so any endpoint can push replies
+    # Register a shared reply queue so any endpoint can push replies.
+    # Keyed per (user, run): two concurrent runs must not eat each other's
+    # replies.
     reply_queue = asyncio.Queue()
-    HITL_REPLY_QUEUES[user_id] = reply_queue
-    HITL_ACCEPTING[user_id] = False
+    hitl_key = (user_id, run_id)
+    HITL_REPLY_QUEUES[hitl_key] = reply_queue
+    HITL_ACCEPTING[hitl_key] = False
 
     # Mutable ref so the listener can dispatch input events once the relay is
     # attached (set after the browser comes up). Input handling itself lives in
@@ -1175,7 +1466,8 @@ async def stream_endpoint(websocket: WebSocket):
                     content = msg.get("content", "")
                     if isinstance(content, str) and _is_stop_command(content):
                         print("[HITL] Stop requested via WebSocket")
-                        HITL_ACCEPTING[user_id] = False
+                        run_outcome["aborted"] = True
+                        HITL_ACCEPTING[hitl_key] = False
                         _drain_async_queue(reply_queue)
                         try:
                             await websocket.send_json({
@@ -1194,7 +1486,7 @@ async def stream_endpoint(websocket: WebSocket):
                 # Only explicit user HITL replies while a clarification is active.
                 if (
                     msg.get("type") == USER_HITL_REPLY_TYPE
-                    and HITL_ACCEPTING.get(user_id)
+                    and HITL_ACCEPTING.get(hitl_key)
                 ):
                     content = msg.get("content", "")
                     if isinstance(content, str):
@@ -1238,9 +1530,16 @@ async def stream_endpoint(websocket: WebSocket):
                 try:
                     if hitl_type == "finish":
                         print(f"[HITL] Sending final response to frontend")
+                        run_outcome["final_response"] = hitl_message
+                        raw_items = hitl_payload.get("item_results")
+                        if isinstance(raw_items, list):
+                            run_outcome["item_results"] = [
+                                r for r in raw_items if isinstance(r, dict)
+                            ]
                         await websocket.send_json({
                             "type": "RESPONSE",
                             "content": hitl_message,
+                            "item_results": run_outcome["item_results"],
                         })
                         await websocket.send_json({
                             "type": "LOG",
@@ -1250,7 +1549,7 @@ async def stream_endpoint(websocket: WebSocket):
                     else:
                         print(f"[HITL] Sending clarification request to frontend")
                         _drain_async_queue(reply_queue)
-                        HITL_ACCEPTING[user_id] = True
+                        HITL_ACCEPTING[hitl_key] = True
                         try:
                             await websocket.send_json({
                                 "type": "CLARIFICATION",
@@ -1282,14 +1581,21 @@ async def stream_endpoint(websocket: WebSocket):
                             except Exception as exc:
                                 print(f"[HITL] Failed to write to stdin: {exc}")
                                 break
+                            # Structured close: the frontend keys its HITL
+                            # state off this, not off log-substring matching.
+                            try:
+                                await websocket.send_json({"type": "HITL_CLOSED"})
+                            except Exception:
+                                pass
                         finally:
-                            HITL_ACCEPTING[user_id] = False
+                            HITL_ACCEPTING[hitl_key] = False
                 except Exception:
                     break
                 continue
 
             # Regular log line
             print(f"[{log_type}] {content}")
+            log_ring.append(f"[{log_type}] {content}")
             try:
                 await websocket.send_json({"type": "LOG", "source": log_type, "content": content})
             except Exception:
@@ -1298,6 +1604,7 @@ async def stream_endpoint(websocket: WebSocket):
 
     log_task = asyncio.create_task(log_consumer())
 
+    final_frame = None
     try:
         # 3. Attach to the agent's browser over raw CDP and stream it.
         # No Playwright here: the driver subprocess it spawns cannot start
@@ -1338,20 +1645,24 @@ async def stream_endpoint(websocket: WebSocket):
         finally:
             send_failure_task.cancel()
             relay_ref["relay"] = None
+            # The newest frame is the run's visual evidence; keep it before
+            # the connection goes away.
+            final_frame = relay.latest_frame
             await relay.close()
 
     finally:
         # 5. Cleanup
+        exit_code = process.poll()
         exit_reason = (
-            "agent process exited" if process.poll() is not None
+            "agent process exited" if exit_code is not None
             else "client disconnected" if stream_disconnect_event.is_set()
             else "handler returned"
         )
-        print(f"[STREAM] Run finished for user_id={user_id}: {exit_reason} (exit code {process.poll()}).")
+        print(f"[STREAM] Run finished for user_id={user_id}: {exit_reason} (exit code {exit_code}).")
 
         stream_disconnect_event.set()
-        HITL_REPLY_QUEUES.pop(user_id, None)
-        HITL_ACCEPTING.pop(user_id, None)
+        HITL_REPLY_QUEUES.pop(hitl_key, None)
+        HITL_ACCEPTING.pop(hitl_key, None)
 
         reply_listener_task.cancel()
         try:
@@ -1368,8 +1679,50 @@ async def stream_endpoint(websocket: WebSocket):
             except asyncio.CancelledError:
                 pass
 
+        # ── Run outcome: status, artifact, persistence, structured message ──
+        if run_outcome["aborted"]:
+            run_status, run_exit_reason = "aborted", "stopped by user"
+        elif run_outcome["final_response"] and (exit_code in (None, 0)):
+            run_status, run_exit_reason = "succeeded", "completed with a final response"
+        elif exit_code not in (None, 0):
+            run_status, run_exit_reason = "failed", f"agent process exited with code {exit_code}"
+        elif stream_disconnect_event.is_set() and not run_outcome["final_response"]:
+            run_status, run_exit_reason = "failed", "client disconnected before the run finished"
+        else:
+            run_status, run_exit_reason = "failed", "ended without a final response"
+
+        has_screenshot = False
+        if final_frame:
+            try:
+                os.makedirs(RUN_ARTIFACTS_DIR, exist_ok=True)
+                with open(os.path.join(RUN_ARTIFACTS_DIR, f"{run_id}.jpg"), "wb") as handle:
+                    handle.write(final_frame)
+                has_screenshot = True
+            except Exception as exc:
+                print(f"[STREAM] Could not save run screenshot: {type(exc).__name__}")
+
         try:
-            await websocket.send_json({"type": "STATUS", "content": "Agent finished task."})
+            await asyncio.to_thread(
+                finish_run,
+                run_id,
+                run_status,
+                run_exit_reason,
+                run_outcome["final_response"],
+                run_outcome["item_results"],
+                "\n".join(log_ring),
+                has_screenshot,
+            )
+        except Exception as exc:
+            print(f"[STREAM] Could not persist run outcome: {type(exc).__name__}")
+
+        try:
+            await websocket.send_json({
+                "type": "run_finished",
+                "run_id": run_id,
+                "status": run_status,
+                "exit_reason": run_exit_reason,
+                "has_screenshot": has_screenshot,
+            })
         except Exception:
             pass
         # Client cleanup (live view, isAgentRunning) runs on socket onclose; must close the socket.
@@ -1407,23 +1760,28 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
 
-            queue = HITL_REPLY_QUEUES.get(user_id)
-            if queue is None:
-                try:
-                    await websocket.send_json({
-                        "type": "STATUS",
-                        "content": "No agent is currently waiting for input.",
-                    })
-                except Exception:
-                    break
-                continue
-
             try:
                 payload = _json.loads(data)
             except (ValueError, TypeError):
                 payload = {"content": data}
             if not isinstance(payload, dict):
                 payload = {"content": str(payload)}
+
+            requested_run = str(payload.get("run_id") or "") or None
+            queue, _resolved = _queue_for_reply(user_id, requested_run)
+            if queue is None:
+                waiting = len(_accepting_run_ids(user_id))
+                message = (
+                    "Several runs are waiting; include run_id."
+                    if waiting > 1
+                    else "No agent is currently waiting for input."
+                )
+                try:
+                    await websocket.send_json({"type": "STATUS", "content": message})
+                except Exception:
+                    break
+                continue
+
             await queue.put(payload)
             print(f"[HITL] Forwarded chat message to agent for user {user_id}")
     except WebSocketDisconnect:
