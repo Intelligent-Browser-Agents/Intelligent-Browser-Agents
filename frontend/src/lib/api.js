@@ -10,6 +10,14 @@
 
 const TOKEN_KEY = 'token';
 
+/**
+ * Backend origin. Empty (the default) means same-origin: the dev server
+ * proxies /api and /ws, and a production build served by the backend needs no
+ * prefix. Set VITE_API_BASE (e.g. https://api.example.com) when the frontend
+ * is hosted elsewhere.
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
+
 export function getToken() {
   const token = localStorage.getItem(TOKEN_KEY);
   if (!token || token === 'undefined' || token === 'null') return '';
@@ -72,7 +80,7 @@ export async function apiFetch(path, { method = 'GET', body, auth = true } = {})
 
   let response;
   try {
-    response = await fetch(path, {
+    response = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -96,8 +104,11 @@ export async function apiFetch(path, { method = 'GET', body, auth = true } = {})
   return payload;
 }
 
-/** Build a same-origin WebSocket URL. Tokens are sent in the first frame, never here. */
+/** Build a WebSocket URL against the API origin. Tokens are sent in the first frame, never here. */
 export function buildWebSocketUrl(path) {
+  if (API_BASE) {
+    return `${API_BASE.replace(/^http/, 'ws')}${path}`;
+  }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}${path}`;
 }
@@ -148,6 +159,51 @@ export const api = {
 
   deleteAccount: () => apiFetch('/api/users/delete/', { method: 'DELETE' }),
 
-  hitlReply: (content) =>
-    apiFetch('/api/hitl_reply', { method: 'POST', body: { content } }),
+  /** Partial update of account fields; include `password` to change it. */
+  updateUser: (fields) =>
+    apiFetch('/api/users/update/', { method: 'POST', body: fields }),
+
+  hitlReply: (content, runId) =>
+    apiFetch('/api/hitl_reply', { method: 'POST', body: { content, run_id: runId } }),
+
+  // ── Runs ────────────────────────────────────────────────────────────────
+
+  listRuns: () => apiFetch('/api/runs'),
+
+  getRun: (runId) => apiFetch(`/api/runs/${runId}`),
+
+  /**
+   * The run's final screenshot as an object URL (the endpoint needs the
+   * bearer header, which an <img src> cannot carry). Callers must
+   * URL.revokeObjectURL when done.
+   */
+  fetchRunScreenshot: async (runId) => {
+    const response = await fetch(`${API_BASE}/api/runs/${runId}/screenshot`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!response.ok) throw new ApiError(response.status, 'No screenshot for this run.');
+    return URL.createObjectURL(await response.blob());
+  },
+
+  // ── Documents (resume, cover letter) ────────────────────────────────────
+
+  getDocuments: () => apiFetch('/api/documents'),
+
+  uploadDocument: async (docType, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await fetch(`${API_BASE}/api/documents/${docType}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}` },
+      body: form,
+    });
+    const payload = await parseBody(response);
+    if (!response.ok) {
+      throw new ApiError(response.status, payload?.detail || 'Upload failed.');
+    }
+    return payload;
+  },
+
+  deleteDocument: (docType) =>
+    apiFetch(`/api/documents/${docType}`, { method: 'DELETE' }),
 };

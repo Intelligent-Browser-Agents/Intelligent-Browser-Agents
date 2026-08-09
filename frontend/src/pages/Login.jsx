@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Login.css";
 
+import Brand from "../components/Brand";
 import { api, clearToken, setToken } from "../lib/api";
 
 export default function Login() {
@@ -62,10 +63,9 @@ export default function Login() {
 
       <div className="login-container">
         <h1 className="login-title">
-          Intelligent Browser Agents
-          <br/> 
-
+          <Brand size={44} />
         </h1>
+        <p className="login-tagline">Your browser, with a helping hand.</p>
 
         <form onSubmit={handleSubmit} className="login-form">
           <label className="login-label" htmlFor="login-username">Username</label>

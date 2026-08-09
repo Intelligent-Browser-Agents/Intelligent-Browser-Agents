@@ -1,30 +1,25 @@
 .about-site {
-  --bg-top: #d9f3ff;
-  --bg-bottom: #9fd8f3;
-  --ink-strong: #164e68;
-  --ink-main: #2f5f76;
-  --ink-soft: #53768a;
-  --line: rgba(29, 97, 127, 0.18);
-  --line-strong: rgba(29, 97, 127, 0.3);
-  --surface: rgba(248, 252, 255, 0.82);
+  /* Flat HUMANi palette; the faint grid is texture drawn with hard 1px
+     lines, not a color blend. */
+  --ink-strong: var(--navy);
+  --ink-main: var(--text);
+  --ink-soft: var(--text-secondary);
+  --line: var(--border);
+  --line-strong: var(--border-strong);
+  --surface: #ffffff;
   position: relative;
   min-height: 100vh;
   overflow: hidden;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
-    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+    linear-gradient(rgba(66, 133, 244, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(66, 133, 244, 0.05) 1px, transparent 1px),
+    var(--canvas);
   background-size: 44px 44px, 44px 44px, 100% 100%;
   color: var(--ink-main);
 }
 
 .about-overlay {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at 16% 10%, rgba(255, 255, 255, 0.62), transparent 24%),
-    radial-gradient(circle at 86% 14%, rgba(255, 255, 255, 0.3), transparent 26%);
-  pointer-events: none;
+  display: none;
 }
 
 .about-header,

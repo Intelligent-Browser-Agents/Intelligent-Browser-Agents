@@ -1,9 +1,53 @@
 :root {
-  font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* ── HUMANi design tokens ─────────────────────────────────────────────
+     Flat, simple, approachable. Colors come from the brand mark: brand blue
+     for action, dark navy for ink, soft tints for states. No gradients. */
+
+  /* Brand */
+  --blue: #4285f4;
+  --blue-strong: #2f6fe0;      /* hover / pressed */
+  --blue-soft: #eaf2fe;        /* selected rows, chips, tints */
+  --blue-softer: #f4f8fe;      /* hover washes */
+  --navy: #141b4d;             /* wordmark, headings */
+
+  /* Surfaces and lines */
+  --canvas: #f6f8fc;           /* app background */
+  --surface: #ffffff;          /* cards, panels, modals */
+  --surface-sunken: #f1f5fb;   /* wells: log panel, code, viewport backing */
+  --border: #e3e9f2;
+  --border-strong: #cdd7e6;
+
+  /* Text */
+  --text: #23304d;
+  --text-secondary: #5a6b8c;
+  --text-faint: #8b98b3;
+  --text-on-blue: #ffffff;
+
+  /* Status */
+  --ok: #1f9d61;
+  --ok-soft: #e6f6ee;
+  --danger: #de3b4b;
+  --danger-soft: #fdecee;
+  --warn: #e8930c;
+  --warn-soft: #fdf3e2;
+  --idle: #8b98b3;
+
+  /* Shape and depth (flat: borders first, shadows subtle) */
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+  --shadow-panel: 0 1px 2px rgba(20, 27, 77, 0.05), 0 8px 24px rgba(20, 27, 77, 0.06);
+  --shadow-pop: 0 12px 40px rgba(20, 27, 77, 0.16);
+
+  color: var(--text);
+  background-color: var(--canvas);
 }
 
 *,
@@ -23,4 +67,163 @@ body,
 
 body {
   min-width: 320px;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--navy);
+}
+
+/* ── Brand lockup (used by Brand.jsx) ─────────────────────────────────── */
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.brand-wordmark {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--navy);
+  line-height: 1;
+}
+
+.brand-wordmark-i {
+  color: var(--blue);
+}
+
+/* ── Shared primitives ────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--blue);
+  color: var(--text-on-blue);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--blue-strong);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--blue-softer);
+  border-color: var(--blue);
+  color: var(--blue-strong);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #c22f3e;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--blue-softer);
+  color: var(--blue-strong);
+}
+
+.field-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.text-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+}
+
+.text-input:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+  border-color: var(--blue);
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.status-chip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-chip.running {
+  color: var(--blue-strong);
+  background: var(--blue-soft);
+}
+
+.status-chip.succeeded {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.status-chip.failed {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.status-chip.aborted {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.status-chip.idle {
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
 }

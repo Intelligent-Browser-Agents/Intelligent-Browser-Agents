@@ -15,6 +15,11 @@ import "./Dashboard.css";
 
 import ThinkingStream, { ThinkingChatBlock } from "../components/ThinkingStream";
 import LiveView from "../components/LiveView";
+import Brand from "../components/Brand";
+import Modal from "../components/Modal";
+import SettingsModal from "../components/SettingsModal";
+import RunHistory from "../components/RunHistory";
+import HitlForm from "../components/HitlForm";
 import { api, buildWebSocketUrl, clearToken, getToken } from "../lib/api";
 
 // === COMPONENTS ===
@@ -273,9 +278,7 @@ export default function Dashboard() {
     description: "",
   };
   
-  // ⬅ Stores the settings text
   const [conversations, setConversations] = useState([ { id: crypto.randomUUID(), title: "Browse 1", messages: [] }]);
-  const [agentPrompt, setAgentPrompt] = useState(localStorage.getItem("agentPrompt") || "");
   const [activeChatId, setActiveChatId] = useState(conversations[0].id);
   const [showUserCredentials, setShowUserCredentials] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -311,17 +314,17 @@ export default function Dashboard() {
   // never touch state: LiveView paints binary frames into a canvas via refs,
   // so streaming does not re-render the Dashboard.
   const [hasStream, setHasStream] = useState(false);
-  const socketRef = useRef(null);
-  const [isHITL, setIsHITL] = useState(false);
-  const isHITLRef = useRef(false);
+  // One socket per run session, so several chats can run concurrently.
+  // Each entry is a {current: WebSocket} holder, shaped like a ref so
+  // LiveView can consume it directly.
+  const runSocketsRef = useRef(new Map());
   const notificationAudioRef = useRef(null);
 
-  const [isAgentRunning, setIsAgentRunning] = useState(false);
-  const isAgentRunningRef = useRef(false);
   const chatSocketRef = useRef(null);
   const [agentSessionsByChat, setAgentSessionsByChat] = useState({});
-  const [currentRunSessionId, setCurrentRunSessionId] = useState(null);
-  const currentRunSessionIdRef = useRef(null);
+  const agentSessionsByChatRef = useRef({});
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [showBatchComposer, setShowBatchComposer] = useState(false);
 
   const [userCredentialsList, setUserCredentialsList] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
@@ -345,16 +348,13 @@ export default function Dashboard() {
   }, [activeChatId]);
 
   useEffect(() => {
-    isAgentRunningRef.current = isAgentRunning;
-  }, [isAgentRunning]);
+    agentSessionsByChatRef.current = agentSessionsByChat;
+  }, [agentSessionsByChat]);
 
-  useEffect(() => {
-    currentRunSessionIdRef.current = currentRunSessionId;
-  }, [currentRunSessionId]);
-
-  useEffect(() => {
-    isHITLRef.current = isHITL;
-  }, [isHITL]);
+  const findRunningSession = (chatId) =>
+    (agentSessionsByChatRef.current[chatId] || []).find(
+      (session) => session.status === "running"
+    ) || null;
 
   useEffect(() => {
     const audio = new Audio(userNotificationSound);
@@ -375,21 +375,13 @@ export default function Dashboard() {
     channel,
   });
 
-  const sanitizeAgentLogLine = (line) => {
-    const raw = String(line ?? "").trim();
-    if (!raw) return "";
+  // Logs pass through untouched apart from trimming. The old sanitizer
+  // collapsed whitespace and rewrote around colons, which mangled tracebacks
+  // and JSON in the one panel meant for debugging.
+  const sanitizeAgentLogLine = (line) => String(line ?? "").trim();
 
-    const cleaned = raw.replace(/-{3,}/g, "").replace(/\s{2,}/g, " ").trim();
-    if (!cleaned) return "";
-
-    const separatorIndex = cleaned.indexOf(":");
-    if (separatorIndex < 0) return cleaned;
-
-    const source = cleaned.slice(0, separatorIndex + 1);
-    const content = cleaned.slice(separatorIndex + 1).trim();
-    if (!content) return "";
-    return `${source} ${content}`;
-  };
+  // Keep sessions bounded so a very long run cannot grow state without limit.
+  const MAX_SESSION_LOG_LINES = 1500;
 
   const appendMessageToChat = (chatId, text, isUser, channel = "main") => {
     setConversations((prev) =>
@@ -448,10 +440,14 @@ export default function Dashboard() {
         ...(prev[chatId] || []),
         {
           id: sessionId,
+          runId: null,
           prompt,
           logs: [],
           chatMessages: [],
           status: "running",
+          exitReason: "",
+          hitl: null,
+          itemResults: [],
           startedAt: Date.now(),
           finishedAt: null,
         },
@@ -460,19 +456,23 @@ export default function Dashboard() {
     return sessionId;
   };
 
+  const updateSession = (chatId, sessionId, updater) => {
+    setAgentSessionsByChat((prev) => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map((session) =>
+        session.id === sessionId ? { ...session, ...updater(session) } : session
+      ),
+    }));
+  };
+
   const appendAgentLogLine = (chatId, sessionId, line) => {
     const sanitizedLine = sanitizeAgentLogLine(line);
     if (!sanitizedLine) {
       return;
     }
 
-    setAgentSessionsByChat((prev) => ({
-      ...prev,
-      [chatId]: (prev[chatId] || []).map((session) =>
-        session.id === sessionId
-          ? { ...session, logs: [...session.logs, sanitizedLine] }
-          : session
-      ),
+    updateSession(chatId, sessionId, (session) => ({
+      logs: [...session.logs.slice(-(MAX_SESSION_LOG_LINES - 1)), sanitizedLine],
     }));
   };
 
@@ -569,27 +569,25 @@ export default function Dashboard() {
   }, []);
 
   const appendSessionChatMessage = (chatId, sessionId, text, isUser) => {
-    setAgentSessionsByChat((prev) => ({
-      ...prev,
-      [chatId]: (prev[chatId] || []).map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              chatMessages: [...session.chatMessages, createTextMessage(text, isUser, "chat-socket")],
-            }
-          : session
-      ),
+    updateSession(chatId, sessionId, (session) => ({
+      chatMessages: [...session.chatMessages, createTextMessage(text, isUser, "chat-socket")],
     }));
   };
 
-  const markSessionFinished = (chatId, sessionId) => {
-    setAgentSessionsByChat((prev) => ({
-      ...prev,
-      [chatId]: (prev[chatId] || []).map((session) =>
-        session.id === sessionId
-          ? { ...session, status: "finished", finishedAt: Date.now() }
-          : session
-      ),
+  /**
+   * Socket closed. If a structured `run_finished` already set the real status
+   * (succeeded / failed / aborted), keep it; a close with no verdict means the
+   * run died on us, which is a failure, not "Complete".
+   */
+  const markSessionClosed = (chatId, sessionId) => {
+    updateSession(chatId, sessionId, (session) => ({
+      status: session.status === "running" ? "failed" : session.status,
+      exitReason:
+        session.status === "running"
+          ? session.exitReason || "connection closed before the run finished"
+          : session.exitReason,
+      hitl: null,
+      finishedAt: session.finishedAt || Date.now(),
     }));
   };
 
@@ -606,11 +604,6 @@ export default function Dashboard() {
         console.warn("Unable to play notification sound:", err);
       });
     }
-  };
-
-  const setHitlState = (nextState) => {
-    isHITLRef.current = nextState;
-    setIsHITL(nextState);
   };
 
   const sendThroughChatSocket = (text) => {
@@ -633,47 +626,35 @@ export default function Dashboard() {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  /** Send a HITL reply to a specific running session's socket. */
+  const sendReplyToSession = (chatId, session, text) => {
+    appendSessionChatMessage(chatId, session.id, text, true);
+    const holder = runSocketsRef.current.get(session.id);
+    const streamSocket = holder?.current;
+    if (streamSocket && streamSocket.readyState === WebSocket.OPEN) {
+      streamSocket.send(JSON.stringify({ type: "user_hitl_reply", content: text }));
+    } else {
+      sendThroughChatSocket(JSON.stringify({ content: text, run_id: session.runId || undefined }));
+    }
+  };
 
-    const currentInput = input;
-    setInput("");
+  /** The Stop button: ask the server to halt this session's run. */
+  const stopSession = (chatId, session) => {
+    const holder = runSocketsRef.current.get(session.id);
+    const streamSocket = holder?.current;
+    if (streamSocket && streamSocket.readyState === WebSocket.OPEN) {
+      streamSocket.send(JSON.stringify({ type: "abort_run", content: "stop" }));
+      appendAgentLogLine(chatId, session.id, "STATUS: Stop requested.");
+    }
+  };
+
+  const launchRun = (prompt) => {
     const selectedChatId = activeChatIdRef.current;
+    const sessionId = startAgentSession(selectedChatId, prompt);
 
-    // 1. While agent is running, send reply through the stream WebSocket (HITL)
-    if (isAgentRunning) {
-      const runningSessionId = currentRunSessionIdRef.current;
-      if (runningSessionId) {
-        appendSessionChatMessage(selectedChatId, runningSessionId, currentInput, true);
-      }
-      const streamSocket = socketRef.current;
-      if (streamSocket && streamSocket.readyState === WebSocket.OPEN) {
-        streamSocket.send(
-          JSON.stringify({ type: "user_hitl_reply", content: currentInput })
-        );
-      } else {
-        sendThroughChatSocket(currentInput);
-      }
-      return;
-    }
-
-    // Agent is NOT running: close any existing ghost stream connection first
-    if (socketRef.current) {
-      socketRef.current.close();
-    }
-
-    // Credentials are NOT pushed here. The agent reads them from the caller's own
-    // encrypted vault row on the server, so there is nothing to send.
+    // Credentials are NOT pushed here. The agent reads them from the caller's
+    // own encrypted vault row on the server, so there is nothing to send.
     //
-    // Uploading the form state at send time would be actively harmful now that the
-    // vault is server-side: the credential fields are only populated after the user
-    // opens the modal and confirms their password, so a run started before that
-    // would overwrite the saved vault with blanks.
-    const sessionId = startAgentSession(selectedChatId, currentInput);
-
-    // const data = response.data;
-    // setFirstname(data.firstname);
-
     // The prompt and the bearer token used to travel as query parameters, which
     // put the task text and the credential into every access log on the path. Both
     // now go in the first frame, and the run is keyed to the authenticated user.
@@ -681,16 +662,14 @@ export default function Dashboard() {
     // Frames arrive as binary JPEG; LiveView consumes them straight from the
     // socket without base64 or JSON.
     socket.binaryType = "arraybuffer";
-    socketRef.current = socket;
-
-    setIsAgentRunning(true);
-    setCurrentRunSessionId(sessionId);
+    const holder = { current: socket };
+    runSocketsRef.current.set(sessionId, holder);
 
     socket.onopen = () => {
       socket.send(JSON.stringify({
         type: "start",
         token: getToken(),
-        prompt: currentInput,
+        prompt,
       }));
     };
 
@@ -709,44 +688,63 @@ export default function Dashboard() {
         return;
       }
 
-      if (msg.type === "STATUS") {
+      if (msg.type === "run_started") {
+        updateSession(selectedChatId, sessionId, () => ({ runId: msg.run_id }));
+      } else if (msg.type === "STATUS") {
         appendAgentLogLine(selectedChatId, sessionId, `STATUS: ${msg.content}`);
       } else if (msg.type === "LOG") {
         appendAgentLogLine(selectedChatId, sessionId, `${msg.source}: ${msg.content}`);
-        if (msg.content && msg.content.includes("[NODE]: __INTERRUPT__")) {
-          if (!isHITLRef.current) {
-            playUserNotification();
-          }
-          setHitlState(true);
-        }
-        if (msg.content && msg.source === "STDOUT" && msg.content.includes("[NODE]: ORCHESTRATOR")) {
-          setHitlState(false);
-        }
       } else if (msg.type === "CLARIFICATION") {
-        if (!isHITLRef.current) {
-          playUserNotification();
-        }
-        setHitlState(true);
+        // Structured HITL: the message plus the labeled fields the agent
+        // needs. No log-substring sniffing.
+        playUserNotification();
+        updateSession(selectedChatId, sessionId, () => ({
+          hitl: {
+            message: msg.message || "",
+            requestedFields: Array.isArray(msg.requested_fields) ? msg.requested_fields : [],
+          },
+        }));
         appendSessionChatMessage(selectedChatId, sessionId, msg.message, false);
+      } else if (msg.type === "HITL_CLOSED") {
+        updateSession(selectedChatId, sessionId, () => ({ hitl: null }));
       } else if (msg.type === "RESPONSE") {
-        setHitlState(false);
+        updateSession(selectedChatId, sessionId, () => ({
+          hitl: null,
+          itemResults: Array.isArray(msg.item_results) ? msg.item_results : [],
+        }));
         appendSessionChatMessage(selectedChatId, sessionId, msg.content, false);
+      } else if (msg.type === "run_finished") {
+        updateSession(selectedChatId, sessionId, () => ({
+          status: msg.status || "failed",
+          exitReason: msg.exit_reason || "",
+          hitl: null,
+          finishedAt: Date.now(),
+        }));
+        setHistoryRefreshKey((key) => key + 1);
       }
     };
 
     socket.onclose = () => {
-      // Identity guard: a previous run's close event can land after a new run has
-      // started, and without this check it reset the live view and flipped the new
-      // run back to "Idle".
-      markSessionFinished(selectedChatId, sessionId);
-      if (socketRef.current !== socket) return;
-
-      // hasStream is deliberately left alone: the last frame stays on the
-      // canvas as evidence of what the finished run did.
-      setHitlState(false);
-      setIsAgentRunning(false);
-      setCurrentRunSessionId(null);
+      markSessionClosed(selectedChatId, sessionId);
+      runSocketsRef.current.delete(sessionId);
     };
+  };
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+
+    const currentInput = input;
+    setInput("");
+    const selectedChatId = activeChatIdRef.current;
+
+    // While this chat has a live run, the input box replies to it.
+    const running = findRunningSession(selectedChatId);
+    if (running) {
+      sendReplyToSession(selectedChatId, running, currentInput);
+      return;
+    }
+
+    launchRun(currentInput);
   };
 
   const handleNewChat = () => {
@@ -768,13 +766,13 @@ export default function Dashboard() {
     }, 50);
   };
 
+  // Enter submits; Shift+Enter makes a newline; a composing IME keydown is
+  // neither (submitting mid-composition is how CJK input used to fire early).
   const handleKeyPress = (e) => {
-    if (e.key === "Enter") handleSend();
-  };
-
-  const handleSaveSettings = () => {
-    localStorage.setItem("agentPrompt", agentPrompt); // persistence
-    setShowSettings(false); // close modal
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   const handleGetUserInfo = async () => {
@@ -813,25 +811,28 @@ export default function Dashboard() {
       if (msg.type !== "STATUS" || !msg.content) return;
 
       const chatId = activeChatIdRef.current;
-      const runningSessionId = currentRunSessionIdRef.current;
-      if (isAgentRunningRef.current && runningSessionId) {
-        appendSessionChatMessage(chatId, runningSessionId, msg.content, false);
+      const running = findRunningSession(chatId);
+      if (running) {
+        appendSessionChatMessage(chatId, running.id, msg.content, false);
         return;
       }
       appendMessageToChat(chatId, msg.content, false, "chat-socket");
     };
 
+    const runSockets = runSocketsRef.current;
     return () => {
       if (chatSocketRef.current) {
         chatSocketRef.current.close();
         chatSocketRef.current = null;
       }
 
-      if (socketRef.current) {
-        socketRef.current.close();
-        socketRef.current = null;
+      // Close every run socket this page owns.
+      for (const holder of runSockets.values()) {
+        holder.current?.close();
       }
+      runSockets.clear();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLogout = () => {
@@ -1109,41 +1110,63 @@ export default function Dashboard() {
   const mainLaneMessages = (activeChat?.messages || []).filter((msg) => msg.channel !== "chat-socket");
   const activeChatSessions = agentSessionsByChat[activeChatId] || [];
   const runningSession =
-    activeChatSessions.find(
-      (session) => session.id === currentRunSessionId && session.status === "running"
-    ) || null;
+    activeChatSessions.find((session) => session.status === "running") || null;
   const latestSession =
     activeChatSessions.length > 0 ? activeChatSessions[activeChatSessions.length - 1] : null;
   const thoughtSession = runningSession || latestSession;
   const thoughtSessionIndex = thoughtSession
     ? activeChatSessions.findIndex((session) => session.id === thoughtSession.id) + 1
     : 0;
+  // Structured HITL: derived from the session, not from log sniffing.
+  const activeHitl = runningSession?.hitl || null;
+  const isAgentRunning = Boolean(runningSession);
+  // The live view consumes the running session's own socket holder.
+  const activeSocketHolder = runningSession
+    ? runSocketsRef.current.get(runningSession.id) || { current: null }
+    : { current: null };
 
+  // Autoscroll the log panel only when the user is already at the bottom;
+  // scrolling up to read must not fight a live stream.
   useEffect(() => {
     const container = thoughtsStreamRef.current;
     if (!container) return;
-    container.scrollTop = container.scrollHeight;
+    const nearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+    if (nearBottom) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [thoughtSession?.id, thoughtSession?.logs.length, thoughtsTab]);
 
   // Takeover is allowed at any time during a run, not only in HITL pauses:
   // the live view is the escape hatch for CAPTCHAs and widgets the agent
-  // cannot drive. isHITL still drives notifications and chat prompts.
+  // cannot drive.
   const browserIsInteractive = Boolean(runningSession && hasStream);
   const browserStatusTone = browserIsInteractive ? "interactive" : runningSession ? "locked" : "idle";
   const browserStatusLabel = browserIsInteractive
-    ? isHITL
+    ? activeHitl
       ? "Action needed"
       : "Interactive"
     : runningSession
       ? "Connecting"
       : "Standby";
   const browserStatusDetail = browserIsInteractive
-    ? isHITL
+    ? activeHitl
       ? "The agent needs your help"
       : "Click the view to take over"
     : runningSession
       ? "Waiting for stream"
       : "Ready";
+
+  const statusChipFor = (session) => {
+    const value = session.status === "finished" ? "succeeded" : session.status;
+    const labels = {
+      running: "Running",
+      succeeded: "Succeeded",
+      failed: "Failed",
+      aborted: "Stopped",
+    };
+    return { value, label: labels[value] || value };
+  };
 
   return (
     <div className="dashboard-container">
@@ -1160,7 +1183,9 @@ export default function Dashboard() {
       
       {/* Sidebar */}
       <aside className={`dashboard-sidebar ${mobileMenuOpen ? "mobile-open" : ""}`}>
-        <h1 className="dashboard-title">Intelligent Browser Agents</h1>
+        <h1 className="dashboard-title">
+          <Brand size={30} />
+        </h1>
 
         <button className="sidebar-btn" onClick={() => { handleNewChat(); setMobileMenuOpen(false); }}>
           + New chat
@@ -1201,8 +1226,22 @@ export default function Dashboard() {
                   <p className="panel-kicker">Current Run</p>
                   <h2>Live Agent View</h2>
                 </div>
-                <div className={`run-chip ${runningSession ? "live" : latestSession ? "review" : "idle"}`}>
-                  {runningSession ? "Running" : latestSession ? "Review" : "Idle"}
+                <div className="live-panel-controls">
+                  {latestSession && !runningSession && (
+                    <span className={`status-chip ${statusChipFor(latestSession).value}`}>
+                      {statusChipFor(latestSession).label}
+                    </span>
+                  )}
+                  {runningSession && <span className="status-chip running">Running</span>}
+                  {runningSession && (
+                    <button
+                      type="button"
+                      className="btn btn-danger stop-run-btn"
+                      onClick={() => stopSession(activeChatId, runningSession)}
+                    >
+                      Stop
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1220,7 +1259,8 @@ export default function Dashboard() {
                     className={`browser-frame-wrapper browser-frame-shell${browserIsInteractive ? " browser-interactive" : ""}`}
                   >
                     <LiveView
-                      socketRef={socketRef}
+                      key={(runningSession || latestSession)?.id || "idle"}
+                      socketRef={activeSocketHolder}
                       runActive={Boolean(runningSession)}
                       onStreamChange={setHasStream}
                     />
@@ -1229,6 +1269,7 @@ export default function Dashboard() {
                   <div className="live-agent-placeholder">
                     <span className="placeholder-orbit placeholder-orbit-a" aria-hidden="true" />
                     <span className="placeholder-orbit placeholder-orbit-b" aria-hidden="true" />
+                    <Brand size={52} wordmark={false} />
                     <p className="placeholder-kicker">
                       {latestSession ? "Run complete" : `Welcome${firstname ? `, ${firstname}` : ""}`}
                     </p>
@@ -1270,8 +1311,11 @@ export default function Dashboard() {
                       <section key={session.id} className="transcript-run">
                         <div className="transcript-run-header">
                           <span className="transcript-run-title">Run {sessionIndex + 1}</span>
-                          <span className={`transcript-run-status ${session.status}`}>
-                            {session.status === "running" ? "Live" : "Complete"}
+                          <span
+                            className={`status-chip ${statusChipFor(session).value}`}
+                            title={session.exitReason || undefined}
+                          >
+                            {statusChipFor(session).label}
                           </span>
                         </div>
 
@@ -1291,6 +1335,40 @@ export default function Dashboard() {
                               {msg.isUser ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
                             </div>
                           ))}
+
+                          {session.status === "running" && session.hitl && (
+                            <HitlForm
+                              key={`${session.id}-hitl-${session.hitl.message}`}
+                              hitl={session.hitl}
+                              onSubmit={(reply) => sendReplyToSession(activeChatId, session, reply)}
+                            />
+                          )}
+
+                          {session.itemResults.length > 0 && (
+                            <div className="transcript-bubble chat-system item-results">
+                              <strong>Per-item results</strong>
+                              <ul>
+                                {session.itemResults.map((item, index) => (
+                                  <li key={index}>
+                                    <span
+                                      className={`status-chip ${
+                                        String(item.status || "").toLowerCase().includes("success")
+                                          ? "succeeded"
+                                          : "failed"
+                                      }`}
+                                    >
+                                      {item.status || "?"}
+                                    </span>
+                                    <span>{item.description || `Item ${index + 1}`}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {session.status !== "running" && session.exitReason && session.status !== "succeeded" && (
+                            <p className="transcript-exit-reason">{session.exitReason}</p>
+                          )}
                         </div>
                       </section>
                     ))}
@@ -1305,19 +1383,30 @@ export default function Dashboard() {
                 {isAgentRunning ? "Reply" : "Input"}
               </label>
               <div className="input-row">
-                <input
+                <textarea
                   id="dashboard-input"
                   className="dashboard-input"
+                  rows={1}
                   placeholder={
                     isAgentRunning
-                      ? "Send reply..."
-                      : "Start browsing..."
+                      ? "Send a reply... (Shift+Enter for a new line)"
+                      : "Start browsing... (Shift+Enter for a new line)"
                   }
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyPress}
                 />
-                <button className="dashboard-bar-btn" onClick={handleSend} disabled={!input.trim()}>
+                {!isAgentRunning && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setShowBatchComposer(true)}
+                    title="Run the same task across a list of URLs"
+                  >
+                    Batch
+                  </button>
+                )}
+                <button className="btn btn-primary dashboard-bar-btn" onClick={handleSend} disabled={!input.trim()}>
                   {isAgentRunning ? "Send" : "Launch"}
                 </button>
               </div>
@@ -1359,10 +1448,21 @@ export default function Dashboard() {
               >
                 Logs
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={thoughtsTab === "history"}
+                className={`thoughts-tab ${thoughtsTab === "history" ? "active" : ""}`}
+                onClick={() => setThoughtsTab("history")}
+              >
+                History
+              </button>
             </div>
 
             <div className="thoughts-meta">
-              {thoughtSession ? (
+              {thoughtsTab === "history" ? (
+                <p className="thoughts-prompt">Every run, kept on the server.</p>
+              ) : thoughtSession ? (
                 <>
                   <span className="thoughts-run-label">Run {thoughtSessionIndex}</span>
                   <p className="thoughts-prompt">{thoughtSession.prompt}</p>
@@ -1376,7 +1476,11 @@ export default function Dashboard() {
               )}
             </div>
 
-            {thoughtsTab === "thinking" ? (
+            {thoughtsTab === "history" ? (
+              <div className="thoughts-stream">
+                <RunHistory refreshKey={historyRefreshKey} />
+              </div>
+            ) : thoughtsTab === "thinking" ? (
               thoughtSession ? (
                 <ThinkingStream key={thoughtSession.id} session={thoughtSession} />
               ) : (
@@ -1435,40 +1539,22 @@ export default function Dashboard() {
       </main>
       {/* ---------- SETTINGS MODAL ---------- */}
       {showSettings && (
-        <div className="modal-overlay" >
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowSettings(false)} aria-label="Close settings">X</button>
-            <h2 className="modal-title">Settings</h2>
-
-            <label className="modal-label">Agent Prompt</label>
-            <textarea
-              className="modal-textarea"
-              placeholder="Type here..."
-              value={agentPrompt}
-              onChange={(e) => setAgentPrompt(e.target.value)}
-            />
-
-            {/* Account Options */}
-            <h3>Account Settings</h3>
-            <button className="setting-btn">Reset Password</button>
-            <br/>
-            <button className="setting-btn">Delete Account</button>
-            <br/><br/>
-
-            <button className="save-btn" onClick={handleSaveSettings}>Save Settings</button>
-          </div>
-        </div>
+        <SettingsModal onClose={() => setShowSettings(false)} onLogout={handleLogout} />
       )}
 
+      {showBatchComposer && (
+        <BatchComposer
+          onClose={() => setShowBatchComposer(false)}
+          onLaunch={(prompt) => {
+            setShowBatchComposer(false);
+            launchRun(prompt);
+          }}
+        />
+      )}
 
       {/* ---------- USER CREDENTIALS MODAL ---------- */}
       {showUserCredentials && (
-        <div className="modal-overlay">
-          <div className="modal-content user-credentials-modal">
-            <button className="modal-close" onClick={handleSaveGeneralUserData} aria-label="Save and close user credentials">X</button>
-            <h2 className="modal-title">User Credentials</h2>
-            <hr className="modal-title-divider"/>
-
+        <Modal title="Your Details" onClose={() => setShowUserCredentials(false)} wide>
             {credentialsError && (
               <p className="creds-error" role="alert">{credentialsError}</p>
             )}
@@ -1514,24 +1600,99 @@ export default function Dashboard() {
 
             ) : (
               // FALSE - prompt user to verify their identity first
-              <div className="password-verification-group">
-                <h3 className="password-prompt">Please enter your password.</h3>
-                <input 
-                  className="small-input password-input" 
-                  placeholder="Your Password" 
-                  type="password" 
+              <form
+                className="password-verification-group"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  verifyUser();
+                }}
+              >
+                <h3 className="password-prompt">Confirm your password to view saved details.</h3>
+                <input
+                  className="text-input password-input"
+                  placeholder="Your password"
+                  type="password"
+                  autoComplete="current-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}  
-                ></input>
-                <button className="setting-btn verify-identity-btn" type="submit" onClick={verifyUser}>Verify Identity</button>
-              </div>
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button className="btn btn-primary" type="submit">Verify identity</button>
+              </form>
             )}
 
-          </div>
-        </div>
+            {didUserVerifyIdentity && (
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowUserCredentials(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" onClick={handleSaveGeneralUserData}>
+                  Save and close
+                </button>
+              </div>
+            )}
+        </Modal>
       )}
 
     </div>
+  );
+}
+
+/**
+ * Batch composer: paste a list of job URLs, get one mission whose work items
+ * the planner turns into the deterministic outer loop ("apply to each").
+ */
+function BatchComposer({ onClose, onLaunch }) {
+  const [instruction, setInstruction] = useState(
+    "Apply to each of these jobs using my saved profile and documents."
+  );
+  const [urlText, setUrlText] = useState("");
+
+  const urls = urlText
+    .split(/\s+/)
+    .map((u) => u.trim())
+    .filter((u) => /^https?:\/\//i.test(u));
+
+  const launch = () => {
+    const lines = urls.map((u) => `- ${u}`).join("\n");
+    onLaunch(`${instruction.trim()}\n\nWork through these one at a time:\n${lines}`);
+  };
+
+  return (
+    <Modal title="Batch run" onClose={onClose}>
+      <p className="settings-hint">
+        One task, many pages. The agent works through the list one item at a
+        time and reports the outcome of each.
+      </p>
+      <label className="field-label" htmlFor="batch-instruction">What should the agent do?</label>
+      <input
+        id="batch-instruction"
+        className="text-input"
+        value={instruction}
+        onChange={(e) => setInstruction(e.target.value)}
+      />
+      <label className="field-label" htmlFor="batch-urls">
+        URLs (one per line){urls.length > 0 ? ` - ${urls.length} detected` : ""}
+      </label>
+      <textarea
+        id="batch-urls"
+        className="text-input batch-url-input"
+        rows={6}
+        placeholder={"https://example.com/careers/123\nhttps://example.org/jobs/456"}
+        value={urlText}
+        onChange={(e) => setUrlText(e.target.value)}
+      />
+      <div className="modal-footer">
+        <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={urls.length === 0 || !instruction.trim()}
+          onClick={launch}
+        >
+          Launch {urls.length > 0 ? `${urls.length} item${urls.length === 1 ? "" : "s"}` : "batch"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

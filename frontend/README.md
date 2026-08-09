@@ -75,6 +75,23 @@ existing `LOG`/`STATUS` messages; there is no dedicated backend channel.
 The issue that introduced this is
 [docs/issues/thinking-stream-ui.md](../docs/issues/thinking-stream-ui.md).
 
+## Configuration
+
+`VITE_API_BASE` sets the backend origin for REST and WebSocket calls
+(e.g. `https://api.example.com`).
+Unset (the default), the app talks same-origin: the dev server proxies
+`/api` and `/ws`, and a production build served by the backend needs no
+prefix.
+
+## Brand
+
+The app is branded HUMANi.
+The mark is a flat SVG at `src/assets/brand/humani-mark.svg`, rendered
+with the wordmark by `src/components/Brand.jsx`.
+Design tokens (colors, radii, shadows) live in `src/index.css`; new UI
+should consume those variables rather than hardcoding colors, and keep
+surfaces flat - no gradients where they are not necessary.
+
 ## Known gaps
 
 The build toolchain aliases `vite` to `rolldown-vite` via `overrides` in
