@@ -110,7 +110,7 @@ def test_regression_verifier_no_longer_overwrites_the_log_tail():
 def test_regression_the_prompt_receives_after_state():
     """`last_execution` goes into the prompt and must prefer the raw log entry."""
     source = inspect.getsource(Verifier.__call__)
-    prompt_line = 'self._clip_text(last_execution, 2200)'
+    prompt_line = 'self._clip_text(last_execution, 4400)'
     assert prompt_line in source, "prompt no longer interpolates last_execution"
     # And last_execution must come from the raw log, not the synthetic renderer.
     assert "last_execution = recent_executor_logs[-1]" in source

@@ -51,6 +51,7 @@ class ActionArgs(BaseModel):
 
     # fill
     clear: Optional[bool] = True
+    press_enter: Optional[bool] = None
 
     # read_page
     section: Optional[int] = None

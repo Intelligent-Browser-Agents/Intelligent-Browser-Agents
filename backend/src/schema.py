@@ -106,6 +106,10 @@ class ExecutionArgs(BaseModel):
     text_contains: Optional[str] = Field(default=None, description="Visible text for wait_for.")
     index: Optional[int] = Field(default=None, description="Tab index for switch_tab / close_tab.")
     clear: Optional[bool] = Field(default=True, description="Whether fill clears the field first.")
+    press_enter: Optional[bool] = Field(
+        default=None,
+        description="For fill: press Enter in the field after the value is confirmed (commits a search box).",
+    )
     section: Optional[int] = Field(default=None, description="1-based snapshot section for read_page.")
     text: Optional[str] = Field(
         default=None,

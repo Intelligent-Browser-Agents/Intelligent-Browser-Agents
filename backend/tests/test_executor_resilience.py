@@ -515,12 +515,18 @@ def test_dom_cache_context_prefers_diff_summary_when_two_snapshots_exist():
     assert "Riu Plaza Chicago" in context
 
 
-def test_dom_snapshot_budget_for_listing_tasks_is_moderate_and_bounded():
+def test_dom_snapshot_budget_is_uniform_and_larger_than_a_section():
     budget = Executor._dom_snapshot_budget("Select a hotel from the booking results listing.")
 
     # Phase 3 removed the site-specific listing heuristic so section numbers are
-    # stable across every page shape, not special-cased for one travel DOM.
-    assert budget == 3500
+    # stable across every page shape. The executor's own view is deliberately
+    # larger than the 3500-char read_page section: at one section per prompt the
+    # targets a step needs were routinely out of sight and reachable only
+    # through read_page round-trips (docs/issues/executor-page-visibility-loop.md).
+    assert budget == Executor._EXECUTOR_SNAPSHOT_MAX_CHARS
+    assert budget >= 3500
+    # Every task gets the same budget; no task-keyword special cases.
+    assert Executor._dom_snapshot_budget("Fill the email field.") == budget
 
 
 def test_recovery_screenshot_capture_gate_requires_retry_or_high_signal_error():

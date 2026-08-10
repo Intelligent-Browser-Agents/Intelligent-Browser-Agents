@@ -108,6 +108,7 @@ class Executor:
 
         dom_snapshot = await self._get_real_dom_snapshot(page, max_chars=self._dom_snapshot_budget(current_task))
         plan_step_url = self._extract_first_url(current_task) or "none"
+        read_section_block = self._build_read_section_context(state, dom_snapshot)
         credentials_block = self._build_credentials_context(state, current_task, current_url)
         recent_actions_block = self._build_recent_actions(state)
         adaptive_guidance_block = self._build_adaptive_guidance(state, current_task)
@@ -133,6 +134,7 @@ class Executor:
 
         DOM_SNAPSHOT:
         {dom_snapshot}
+        {read_section_block}
         {dom_cache_block}
         {field_priority_block}
         {credentials_block}
@@ -268,6 +270,15 @@ class Executor:
                     error_type="ambiguous_step",
                 )
 
+            repeat_message = self._repeated_readonly_call(state, name, args)
+            if repeat_message:
+                return self._return_failure(
+                    state, current_url,
+                    action=name, args=args,
+                    message=repeat_message,
+                    error_type="repeated_action",
+                )
+
             consume_sensitive_approval = False
             decision = assess_action(
                 name,
@@ -314,7 +325,7 @@ class Executor:
                     error_type="unknown",
                     clear_sensitive_approval=consume_sensitive_approval,
                 )
-            result = self._coerce_tool_result_to_output(name, result)
+            result = self._coerce_tool_result_to_output(name, result, args)
             return await self._finish_from_result(
                 state,
                 page,
@@ -395,6 +406,15 @@ class Executor:
             validated_args = validated.args.model_dump(
                 exclude_none=True, exclude_defaults=True
             )
+
+            repeat_message = self._repeated_readonly_call(state, validated.action, validated_args)
+            if repeat_message:
+                return self._return_failure(
+                    state, current_url,
+                    action=validated.action, args=validated_args,
+                    message=repeat_message,
+                    error_type="repeated_action",
+                )
 
             consume_sensitive_approval = False
             decision = assess_action(
@@ -595,12 +615,19 @@ class Executor:
             return str(decision.get("reason") or "This action requires explicit confirmation")
         return None
 
+    _SIGNATURE_ARG_KEYS = (
+        "url", "role", "name", "text", "direction", "key", "seconds",
+        "section", "nth", "label", "value", "checked", "index",
+        "url_contains", "text_contains", "file_path", "max_chars",
+        "query", "filter_text", "max_results", "press_enter",
+    )
+
     @staticmethod
     def _action_signature(action: str | None, args: dict) -> str:
         action_l = (action or "").strip().lower()
         safe_args = {}
         if isinstance(args, dict):
-            for key in ("url", "role", "name", "text", "direction", "key", "seconds"):
+            for key in Executor._SIGNATURE_ARG_KEYS:
                 value = args.get(key)
                 if value is None:
                     continue
@@ -609,6 +636,45 @@ class Executor:
                 safe_args[key] = value
         encoded = json.dumps(safe_args, ensure_ascii=True, sort_keys=True, default=str)
         return f"{action_l}:{encoded}"
+
+    # Read-only discovery actions where re-running the identical call cannot
+    # produce new information. State-changing repeats stay legal: scrolling
+    # again, clicking "Next Page" again, or pressing ArrowDown again are all
+    # legitimate.
+    _REPEAT_GUARDED_ACTIONS = frozenset({
+        "read_page", "read_form", "list_tabs", "list_links", "dom_search", "extract_content",
+    })
+
+    @classmethod
+    def _repeated_readonly_call(cls, state: ProjectState, action: str | None, args) -> str | None:
+        """Message when this call would repeat the previous successful read-only call verbatim.
+
+        Observed failure: read_page(section=2) executed five times in a row,
+        each costing a full orchestrate/execute/verify cycle, because nothing
+        structural stopped the repetition once the model settled on it.
+        """
+        action_l = (action or "").strip().lower()
+        if action_l not in cls._REPEAT_GUARDED_ACTIONS:
+            return None
+        event = state.get("last_execution_event")
+        event = event if isinstance(event, dict) else {}
+        if (event.get("action") or "").strip().lower() != action_l:
+            return None
+        if (event.get("status") or "").strip().lower() != "success":
+            return None
+        proposed = dict(args) if isinstance(args, dict) else {}
+        previous = event.get("args")
+        previous = dict(previous) if isinstance(previous, dict) else {}
+        if action_l == "read_page":
+            proposed.setdefault("section", 1)
+            previous.setdefault("section", 1)
+        if cls._action_signature(action_l, proposed) != cls._action_signature(action_l, previous):
+            return None
+        return (
+            f"Refusing to run {action_l} again with identical arguments: you already have its result "
+            "(see PAGE_SECTION_JUST_READ / PREVIOUS_ACTIONS). Act on what it showed - click or fill a "
+            "listed target, scroll, or read a different section."
+        )
 
     @staticmethod
     def _is_sensitive_action_approved(state: ProjectState, action_signature: str) -> bool:
@@ -631,11 +697,15 @@ class Executor:
         return action
 
     @staticmethod
-    def _coerce_tool_result_to_output(tool_name: str, result: Any) -> ExecutionOutput:
+    def _coerce_tool_result_to_output(tool_name: str, result: Any, args: dict | None = None) -> ExecutionOutput:
         """
         Handler-based tools return ExecutionOutput; dom_search / list_links return lists
         of snippets or link dicts. Normalize so _finish_from_result always sees ExecutionOutput.
+
+        `args` are the tool-call arguments; synthesized outputs carry them so the
+        repeat guard and the action log can see what the call actually asked for.
         """
+        args = args if isinstance(args, dict) else {}
         if isinstance(result, ExecutionOutput):
             return result
         if isinstance(result, dict):
@@ -665,7 +735,7 @@ class Executor:
                 msg += f" Clickable targets:\n{preview}"
             return ExecutionOutput(
                 action=tool_name,
-                args={},
+                args=args,
                 status="success",
                 error_type="none",
                 message=msg,
@@ -675,7 +745,7 @@ class Executor:
         if isinstance(result, str):
             return ExecutionOutput(
                 action=tool_name,
-                args={},
+                args=args,
                 status="success",
                 error_type="none",
                 message=f"Tool {tool_name} completed.",
@@ -684,7 +754,7 @@ class Executor:
             )
         return ExecutionOutput(
             action=tool_name,
-            args={},
+            args=args,
             status="success",
             error_type="none",
             message=f"Tool {tool_name} returned {type(result).__name__}",
@@ -833,9 +903,16 @@ class Executor:
             return []
         return self._missing_required_field_names(getattr(result, "extracted_text", "") or "")
 
+    # The executor's own view of the page is allowed to be much larger than the
+    # default per-section budget. At 3500 chars a job-listings page paginates
+    # into 5 sections and the targets the step needs are routinely in section 2+,
+    # which the model can only reach through read_page round-trips. ~12k chars
+    # (~3k tokens) fits typical pages whole; genuinely huge pages still paginate.
+    _EXECUTOR_SNAPSHOT_MAX_CHARS = int(os.getenv("EXECUTOR_SNAPSHOT_MAX_CHARS", "12000"))
+
     @staticmethod
     def _dom_snapshot_budget(current_task: str) -> int:
-        return SNAPSHOT_SECTION_MAX_CHARS
+        return max(Executor._EXECUTOR_SNAPSHOT_MAX_CHARS, SNAPSHOT_SECTION_MAX_CHARS)
 
     @staticmethod
     def _split_dom_cache_snapshot(snapshot: str) -> tuple[str, list[str]]:
@@ -855,6 +932,36 @@ class Executor:
         added = [line for line in latest_lines if line not in prev_set][:max_items]
         removed = [line for line in previous_lines if line not in latest_set][:max_items]
         return added, removed
+
+    @staticmethod
+    def _build_read_section_context(state: ProjectState, dom_snapshot: str) -> str:
+        """Re-show the section a read_page call just fetched, so it can be acted on.
+
+        Without this the section body evaporated between turns: it went into the
+        action result, but the next executor prompt rendered section 1 again, so
+        the model's only visible move was to read the same section forever.
+        Only the turn immediately after a read_page carries this block; any other
+        action overwrites last_page_snapshot with a fresh capture.
+        """
+        event = state.get("last_execution_event")
+        event = event if isinstance(event, dict) else {}
+        if (event.get("action") or "") != "read_page":
+            return ""
+        if (event.get("status") or "") != "success":
+            return ""
+        body = (state.get("last_page_snapshot") or "").strip()
+        rows = [line for line in body.splitlines() if line.startswith("[ref=")]
+        if not rows:
+            return ""
+        # Skip when the fresh DOM_SNAPSHOT already contains these rows (the page
+        # fits inside the executor budget); duplication would only burn context.
+        sample = rows[:: max(1, len(rows) // 8)][:8]
+        if sum(1 for line in sample if line in dom_snapshot) >= (len(sample) + 1) // 2:
+            return ""
+        return (
+            "\n\nPAGE_SECTION_JUST_READ (result of your read_page call; these targets are on the "
+            "current page and actionable NOW - act on one instead of reading again):\n" + body
+        )
 
     @staticmethod
     def _build_dom_cache_context(state: ProjectState) -> str:
@@ -1038,14 +1145,20 @@ class Executor:
             new_url = result.args.get("url") or page.url if result.action == "navigate" else page.url
         else:
             new_url = page.url
+        extracted = getattr(result, "extracted_text", None)
         after_state = ""
-        try:
-            after_state = await self._get_real_dom_snapshot(page, max_chars=SNAPSHOT_SECTION_MAX_CHARS)
-        except Exception:
-            after_state = f"[URL after action: {new_url}]"
+        if result.action == "read_page" and result_status == "success" and extracted and extracted.strip():
+            # The read section IS the page evidence for this action. Re-rendering
+            # section 1 here is what made read_page results invisible to both the
+            # verifier and the next executor turn.
+            after_state = extracted.strip()
+        else:
+            try:
+                after_state = await self._get_real_dom_snapshot(page, max_chars=SNAPSHOT_SECTION_MAX_CHARS)
+            except Exception:
+                after_state = f"[URL after action: {new_url}]"
 
         # For extract_content, show the extracted text to the verifier
-        extracted = getattr(result, "extracted_text", None)
         if extracted and result.action == "extract_content":
             after_state = (
                 f"EXTRACTED_TEXT:\n{extracted.strip()[:SNAPSHOT_SECTION_MAX_CHARS]}\n\n"
@@ -1078,7 +1191,16 @@ class Executor:
             ),
             "last_page_snapshot": after_state,
         }
-        if extracted and isinstance(extracted, str) and extracted.strip():
+        # Only page *content* belongs in the report pipeline. read_form rides
+        # along because status_tracker._read_form_rows consumes it from this
+        # key. read_page sections and discovery listings are working context;
+        # letting them in made raw DOM rows count as "reportable content".
+        if (
+            extracted
+            and isinstance(extracted, str)
+            and extracted.strip()
+            and result.action in {"extract_content", "read_form"}
+        ):
             out["extracted_content"] = [extracted.strip()]
         # Also keep a lightweight DOM/text snapshot in dom_cache for later navigation tools
         try:
@@ -1793,6 +1915,9 @@ class Executor:
             "direction",
             "key",
             "seconds",
+            "press_enter",
+            "query",
+            "filter_text",
         ]:
             value = args.get(key) if isinstance(args, dict) else None
             if value is not None and str(value).strip() != "":

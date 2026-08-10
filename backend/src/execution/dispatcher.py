@@ -72,7 +72,12 @@ async def dispatch_action(page: Page, action: Action, runtime: dict | None = Non
         "navigate": lambda: handle_navigate(page, a.url),
         # Element-addressed actions. Each names its target and verifies its effect.
         "click": lambda: do_click(page, a.role, a.name, nth=a.nth),
-        "fill": lambda: do_fill(page, a.role, a.name, a.text, nth=a.nth, clear=True if a.clear is None else a.clear),
+        "fill": lambda: do_fill(
+            page, a.role, a.name, a.text,
+            nth=a.nth,
+            clear=True if a.clear is None else a.clear,
+            press_enter=bool(a.press_enter),
+        ),
         # role defaults to combobox for parity with the tool-mode schema
         # (SelectOptionInput); without it a role-less JSON call dies on
         # invalid_role while the identical tool call works.

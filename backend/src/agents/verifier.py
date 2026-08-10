@@ -105,12 +105,15 @@ class Verifier:
         else:
             last_execution_structured = recent_executor_logs[-1] if recent_executor_logs else "No execution log."
 
+        # 4000 chars so the page evidence survives past the global-nav rows that
+        # open every snapshot; at 2200 the verifier often saw nothing but the
+        # site chrome and judged the page from it.
         page_snapshot = (state.get("last_page_snapshot") or "").strip()
         if page_snapshot:
             last_execution = (
                 f"{last_execution_structured}\n"
                 f"[Executor] AFTER_STATE (page content for verification):\n"
-                f"{self._clip_text(page_snapshot, 2200)}"
+                f"{self._clip_text(page_snapshot, 4000)}"
             )
         else:
             last_execution = recent_executor_logs[-1] if recent_executor_logs else last_execution_structured
@@ -274,7 +277,7 @@ STRUCTURAL_SIGNALS (measured, prefer these over prose):
 - field_progress: {fp_display}
 
 EXECUTION_OUTPUT (action, args, status, message) and AFTER_STATE (page content after the action) from the Execution Agent:
-{self._clip_text(last_execution, 2200)}
+{self._clip_text(last_execution, 4400)}
 
 RECENT_EXECUTION_HISTORY (last few executor logs):
 {recent_executor_history}

@@ -114,6 +114,24 @@ async def test_fill_never_echoes_the_value(form):
     assert "character(s)" in result.message
 
 
+async def test_fill_press_enter_commits_on_the_field_itself(form):
+    """press_enter presses Enter on the just-filled element, not the page keyboard,
+    so a focus-stealing overlay cannot eat the keystroke the way press_key can
+    (the Apple-careers run typed a search twice and never committed it)."""
+    result = await actions.do_fill(form, "textbox", "Full name", "Ada Lovelace", press_enter=True)
+    assert result.status == "success"
+    assert result.verified is True
+    assert "Pressed Enter" in result.message
+    assert await form.locator("#status").inner_text() == "Application received"
+
+
+async def test_fill_without_press_enter_does_not_submit(form):
+    result = await actions.do_fill(form, "textbox", "Full name", "Ada Lovelace")
+    assert result.status == "success"
+    assert "Pressed Enter" not in result.message
+    assert await form.locator("#status").inner_text() == ""
+
+
 async def test_fill_refuses_a_readonly_field(form):
     result = await actions.do_fill(form, "textbox", "Requisition", "TAMPERED")
     assert result.status == "failure"
@@ -266,6 +284,14 @@ async def test_wait_for_requires_a_condition(form):
     result = await actions.do_wait_for(form, seconds=1)
     assert result.status == "failure"
     assert result.error_type == "ambiguous_step"
+
+
+async def test_wait_for_says_when_the_url_condition_was_already_true(form):
+    """A tautological wait must say so, or a login-wall step can 'succeed'
+    instantly every cycle and burn the transaction budget without waiting."""
+    result = await actions.do_wait_for(form, url_contains="job_application", seconds=5)
+    assert result.status == "success"
+    assert "already contained" in result.message
 
 
 # ---------------------------------------------------------------------------

@@ -269,7 +269,11 @@ async def _run_hitl_loop(app, config: dict, graph_input: dict) -> None:
 async def main(prompt: str, video_port: int, credentials: dict | None = None, run_id: str | None = None, session_key: str | None = None):
     run_id = run_id or str(uuid.uuid4())
     session_key = session_key or run_id
-    max_transactions = 80
+    # Every graph node increments the counter, so one browser action costs ~4
+    # transactions (orchestrate, execute, verify, and often a fallback). 160
+    # allows ~40 actions; a real application flow (search, select, sign in,
+    # multi-page form) does not fit in the 20 that the old 80 allowed.
+    max_transactions = int(os.environ.get("AGENT_MAX_TRANSACTIONS", "160"))
     config = {
         "configurable": {"thread_id": run_id},
         "recursion_limit": max_transactions + _TRANSACTION_HEADROOM,

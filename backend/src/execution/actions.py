@@ -176,6 +176,29 @@ async def do_click(
 # fill
 # ---------------------------------------------------------------------------
 
+async def _commit_with_enter(page: Page, locator) -> str:
+    """Press Enter on the just-filled element and report what it did.
+
+    Pressing on the locator, not the page keyboard, means an autocomplete
+    overlay or a stray click cannot steal the keystroke: `press_key("Enter")`
+    goes to whatever currently has focus, which is how a typed search query
+    can silently never be committed.
+    """
+    url_before = page.url
+    try:
+        await locator.press("Enter", timeout=ELEMENT_TIMEOUT_MS)
+    except PlaywrightError as exc:
+        return f" Enter could not be pressed: {str(exc).splitlines()[0]}"
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=3000)
+    except PlaywrightError:
+        pass
+    await asyncio.sleep(SETTLE_SECONDS)
+    if page.url != url_before:
+        return f" Pressed Enter; the page navigated to {page.url}."
+    return " Pressed Enter (no URL change)."
+
+
 async def do_fill(
     page: Page,
     role: Optional[str],
@@ -183,6 +206,7 @@ async def do_fill(
     text: Optional[str],
     nth: Optional[int] = None,
     clear: bool = True,
+    press_enter: bool = False,
 ) -> ExecutionOutput:
     start = asyncio.get_event_loop().time()
     value = "" if text is None else str(text)
@@ -191,6 +215,8 @@ async def do_fill(
     args = {"role": role, "name": name, "text": value}
     if nth is not None:
         args["nth"] = nth
+    if press_enter:
+        args["press_enter"] = True
 
     res = await resolve_target(page, role, name, nth=nth, restrict_roles=set(EDITABLE_ROLES))
     if not res.ok:
@@ -248,13 +274,21 @@ async def do_fill(
         )
 
     if actual == value:
-        return _ok("fill", args, f"Filled {role} '{name}' with {len(value)} character(s).", start, verified=True)
-
-    if value and value in actual:
+        suffix = await _commit_with_enter(page, locator) if press_enter else ""
         return _ok(
             "fill",
             args,
-            f"Filled {role} '{name}'; field holds extra formatting ({len(actual)} chars stored).",
+            f"Filled {role} '{name}' with {len(value)} character(s).{suffix}",
+            start,
+            verified=True,
+        )
+
+    if value and value in actual:
+        suffix = await _commit_with_enter(page, locator) if press_enter else ""
+        return _ok(
+            "fill",
+            args,
+            f"Filled {role} '{name}'; field holds extra formatting ({len(actual)} chars stored).{suffix}",
             start,
             verified=True,
         )
@@ -566,6 +600,22 @@ async def do_wait_for(
 
     try:
         if url_contains:
+            # A condition that already holds is a zero-second no-op, not a wait.
+            # Observed loop: waiting on url_contains="apple.com" while already on
+            # apple.com "succeeded" instantly every cycle, so a login-wall step
+            # burned its whole transaction budget without ever actually waiting.
+            if url_contains in (page.url or ""):
+                return _ok(
+                    "wait_for",
+                    args,
+                    (
+                        f"URL already contained '{url_contains}' before waiting (0s elapsed). "
+                        "If you meant to wait for a future state, wait for something that is "
+                        "not yet true, e.g. a post-login URL fragment or visible text."
+                    ),
+                    start,
+                    verified=True,
+                )
             await page.wait_for_url(f"**{url_contains}**", timeout=timeout_ms)
             return _ok("wait_for", args, f"URL now contains '{url_contains}'.", start, verified=True)
 

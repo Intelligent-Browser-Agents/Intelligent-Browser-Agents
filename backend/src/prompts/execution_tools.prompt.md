@@ -18,6 +18,7 @@ Always present in the context:
 
 Present when relevant:
 
+- `PAGE_SECTION_JUST_READ`: the snapshot section your previous `read_page` call fetched. Its targets are on the current page and actionable right now; act on one. Requesting the same section again is rejected.
 - `DOM_TEXT_CONTEXT`: readable page text (or a diff against the previous step).
 - `FIELD_PRIORITY_CONTEXT`: visible fields and controls ranked against the step text. An ordering hint, not a ban.
 - `USER_CREDENTIALS`: saved values, sent on login and form steps. For a login step with a matched saved service it carries the exact credentials plus field-matching rules; for form steps it carries personal, payment, and experience info.
@@ -32,6 +33,7 @@ Tools are provided as callable functions, not as a list in the context.
 Entering data:
 
 - **`fill(role, name, text)`** is the way to put a value in a field. It names the field, so the value cannot land somewhere else, and it reads the value back.
+- **`fill(..., press_enter=True)`** commits the value in the same call once it is confirmed. Use it for search boxes and other submit-on-Enter fields: it presses Enter on the field itself, so an autocomplete overlay cannot steal the keystroke the way a separate `press_key` can. Do not click autocomplete suggestion options to commit a typed query unless the step requires choosing a specific suggested entity; suggestion lists often contain duplicate or detached entries.
 - **`select_option(name, label=...)`** for a dropdown. Clicking a dropdown or one of its options does not work.
 - **`set_checkbox(role, name, checked=...)`** for checkboxes, radios and switches. Prefer it over `click`: it is idempotent, so a retry cannot undo a previous success, and it confirms the resulting state.
 - **`upload_file(file_path=...)`** to attach a resume or other document. Never try to type a path into a file field.
@@ -40,7 +42,7 @@ Entering data:
 Finding out where you are:
 
 - **`read_form()`** lists every field with its state: filled or empty, checked, selected option, attached file, required, readonly. Use it before submitting to see what is still missing, instead of guessing from the snapshot.
-- **`read_page(section=N)`** fetches the snapshot section the DOM_SNAPSHOT footer names. If the target you need is not in the current section, read the next section before concluding it does not exist.
+- **`read_page(section=N)`** fetches the snapshot section the DOM_SNAPSHOT footer names. If the target you need is not in the current section, read the next section before concluding it does not exist. The section you fetch comes back on your next turn as `PAGE_SECTION_JUST_READ`; act on a target from it. Never request the same section twice in a row - the repeat is rejected without touching the page.
 - **`wait_for(...)`** waits for an element, a URL substring, or visible text. Prefer it over `wait(seconds)`, which just sleeps.
 
 Moving around:

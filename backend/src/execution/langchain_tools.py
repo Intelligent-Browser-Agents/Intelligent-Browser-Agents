@@ -69,6 +69,14 @@ class FillInput(BaseModel):
     name: str = Field(description="Accessible name or label of the field, exactly as shown in DOM_SNAPSHOT")
     text: str = Field(description="Value to put in the field")
     nth: Optional[int] = Field(default=None, description="0-based index, only when disambiguating")
+    press_enter: bool = Field(
+        default=False,
+        description=(
+            "Press Enter in this field right after the value is confirmed. Use for search boxes "
+            "and other fields that submit on Enter; more reliable than a separate press_key, "
+            "which goes to whatever happens to have focus."
+        ),
+    )
 
 
 class SelectOptionInput(BaseModel):
@@ -206,8 +214,8 @@ def get_browser_tools(page: Page, runtime: Optional[dict] = None) -> list[Struct
     async def click(role: str, name: str, nth: Optional[int] = None):
         return await do_click(page, role, name, nth=nth)
 
-    async def fill(role: str, name: str, text: str, nth: Optional[int] = None):
-        return await do_fill(page, role, name, text, nth=nth)
+    async def fill(role: str, name: str, text: str, nth: Optional[int] = None, press_enter: bool = False):
+        return await do_fill(page, role, name, text, nth=nth, press_enter=bool(press_enter))
 
     async def select_option(
         name: str,
@@ -373,7 +381,8 @@ def get_browser_tools(page: Page, runtime: Optional[dict] = None) -> list[Struct
                 "PREFERRED way to enter text. Put a value into a specific field named by role and "
                 "accessible name, e.g. fill(role='textbox', name='Email', text='a@b.com'). The value is "
                 "read back afterwards, so a readonly or masked field reports failure instead of a false "
-                "success. Use this rather than `type`, which cannot say which field it means."
+                "success. Use this rather than `type`, which cannot say which field it means. "
+                "For a search box, pass press_enter=True to commit the query in the same call."
             ),
             args_schema=FillInput,
         ),

@@ -71,6 +71,7 @@ _EXECUTOR_CONTEXT = {
     "PLAN_STEP",              # executor.py context f-string
     "PLAN_STEP_URL_HINT",     # executor.py context f-string
     "DOM_SNAPSHOT",           # executor.py context f-string
+    "PAGE_SECTION_JUST_READ", # executor._build_read_section_context
     "DOM_TEXT_CONTEXT",       # executor._build_dom_cache_context
     "FIELD_PRIORITY_CONTEXT", # executor._build_field_priority_context
     "USER_CREDENTIALS",       # executor._build_credentials_context
