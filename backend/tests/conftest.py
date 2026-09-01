@@ -1,10 +1,12 @@
 """
 Shared pytest fixtures.
 
-Two things happen here:
+Three things happen here:
 
 1. `page` provides a headless Chromium page for tests marked `browser`.
-2. `_stub_models` replaces the LLM factory with deterministic stubs for every test
+2. `site` serves `tests/fixtures/` over local HTTP, so browser tests need a
+   browser but never the network.
+3. `_stub_models` replaces the LLM factory with deterministic stubs for every test
    that is *not* marked `llm`, so the default suite runs offline and free. Without
    this, importing an agent is enough to require a provider API key, because
    `Models.<agent>()` resolves the key at construction time.
@@ -12,8 +14,53 @@ Two things happen here:
 
 from __future__ import annotations
 
+import functools
+import http.server
+import pathlib
+import threading
+
 import pytest
 import pytest_asyncio
+
+FIXTURE_ROOT = pathlib.Path(__file__).parent / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# Fixture site
+# ---------------------------------------------------------------------------
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    """SimpleHTTPRequestHandler without the per-request stderr line."""
+
+    def log_message(self, *_args):
+        pass
+
+
+@pytest.fixture(scope="session")
+def site():
+    """Base URL of a local static server rooted at `tests/fixtures/`.
+
+    Served over HTTP rather than addressed as `file://` because the fixture
+    application spans several pages and embeds a same-origin iframe. Under
+    `file://` Chromium treats every document as a unique opaque origin, so
+    `contentDocument` on the iframe is unreachable and the frame walk cannot be
+    tested at all.
+
+    Session-scoped: the server is stateless, so there is nothing to leak between
+    tests, and the per-test cost of binding a socket is not worth paying.
+    """
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        functools.partial(_QuietHandler, directory=str(FIXTURE_ROOT)),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------

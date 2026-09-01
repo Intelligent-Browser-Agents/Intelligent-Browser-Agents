@@ -12,15 +12,32 @@ import status_tracker as tracker
 
 @pytest.mark.llm
 def test_verifier_marks_success_and_resets_attempts():
+    """A step the page itself confirms resets the attempt counter.
+
+    The state carries `current_url` and an AFTER_STATE block because that is
+    what a real navigate produces, and since Phase 3 the verifier judges on
+    page evidence rather than on the executor's own claim of success. Without
+    them this test asserted that an unverifiable "Status: success" line is
+    enough, which is the behaviour Phase 3 deliberately removed.
+    """
     verifier = Verifier()
     state = {
         "current_step_index": 0,
         "current_plan": ["Navigate to https://ucf.edu"],
+        "current_task": "Navigate to https://ucf.edu",
+        "mission_goal": "Open the UCF homepage.",
+        "current_url": "https://www.ucf.edu/",
         "reasoning_log": [
             "[Executor] Action: navigate\n"
             "[Executor] Args: url=https://ucf.edu\n"
             "[Executor] Status: success\n"
-            "[Executor] Message: Navigated to https://ucf.edu"
+            "[Executor] Message: Navigated to https://ucf.edu\n"
+            "[Executor] AFTER_STATE (page content for verification):\n"
+            'URL: https://www.ucf.edu/\n'
+            '[role="heading"] "University of Central Florida"\n'
+            '[role="link"] "Academics"\n'
+            '[role="link"] "Admissions"\n'
+            '[role="searchbox"] "Search UCF"'
         ],
         "step_attempts": 3,
         "number_of_transactions": 1,

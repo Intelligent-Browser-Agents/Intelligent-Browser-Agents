@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Open roles</title>
+<h1>Open roles</h1>
+
+<!-- `handle_search` probes `input[name='q']` first, so this is the shape that
+     lets the legacy target-free search action be tested without a search
+     engine. Submitting puts the query in the URL, which is an observable
+     post-condition rather than a guess about rendered results. -->
+<form id="role-search" action="listings.html" method="get">
+  <label for="q">Search roles</label>
+  <input id="q" name="q" type="search" aria-label="Search roles">
+  <button type="submit" id="run-search">Search</button>
+</form>
+
+<!-- Every row's link says "Apply". The accessible name alone cannot pick one,
+     so this page is the case `nth` exists for: the old resolver took `.first`
+     and applied to whichever role happened to be at the top of the DOM. -->
+<table>
+  <thead>
+    <tr><th>Role</th><th>Location</th><th></th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Platform Engineer</td>
+      <td>Orlando, FL</td>
+      <td><a href="apply_step1.html">Apply</a></td>
+    </tr>
+    <tr>
+      <td>Data Engineer</td>
+      <td>Remote</td>
+      <td><a href="apply_step1.html?role=data">Apply</a></td>
+    </tr>
+    <tr>
+      <td>Security Analyst</td>
+      <td>Tampa, FL</td>
+      <td><a href="apply_step1.html?role=security">Apply</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<a href="login.html">Sign in to your account</a>

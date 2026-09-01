@@ -10,7 +10,7 @@ import json
 import os
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 from execution import Action, dispatch_action, ActionArgs
 from execution.langchain_tools import get_browser_tools
@@ -1395,10 +1395,10 @@ class Executor:
                     error_type="ambiguous_step",
                     message="Missing or invalid URL for navigate.",
                 )
-            if self._is_google_url(final_url) and not self._user_explicitly_requires_google(
+            if self._is_google_search_url(final_url) and not self._user_explicitly_requires_google(
                 current_task, user_intent
             ):
-                final_url = "https://duckduckgo.com"
+                final_url = self._to_duckduckgo_search(final_url)
             args.url = final_url
 
         # Click: allow attempt even if snapshot format doesn't match (handler will fail if element missing)
@@ -1517,10 +1517,37 @@ class Executor:
             return ""
         return candidate
 
-    def _is_google_url(self, url: str) -> bool:
+    @staticmethod
+    def _is_google_search_url(url: str) -> bool:
+        """True only for a Google *search* entry point, not any Google-owned host.
+
+        This used to match every host ending in `.google.com`, which meant a step
+        naming `docs.google.com/forms/...`, `mail.google.com`, or
+        `accounts.google.com/signin` was silently sent to a search engine
+        instead. Google Forms is a common application host and
+        `accounts.google.com` is the "Sign in with Google" hop on Greenhouse,
+        Lever, and Workday, so every application behind one of those was
+        unfinishable.
+
+        The rewrite exists because Google Search serves an anti-bot interstitial
+        to automated Chromium. That reason applies to search and to nothing else.
+        """
         parsed = urlparse(url)
-        host = parsed.netloc.lower()
-        return host == "google.com" or host == "www.google.com" or host.endswith(".google.com")
+        if parsed.netloc.lower() not in ("google.com", "www.google.com"):
+            return False
+        return (parsed.path or "/").rstrip("/") in ("", "/search")
+
+    @staticmethod
+    def _to_duckduckgo_search(url: str) -> str:
+        """Carry the search terms across when redirecting a Google search.
+
+        Dropping them landed the agent on a blank search homepage, which reads as
+        a successful navigation and loses the step's whole purpose.
+        """
+        query = parse_qs(urlparse(url).query).get("q", [""])[0]
+        if not query:
+            return "https://duckduckgo.com"
+        return f"https://duckduckgo.com/?q={quote_plus(query)}"
 
     def _user_explicitly_requires_google(self, current_task: str, user_intent: str) -> bool:
         text = f"{current_task}\n{user_intent}".lower()

@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Apply - Step 1 of 3</title>
+<h1>Platform Engineer</h1>
+<h2>Step 1 of 3: your details</h2>
+
+<!-- Client-side validation, the way most ATS front-ends do it: `novalidate`
+     suppresses the browser's own bubbles so the page can render styled errors
+     from its submit handler. The handler decides, so an agent that trusts a
+     click's own result will believe it advanced when it is still on step 1.
+     The `required` attributes stay on the fields, because that is what
+     `read_form` reports and what the agent has to prioritise. -->
+<form id="details" action="apply_step2.html" method="get" novalidate>
+  <label for="full-name">Full name</label>
+  <input id="full-name" name="full_name" type="text" required>
+
+  <label for="email">Email address</label>
+  <input id="email" name="email" type="text" required>
+
+  <!-- Rejects anything that is not a digit and caps at 10, so a value written
+       here does not survive verbatim. -->
+  <label for="phone">Phone number</label>
+  <input id="phone" name="phone" type="text" maxlength="10">
+
+  <label for="linkedin">LinkedIn profile</label>
+  <input id="linkedin" name="linkedin" type="text">
+
+  <button type="submit" id="continue">Continue</button>
+</form>
+
+<p id="errors" role="alert"></p>
+
+<script>
+  document.getElementById('phone').addEventListener('input', function (e) {
+    // A digits-only mask. Letters are dropped rather than rejected loudly.
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
+  });
+
+  document.getElementById('details').addEventListener('submit', function (e) {
+    var name = document.getElementById('full-name').value.trim();
+    var email = document.getElementById('email').value.trim();
+    var problems = [];
+
+    if (!name) problems.push('Full name is required.');
+    if (!email) problems.push('Email address is required.');
+    else if (email.indexOf('@') === -1) problems.push('Email address is not valid.');
+
+    if (problems.length) {
+      e.preventDefault();
+      document.getElementById('errors').textContent = problems.join(' ');
+      return;
+    }
+    document.getElementById('errors').textContent = '';
+  });
+</script>

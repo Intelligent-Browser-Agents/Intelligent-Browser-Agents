@@ -18,9 +18,10 @@ This README is the primary implementation guide for setting up, running, and dev
 10. [Agent Workflow](#agent-workflow)
 11. [API and WebSocket Endpoints](#api-and-websocket-endpoints)
 12. [Testing](#testing)
-13. [Troubleshooting](#troubleshooting)
-14. [Security Notes](#security-notes)
-15. [Contributors](#contributors)
+13. [Continuous Integration](#continuous-integration)
+14. [Troubleshooting](#troubleshooting)
+15. [Security Notes](#security-notes)
+16. [Contributors](#contributors)
 
 ## Original Project Overview
 
@@ -321,7 +322,7 @@ LLM calls are replaced with deterministic stubs by `backend/tests/conftest.py`.
 
 Two marker groups are deselected by default:
 
-- `browser` needs a real Chromium instance and outbound network access.
+- `browser` needs a real Chromium instance. It does not need the network.
 - `llm` makes billable model API calls.
 
 Run them explicitly:
@@ -338,6 +339,40 @@ Targeted suites:
 pytest backend/tests/test_server.py -v
 pytest -m browser backend/tests/execution -v
 ```
+
+### The fixture site
+
+Browser tests run against `backend/tests/fixtures/`, served over HTTP on an
+ephemeral loopback port by the session-scoped `site` fixture in
+`backend/tests/conftest.py`. Nothing in the suite resolves a public hostname, so
+the tests are unaffected by network conditions and by the anti-bot interstitials
+that real sites serve to automated Chromium.
+
+Take the base URL from the `site` fixture and never hardcode a port:
+
+```python
+async def test_something(page, site):
+    await page.goto(f"{site}/apply_step1.html")
+```
+
+The pages, and what each one exists to exercise:
+
+| Page | Covers |
+| --- | --- |
+| `apply_step1.html` | Client-side validation that blocks submit; a mask that rewrites typed input |
+| `apply_step2.html` | A same-origin iframe, an open shadow root, an upload restricted by `accept` |
+| `apply_confirm.html` | The observable end state of the application flow |
+| `eeo_frame.html` | The iframe's contents |
+| `login.html`, `mfa.html`, `account.html` | Sign-in with a second factor, and its failure paths |
+| `listings.html` | Three links that share the accessible name "Apply"; a search box |
+| `hazards.html` | A button under an overlay, a disabled control, a truncating field |
+| `tall_page.html` | Enough height for a scroll to be measurable |
+| `job_application.html` | The original single-page form, addressed by `file://` in `test_action_layer.py` |
+
+Add to an existing page when a test needs a variation of what it already covers,
+and add a page when the case is genuinely different. Every fixture control is
+there because a test pins a behaviour on it, so removing one will break
+something.
 
 Using Makefile shortcuts from `backend/` (if your shell supports `make`):
 
@@ -356,6 +391,27 @@ Some tests are marked `xfail` with a reason pointing at the phase of
 the code does not yet have, so they are documentation rather than dead weight.
 They are `strict`, meaning they fail loudly once the underlying defect is fixed,
 which is the prompt to remove the marker.
+
+## Continuous Integration
+
+`.github/workflows/main.yml` runs on every pull request and on every push to
+`main`:
+
+- **Backend tests**: the offline suite, then `pytest -m browser` against a
+  Chromium installed by Playwright. Both run on every pull request, which is why
+  the fixture site above matters: a suite that needed the network could not run
+  here.
+- **Frontend lint and build**: `npm ci`, `npm run lint`, `npm run build`.
+
+Deploy is a third job. It runs only on a push to `main`, and only after both
+test jobs pass, so a red `main` cannot reach the server. It builds the frontend,
+uploads it to `/home/bitnami/deploy-staging`, and publishes into the served root
+only once a complete build is confirmed on the server. The live site is
+therefore untouched if any earlier step fails.
+
+Third-party actions are pinned to commit SHAs with the version in a trailing
+comment. Update the SHA and the comment together; a floating tag like `@master`
+means an outside maintainer decides what runs against the deploy key.
 
 ## Troubleshooting
 

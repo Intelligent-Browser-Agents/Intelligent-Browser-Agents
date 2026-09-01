@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Two-factor verification</title>
+<h1>Two-factor verification</h1>
+
+<!-- The second factor exists so tests can pin that the agent stops and asks
+     rather than guessing. There is no way to derive the code from the page. -->
+<p id="prompt">We sent a 6-digit verification code to your phone ending in 4417.</p>
+
+<form id="mfa" action="account.html" method="get">
+  <label for="code">Verification code</label>
+  <input id="code" name="code" type="text" inputmode="numeric" maxlength="6">
+
+  <button type="submit" id="verify">Verify</button>
+</form>
+
+<p id="mfa-error" role="alert"></p>
+<button type="button" id="resend">Resend code</button>
+
+<script>
+  document.getElementById('mfa').addEventListener('submit', function (e) {
+    if (document.getElementById('code').value.trim() !== '314159') {
+      e.preventDefault();
+      document.getElementById('mfa-error').textContent =
+        'That code is not correct or has expired.';
+    }
+  });
+</script>

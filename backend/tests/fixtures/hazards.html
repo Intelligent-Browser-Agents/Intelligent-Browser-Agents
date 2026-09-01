@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Silent-success hazards</title>
+<style>
+  /* A consent banner that covers the page, the way most of them do. The button
+     underneath is present, enabled, and reported by every extractor, but a
+     click at its coordinates lands on the banner. */
+  #consent-banner {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 9999;
+  }
+</style>
+
+<h1>Silent-success hazards</h1>
+
+<!-- Each control here reproduces one case where the old action layer reported
+     success and nothing had happened. -->
+
+<div id="consent-banner"></div>
+
+<button type="button" id="covered">Save and continue</button>
+<button type="button" id="disabled-action" disabled>Archive</button>
+
+<!-- Accepts only uppercase letters. Anything else is dropped, so a written
+     value does not read back. -->
+<label for="masked">Office code</label>
+<input id="masked" name="office_code" type="text">
+
+<!-- Silently truncates: the field holds a prefix of what was written. -->
+<label for="truncating">Extension</label>
+<input id="truncating" name="extension" type="text" maxlength="4">
+
+<label for="strict-upload">Signed offer (PDF only)</label>
+<input id="strict-upload" name="offer" type="file" accept="application/pdf">
+
+<p id="hazard-status"></p>
+
+<script>
+  document.getElementById('masked').addEventListener('input', function (e) {
+    e.target.value = e.target.value.replace(/[^A-Z]/g, '');
+  });
+
+  document.getElementById('strict-upload').addEventListener('change', function (e) {
+    var input = e.target;
+    if (input.files.length && !input.files[0].name.toLowerCase().endsWith('.pdf')) {
+      input.value = '';
+      document.getElementById('hazard-status').textContent = 'Only PDF files are accepted.';
+    }
+  });
+
+  // Proves whether a click actually landed rather than trusting its result.
+  document.getElementById('covered').addEventListener('click', function () {
+    document.getElementById('hazard-status').textContent = 'Saved';
+  });
+</script>

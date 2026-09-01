@@ -13,20 +13,21 @@ pytestmark = pytest.mark.browser
 
 
 @pytest.mark.asyncio
-async def test_dispatch_navigate(page):
+async def test_dispatch_navigate(page, site):
     """Test that navigate actions are routed to handle_navigate."""
+    target = f"{site}/listings.html"
     action = Action(
         action="navigate",
-        args=ActionArgs(url="https://example.com")
+        args=ActionArgs(url=target)
     )
 
     result = await dispatch_action(page, action)
 
     assert result.action == "navigate"
-    assert result.args["url"] == "https://example.com"
+    assert result.args["url"] == target
     assert result.status == "success"
     assert result.error_type == "none"
-    assert "example.com" in result.message
+    assert "listings.html" in result.message
 
 
 @pytest.mark.asyncio

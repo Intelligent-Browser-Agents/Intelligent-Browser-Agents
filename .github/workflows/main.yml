@@ -1,11 +1,61 @@
-name: Deploy Web Server
+name: CI and Deploy
 
+# Tests run on every pull request and on every push to main. Deploy runs only
+# for a push to main, and only after both test jobs pass, so a red main cannot
+# reach the server.
 on:
+  pull_request:
   push:
     branches: [ main ]
 
+# A new push supersedes an in-flight run for the same branch. Deploys are never
+# cancelled, because a half-finished deploy is worse than a slow one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build-and-deploy:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # The browser suite needs a real Chromium. Cached by Playwright version,
+      # so a dependency bump invalidates it and nothing else does.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      # Deselects the `browser` and `llm` marks via pyproject.toml's addopts.
+      - name: Run offline tests
+        run: pytest -q
+
+      # The action layer's real coverage. Runs against the local fixture site in
+      # backend/tests/fixtures/, so it needs a browser but no network and no
+      # model provider.
+      - name: Run browser tests
+        run: pytest -q -m browser
+
+  frontend:
+    name: Frontend lint and build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -15,74 +65,100 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24' # Match your dev environment
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: ./frontend
+        run: npm run build
+
+  deploy:
+    name: Deploy
+    needs: [ backend, frontend ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install and Build
         working-directory: ./frontend
         run: |
-          npm install
+          npm ci
           npm run build
-          
-      - name: Pre-Deploy (Clean and Prep)
-        uses: appleboy/ssh-action@master
+
+      # Upload to a staging directory rather than straight into the served
+      # root. The old workflow emptied htdocs in a prior step, so any failure
+      # between that and the end of the upload left the site blank.
+      - name: Upload build to staging
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "frontend/dist/*"
+          target: "/home/bitnami/deploy-staging"
+          # Clear the staging directory first so a removed file does not survive
+          # from the previous deploy.
+          rm: true
+          # Drops 'frontend/dist/' from the path so files land at the root.
+          strip_components: 2
+
+      # The live root is only touched once a complete build is known to be on
+      # the server, which keeps the previous site serving if anything above
+      # failed.
+      - name: Publish the staged build
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # Remove old files so SCP has a clean, empty directory to write to
+            set -euo pipefail
+            test -s /home/bitnami/deploy-staging/index.html
             sudo rm -rf /opt/bitnami/apache/htdocs/*
-            # Ensure the folder itself is owned by you for the transfer
-            sudo chown bitnami:bitnami /opt/bitnami/apache/htdocs
-
-      - name: Deploy to Bitnami via SCP
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          # Path to your build output (e.g., frontend/dist or frontend/build)
-          source: "frontend/dist/*" 
-          target: "/opt/bitnami/apache/htdocs"
-          # This removes 'frontend/dist/' from the path so files land in htdocs root
-          strip_components: 2 
-
-      - name: Restart Bitnami Apache
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            # Ensure permissions are correct for the bitnami user
+            sudo cp -a /home/bitnami/deploy-staging/. /opt/bitnami/apache/htdocs/
             sudo chown -R bitnami:daemon /opt/bitnami/apache/htdocs
             sudo chmod -R 775 /opt/bitnami/apache/htdocs
-            # Restart the service
             sudo /opt/bitnami/ctlscript.sh restart apache
 
-      - name: Start Uvicorn Backend via Screen
-        uses: appleboy/ssh-action@master
+      - name: Restart the backend
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # 1. Kill the old backend session if it exists
+            set -euo pipefail
+
             screen -S uvicorn-backend -X quit || true
 
-            source main_venv/bin/activate
-
-            # 2. Install dependencies (optional, can be skipped if you ensure the server is always up-to-date)
-            pip install -r requirements.txt
-
-            # 3. Navigate to backend folder
-            cd /home/bitnami/Intelligent-Browser-Agents/backend
-
+            # Update the code first. This used to run after the install below,
+            # so every deploy installed the *previous* commit's dependencies.
+            cd /home/bitnami/Intelligent-Browser-Agents
             git fetch origin main
             git reset --hard origin/main
 
-            
+            # requirements.txt is at the repository root. The install used to
+            # run from $HOME, where the file does not exist, so it failed
+            # silently on every deploy.
+            source /home/bitnami/main_venv/bin/activate
+            pip install -r requirements.txt
 
-            # 4. Start Uvicorn in a detached screen
-            # -d -m starts it detached immediately
-            # Use 'python3 -m uvicorn' to ensure it uses the correct path
+            cd backend
             screen -d -m -S uvicorn-backend python3 -m uvicorn server:app --host 0.0.0.0 --port 8000

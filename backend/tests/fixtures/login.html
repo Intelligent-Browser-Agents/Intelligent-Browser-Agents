@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sign in</title>
+<h1>Sign in to your candidate account</h1>
+
+<form id="login" action="mfa.html" method="get">
+  <label for="username">Email or username</label>
+  <input id="username" name="username" type="text">
+
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password">
+
+  <button type="submit" id="sign-in">Sign in</button>
+</form>
+
+<p id="login-error" role="alert"></p>
+<a href="#reset">Forgot your password?</a>
+
+<script>
+  // Fixed credentials so a test can drive both the accepted and rejected path.
+  // A wrong password keeps the page on the login form, which is what the
+  // verifier's login guard has to be able to see.
+  document.getElementById('login').addEventListener('submit', function (e) {
+    var user = document.getElementById('username').value.trim();
+    var pass = document.getElementById('password').value;
+    if (user !== 'candidate@example.test' || pass !== 'correct-horse') {
+      e.preventDefault();
+      document.getElementById('login-error').textContent =
+        'That username or password is incorrect.';
+    }
+  });
+</script>

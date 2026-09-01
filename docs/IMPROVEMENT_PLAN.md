@@ -585,6 +585,28 @@ Found and fixed along the way: `.browser-frame` still carried `pointer-events: n
 
 ## Phase 8: tests and CI
 
+**Status: complete** (see `docs/issues/phase-8-tests-and-ci.md`). Results:
+
+| Check | Before | After |
+| --- | --- | --- |
+| Tests reaching the public internet | 12 browser tests drove `google.com`, `example.com`, and `wikipedia.org` | none; every browser test runs against `tests/fixtures/` on a loopback HTTP server |
+| Fixture surface | one single-page form addressed by `file://` | a nine-page site: multi-step application, same-origin iframe, shadow root, login with a second factor, duplicate link text, overlay and mask hazards |
+| Overlay, non-surviving fill, upload-rejected-by-type | untested | pinned, each asserted on the page's own post-condition rather than the action's status |
+| The Google URL rewrite | **still live**; every `.google.com` host was rewritten to DuckDuckGo | fixed and pinned: only `google.com/` and `google.com/search` divert, and the diverted search keeps its query |
+| `execution` package shadow | guarded only by a `pyproject.toml` setting nothing asserted | a test resolves `execution.__file__` and explains the fix if it moves |
+| `ProjectState` key coverage | nothing; LangGraph drops an undeclared key silently | a static walk checks all 48 state updates across the five agents, with floors so it cannot silently stop covering them |
+| CI | `npm run build` on push to `main` | `pytest`, `pytest -m browser`, `eslint`, and `npm run build` on every pull request |
+| Deploy actions | `appleboy/ssh-action@master`, `appleboy/scp-action@master` | pinned to commit SHAs |
+| Deploy ordering | `rm -rf htdocs/*` before upload; `pip install` from `$HOME`; `git reset --hard` after the install | upload to staging then publish; install from the repo directory after the fetch; deploy gated on green tests |
+| Tests | 266 offline, 96 browser | **306 offline, 124 browser** |
+
+Found along the way:
+
+- The working tree carried an uncommitted revert of Phase 5's `file_path` alias on `ExecutionArgs.document_id`, which would have made every JSON-mode upload silently lose its path. Restored, and pinned by a test.
+- `test_verifier_marks_success_and_resets_attempts` was stale and had been failing since Phase 3. Its hand-built state carried an executor log line claiming `Status: success` but no `current_url`, no AFTER_STATE, no `current_task`, and no `mission_goal`, so the verifier correctly refused to confirm a step it had no evidence for. The test was asserting the pre-Phase-3 contract, where the executor's own claim of success was enough. Nobody saw it because `llm`-marked tests are deselected by default and the full `pytest -m ""` run was not part of anyone's loop. The state now carries the evidence a real navigate produces.
+
+Still outstanding: `npm audit` reports 10 high-severity advisories in `react-router-dom` 7.13.1 (fixed in 7.14.2). Most are SSR/RSC-specific and this is a client-rendered SPA, but the open-redirect pair applies. A router upgrade is its own change with its own verification, so it is not folded in here.
+
 1. **HTML fixtures, no network.** Build `backend/tests/fixtures/` with a multi-page job application (text, select, radio, checkbox, file input, iframe, shadow DOM, client-side validation, a confirmation page), a login form with a second-factor step, and a listing page with duplicate link text. Serve them from a local static server in a fixture. Every action-layer test runs against these.
 2. **Unit tests for every Phase 2 primitive,** including the failure modes: ambiguous target, element behind an overlay, value that does not survive `fill`, checkbox already checked, upload rejected by type.
 3. **Regression tests for each confirmed bug in this document,** so they cannot come back. At minimum: the Google URL rewrite, the compose gate blocking a job-application Continue click, the budget arithmetic, the AFTER_STATE strip, the `execution` package shadow, and the login auth bypass.

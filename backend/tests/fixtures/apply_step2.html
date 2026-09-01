@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Apply - Step 2 of 3</title>
+<h1>Platform Engineer</h1>
+<h2>Step 2 of 3: eligibility and documents</h2>
+
+<form id="eligibility" action="apply_confirm.html" method="get">
+  <fieldset>
+    <legend>Work authorization</legend>
+    <input type="radio" id="auth-yes" name="auth" value="yes">
+    <label for="auth-yes">I am authorized to work in this country</label>
+    <input type="radio" id="auth-no" name="auth" value="no">
+    <label for="auth-no">I require sponsorship</label>
+  </fieldset>
+
+  <label for="start-date">Earliest start date</label>
+  <select id="start-date" name="start_date">
+    <option value="">Please select</option>
+    <option value="immediately">Immediately</option>
+    <option value="two-weeks">Within two weeks</option>
+    <option value="month">Within a month</option>
+  </select>
+
+  <!-- Restricted by type and enforced in script, because `set_input_files`
+       does not honour `accept` on its own. A page that clears the input is the
+       common shape, and the readback is the only way to notice. -->
+  <label for="resume">Resume (PDF or Word only)</label>
+  <input id="resume" name="resume" type="file" accept=".pdf,.doc,.docx">
+
+  <button type="submit" id="submit-application">Submit application</button>
+</form>
+
+<p id="upload-error" role="alert"></p>
+
+<!-- Same-origin frame: reachable through the frame walk, invisible to a
+     document-only extractor. -->
+<iframe id="eeo" src="eeo_frame.html" title="Voluntary self-identification" width="420" height="220"></iframe>
+
+<!-- Closed-off custom element, the Salesforce/LWC shape. The controls exist
+     only inside the shadow root. -->
+<div id="referral-widget"></div>
+
+<script>
+  var ALLOWED = ['.pdf', '.doc', '.docx'];
+
+  document.getElementById('resume').addEventListener('change', function (e) {
+    var input = e.target;
+    if (!input.files.length) return;
+    var filename = input.files[0].name.toLowerCase();
+    var ok = ALLOWED.some(function (ext) { return filename.endsWith(ext); });
+    if (!ok) {
+      // Reject and clear, so the field reads back empty.
+      input.value = '';
+      document.getElementById('upload-error').textContent =
+        'That file type is not accepted. Upload a PDF or Word document.';
+      return;
+    }
+    document.getElementById('upload-error').textContent = '';
+  });
+
+  var shadow = document.getElementById('referral-widget').attachShadow({ mode: 'open' });
+  shadow.innerHTML =
+    '<div id="ref-label">Referral code</div>' +
+    '<input id="ref-input" type="text" aria-labelledby="ref-label">' +
+    '<button type="button" id="ref-verify">Verify referral</button>';
+</script>

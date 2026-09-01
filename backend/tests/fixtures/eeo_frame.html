@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Voluntary self-identification</title>
+
+<!-- Served into an iframe on apply_step2.html. Real ATS products host the EEO
+     block this way, so a page representation that does not walk into frames
+     reports the application as complete while these are still unanswered. -->
+<h3>Voluntary self-identification</h3>
+
+<label for="gender">Gender</label>
+<select id="gender" name="gender">
+  <option value="">Please select</option>
+  <option value="f">Female</option>
+  <option value="m">Male</option>
+  <option value="decline">I decline to self-identify</option>
+</select>
+
+<label for="veteran">Veteran status</label>
+<select id="veteran" name="veteran">
+  <option value="">Please select</option>
+  <option value="not-veteran">I am not a protected veteran</option>
+  <option value="veteran">I identify as a protected veteran</option>
+  <option value="decline">I decline to self-identify</option>
+</select>
+
+<input type="checkbox" id="eeo-ack" name="eeo_ack">
+<label for="eeo-ack">I understand this information is voluntary</label>

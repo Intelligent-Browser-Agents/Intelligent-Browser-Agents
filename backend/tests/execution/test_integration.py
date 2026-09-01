@@ -14,33 +14,31 @@ pytestmark = pytest.mark.browser
 
 
 @pytest.mark.asyncio
-async def test_google_search_flow(page):
+async def test_search_flow(page, site):
     """
-    Integration test: Simulate BI orchestration using the tool for Google search.
+    Integration test: an orchestrator dispatching a search action.
 
-    This demonstrates how BI team would:
-    1. Navigate to Google
+    1. Navigate to a page with a search box
     2. Decide to perform search action
     3. Call dispatch_action to execute it
     4. Get result back
-    """
-    # BI team navigates to Google
-    await page.goto("https://google.com")
 
-    # BI team decides which action to take (search)
+    Previously pointed at google.com and asserted only that the status was one
+    of its two possible values, which no implementation could fail.
+    """
+    await page.goto(f"{site}/listings.html")
+
     action = Action(
         action="search",
-        args=ActionArgs(text="Python programming")
+        args=ActionArgs(text="platform")
     )
 
-    # BI team calls the tool
     result = await dispatch_action(page, action)
 
-    # BI team receives result
     assert result.action == "search"
+    assert result.status == "success"
     assert isinstance(result.execution_time_ms, int)
-    # Search may succeed or fail depending on Google's page structure
-    assert result.status in ["success", "failure"]
+    await page.wait_for_url("**/listings.html?q=platform")
 
 
 @pytest.mark.asyncio
@@ -75,7 +73,7 @@ async def test_form_filling_flow(page):
 
 
 @pytest.mark.asyncio
-async def test_navigation_flow(page):
+async def test_navigation_flow(page, site):
     """
     Integration test: Navigation scenario.
 
@@ -84,14 +82,14 @@ async def test_navigation_flow(page):
     # BI decides to navigate
     action = Action(
         action="navigate",
-        args=ActionArgs(url="https://example.com")
+        args=ActionArgs(url=f"{site}/listings.html")
     )
 
     result = await dispatch_action(page, action)
 
     assert result.status == "success"
     assert result.action == "navigate"
-    assert "example.com" in page.url
+    assert "listings.html" in page.url
 
 
 @pytest.mark.asyncio

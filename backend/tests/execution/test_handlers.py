@@ -20,22 +20,29 @@ pytestmark = pytest.mark.browser
 
 
 @pytest.mark.asyncio
-async def test_handle_navigate_success(page):
+async def test_handle_navigate_success(page, site):
     """Test successful navigation."""
-    result = await handle_navigate(page, "https://example.com")
+    target = f"{site}/listings.html"
+    result = await handle_navigate(page, target)
 
     assert result.status == "success"
     assert result.error_type == "none"
     assert result.action == "navigate"
-    assert result.args["url"] == "https://example.com"
-    assert "example.com" in result.message.lower()
+    assert result.args["url"] == target
+    assert "listings.html" in result.message.lower()
     assert result.execution_time_ms > 0
 
 
 @pytest.mark.asyncio
 async def test_handle_navigate_failure(page):
-    """Test navigation to invalid URL."""
-    result = await handle_navigate(page, "https://invalid-domain-that-does-not-exist-12345.com")
+    """Test navigation to a host that refuses the connection.
+
+    Port 1 on loopback is reserved and nothing listens there, so this fails
+    deterministically with a connection refusal. The previous target was a
+    made-up public hostname, which relied on a DNS server being reachable and
+    returning NXDOMAIN rather than a wildcard or a captive-portal page.
+    """
+    result = await handle_navigate(page, "http://127.0.0.1:1/")
 
     assert result.status == "failure"
     assert result.error_type == "navigation_blocked"
@@ -192,19 +199,18 @@ async def test_handle_wait(page):
 
 
 @pytest.mark.asyncio
-async def test_handle_search_google(page):
-    """Test search on Google (integration test)."""
-    # Navigate to Google first
-    await page.goto("https://google.com", wait_until="domcontentloaded")
+async def test_handle_search_on_a_page_with_a_search_box(page, site):
+    """Search through a page's own search box, submitted with Enter."""
+    await page.goto(f"{site}/listings.html", wait_until="domcontentloaded")
 
-    # Try to search
-    result = await handle_search(page, "Python")
+    result = await handle_search(page, "platform")
 
-    # Should succeed (either via search box or fallback)
     assert result.status == "success"
     assert result.action == "search"
-    assert result.args["text"] == "Python"
-    assert "Python" in result.message
+    assert result.args["text"] == "platform"
+    assert "platform" in result.message
+    # The submit actually happened, rather than the query sitting in the box.
+    await page.wait_for_url("**/listings.html?q=platform")
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,6 @@ pythonpath = ["backend", "backend/src"]
 testpaths = ["backend/tests"]
 
 markers = [
-    "browser: needs a real Chromium instance and outbound network access",
+    "browser: needs a real Chromium instance; runs offline against tests/fixtures/",
     "llm: needs a live model provider and makes billable API calls",
 ]
