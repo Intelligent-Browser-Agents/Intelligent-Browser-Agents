@@ -6,7 +6,7 @@ Opened: 2026-08-31
 Plan reference: `docs/IMPROVEMENT_PLAN.md`, Phase 8
 
 Closed with: the full scope below.
-Verification: 306 offline and 124 browser tests green (from 266 and 96), and `pytest -m ""` green at 432 passed / 3 xfailed with nothing deselected. eslint and `npm run build` clean, `npm ci` reproducible from the lockfile.
+Verification: 319 offline and 127 browser tests green (from 279 and 99), and `pytest -m ""` green at 448 passed / 3 xfailed with nothing deselected. eslint and `npm run build` clean, `npm ci` reproducible from the lockfile.
 Every acceptance item was checked directly, including the one that mattered most: the Google URL rewrite was still live in `executor.py`, the new regression test failed against it, and it passes against the fix.
 Results table in the plan doc's Phase 8 section.
 

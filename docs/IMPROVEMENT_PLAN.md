@@ -598,7 +598,7 @@ Found and fixed along the way: `.browser-frame` still carried `pointer-events: n
 | CI | `npm run build` on push to `main` | `pytest`, `pytest -m browser`, `eslint`, and `npm run build` on every pull request |
 | Deploy actions | `appleboy/ssh-action@master`, `appleboy/scp-action@master` | pinned to commit SHAs |
 | Deploy ordering | `rm -rf htdocs/*` before upload; `pip install` from `$HOME`; `git reset --hard` after the install | upload to staging then publish; install from the repo directory after the fetch; deploy gated on green tests |
-| Tests | 266 offline, 96 browser | **306 offline, 124 browser** |
+| Tests | 279 offline, 99 browser | **319 offline, 127 browser** |
 
 Found along the way:
 
