@@ -35,7 +35,6 @@ jobs:
       # The browser suite needs a real Chromium. Cached by Playwright version,
       # so a dependency bump invalidates it and nothing else does.
       - name: Cache Playwright browsers
-        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
