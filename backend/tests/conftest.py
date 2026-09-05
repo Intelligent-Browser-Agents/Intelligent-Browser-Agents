@@ -26,6 +26,38 @@ FIXTURE_ROOT = pathlib.Path(__file__).parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
+# Deterministic environment
+# ---------------------------------------------------------------------------
+
+# A valid Fernet key (32 url-safe base64-encoded bytes, decoding to the ASCII
+# above) so it reads as obviously fake. The specific value does not matter here:
+# only `test_server.py` needs a fixed one, because it asserts on ciphertext it
+# produced earlier in the same run, and it sets its own.
+_TEST_CREDENTIALS_KEY = "dGVzdC1vbmx5LWtleS1ub3QtYS1yZWFsLXNlY3JldCE="  # test-only-key-not-a-real-secret!
+
+
+@pytest.fixture(autouse=True)
+def _test_environment(monkeypatch):
+    """Pin the secrets the server module reads, for every test.
+
+    `server.py` calls `load_dotenv()`, so without this the suite silently
+    inherits whatever is in the developer's repo-root `.env`. That made the
+    result depend on the machine: `test_runs_and_documents.py` passed locally
+    because a real `CREDENTIALS_KEY` happened to be exported, and failed on any
+    clean checkout with `TypeError: Expected a string value` from Fernet(None).
+    CI is exactly that clean checkout.
+
+    `test_server.py` has its own fixture setting the same variables. That one
+    stays: it also patches the mailer and clears the rate limiter, and its
+    values win where both apply.
+    """
+    monkeypatch.setenv("TOKEN_SECRET", "testsecret-long-enough-for-hs256-abcdef")
+    monkeypatch.setenv("CREDENTIALS_KEY", _TEST_CREDENTIALS_KEY)
+    monkeypatch.setenv("EMAIL_ACCOUNT", "from@example.com")
+    monkeypatch.setenv("EMAIL_PASSWORD", "password")
+
+
+# ---------------------------------------------------------------------------
 # Fixture site
 # ---------------------------------------------------------------------------
 
