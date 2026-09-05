@@ -1,6 +1,23 @@
 """
 Centralized LLM configuration and model factory.
 Supports multiple providers (Google, OpenAI, Anthropic) with easy switching.
+
+Model assignment policy
+-----------------------
+Two OpenAI tiers are in use, chosen per agent by how often the agent runs and
+how much a single wrong answer costs the run:
+
+* ``gpt-5.4`` for the per-action control loop (executor, verifier, decision)
+  and for the once-per-run interaction agent. These run once per browser
+  action, so any price change is multiplied by ~40 calls per run.
+* ``gpt-6-astra`` (4x the input price, 3.3x the output price) only for the
+  planner and the fallback agent. Both run a few times per run and both shape
+  everything downstream: the plan is the skeleton of the whole run, and a
+  recovery diagnosis decides whether a failing run recovers or burns its
+  transaction budget.
+
+The cost model behind the split is in
+docs/issues/gpt-6-astra-for-planner-and-fallback.md.
 """
 
 import os
@@ -19,10 +36,17 @@ load_dotenv()
 @dataclass
 class ModelConfig:
     """Configuration for a specific model."""
-    name: str                    # Model name (e.g., "gemini-2.0-flash", "gpt-4o")
+    name: str                    # Model name (e.g., "gemini-2.5-pro", "gpt-5.4")
     provider: Literal["google", "openai", "anthropic"]
     api_key_env: str             # Environment variable for API key
-    
+    # OpenAI reasoning models (gpt-5.x, gpt-6-astra) accept only their default
+    # sampling temperature and reject any other value with HTTP 400, so get_llm
+    # must not send one. langchain-openai strips the parameter for names that
+    # start with "gpt-5" but knows nothing about gpt-6-astra (verified against
+    # langchain-openai 1.1.12 and the live API), hence an explicit flag here
+    # rather than a name pattern in a third-party library.
+    supports_temperature: bool = True
+
 
 # Available model presets
 MODELS = {
@@ -39,17 +63,24 @@ MODELS = {
     ),
 
     # OpenAI models
+    "gpt-6-astra": ModelConfig(
+        name="gpt-6-astra",
+        provider="openai",
+        api_key_env="OPENAI_API_KEY",
+        supports_temperature=False,
+    ),
     "gpt-5.4": ModelConfig(
         name="gpt-5.4",
         provider="openai",
-        api_key_env="OPENAI_API_KEY"
+        api_key_env="OPENAI_API_KEY",
+        supports_temperature=False,
     ),
     "gpt-5.4-mini": ModelConfig(
         name="gpt-5.4-mini",
         provider="openai",
-        api_key_env="OPENAI_API_KEY"
+        api_key_env="OPENAI_API_KEY",
+        supports_temperature=False,
     ),
-    
     # Anthropic models (uncomment when needed)
     # "claude-sonnet": ModelConfig(
     #     name="claude-3-5-sonnet-20241022",
@@ -63,14 +94,15 @@ MODELS = {
 # AGENT MODEL ASSIGNMENTS
 # =============================================================================
 
-# Assign specific models to each agent based on their needs
+# Assign specific models to each agent based on their needs. See the module
+# docstring for the policy; the per-agent notes give call frequency per run.
 AGENT_MODELS = {
-    "planner": "gpt-5.4",  # Smart reasoning for plan creation (1 call)
-    "decision": "gpt-5.4",  # Routing decisions (N calls)
-    "executor": "gpt-5.4",  # Translating tasks to actions
-    "verifier": "gpt-5.4",  # Checking results
-    "fallback": "gpt-5.4",  # Recovery strategies
-    "interaction": "gpt-5.4",  # User-facing polish
+    "planner": "gpt-6-astra",   # 1-3 calls per run; the plan shapes every call after it
+    "decision": "gpt-5.4",      # ~1 call per action; completion/advance are rule-based, the model breaks ties
+    "executor": "gpt-5.4",      # 1 call per action with the largest context of any agent; the cost driver
+    "verifier": "gpt-5.4",      # ~1 call per action; structural signals carry most of the verdict
+    "fallback": "gpt-6-astra",  # only after a failed step; a bad diagnosis is written into the plan
+    "interaction": "gpt-5.4",   # 1 call per run; presentation only
 }
 
 # Temperature presets for different agent behaviors
@@ -78,17 +110,17 @@ AGENT_MODELS = {
 # not prose: `verifier.step_complete` decides whether the orchestrator advances and
 # `verifier.handoff` selects the next node outright.
 #
-# IMPORTANT: these values are inert on the reasoning models currently assigned in
-# AGENT_MODELS. gpt-5.x accepts only temperature=1.0, and langchain-openai silently
-# drops any other value (verified: passing 0.0 or 0.3 stores None, passing 1.0
-# stores 1.0). So this dict does nothing today and sampling cannot be turned down.
+# IMPORTANT: these values are inert on the OpenAI reasoning models currently
+# assigned in AGENT_MODELS. Those models accept only their default temperature,
+# so get_llm omits the parameter for every ModelConfig with
+# supports_temperature=False; sending it would fail the whole call with HTTP 400.
 #
 # The practical consequence is that determinism has to come from structural checks
 # on observable state rather than from sampling settings. See
 # Verifier._credentials_still_requested for that approach, and Phase 4 of
 # docs/IMPROVEMENT_PLAN.md for the rest.
 #
-# These values still take effect if AGENT_MODELS is switched to a model that
+# These values take effect if AGENT_MODELS is switched to a model that
 # supports temperature, such as the gemini-* entries.
 TEMPERATURES = {
     "planner": 0.2,
@@ -116,6 +148,25 @@ def _get_llm_class(provider: str):
         raise ValueError(f"Unknown provider: {provider}")
 
 
+def _llm_kwargs(config: ModelConfig, temperature: float) -> dict:
+    """Constructor arguments beyond model and api key, for one ModelConfig.
+
+    Kept separate from get_llm so the decision is testable without a provider
+    package or a network call.
+    """
+    kwargs: dict = {}
+    if config.supports_temperature:
+        kwargs["temperature"] = temperature
+    if config.provider == "openai":
+        # The per-request timeout must stay under the executor's own 45s ceiling,
+        # otherwise the client is still waiting on a request the caller has already
+        # given up on. Retries are bounded for the same reason: the default of 2
+        # silently turns one slow call into three sequential ones.
+        kwargs["request_timeout"] = float(os.getenv("LLM_REQUEST_TIMEOUT", "40"))
+        kwargs["max_retries"] = int(os.getenv("LLM_MAX_RETRIES", "1"))
+    return kwargs
+
+
 def get_llm(
     schema: Optional[Type[BaseModel]] = None,
     temperature: float = 0.3,
@@ -126,8 +177,9 @@ def get_llm(
     
     Args:
         schema: Pydantic model for structured output (optional)
-        temperature: Creativity level (0.0 = deterministic, 1.0 = creative)
-        model_key: Key from MODELS dict (e.g., "gemini-flash", "gpt-4o")
+        temperature: Creativity level (0.0 = deterministic, 1.0 = creative).
+                     Ignored for models whose config has supports_temperature=False.
+        model_key: Key from MODELS dict (e.g., "gemini-flash", "gpt-5.4")
     
     Returns:
         Configured LLM instance
@@ -139,21 +191,11 @@ def get_llm(
         raise ValueError(f"API key not found. Set {config.api_key_env} in your .env file.")
     
     LLMClass = _get_llm_class(config.provider)
-    
-    extra_kwargs = {}
-    if config.provider == "openai":
-        # The per-request timeout must stay under the executor's own 45s ceiling,
-        # otherwise the client is still waiting on a request the caller has already
-        # given up on. Retries are bounded for the same reason: the default of 2
-        # silently turns one slow call into three sequential ones.
-        extra_kwargs["request_timeout"] = float(os.getenv("LLM_REQUEST_TIMEOUT", "40"))
-        extra_kwargs["max_retries"] = int(os.getenv("LLM_MAX_RETRIES", "1"))
 
     llm = LLMClass(
         model=config.name,
-        temperature=temperature,
         api_key=api_key,
-        **extra_kwargs,
+        **_llm_kwargs(config, temperature),
     )
     
     if schema:
@@ -244,6 +286,7 @@ def list_available_models():
         print(f"    Provider: {config.provider}")
         print(f"    Model: {config.name}")
         print(f"    API Key: {config.api_key_env}")
+        print(f"    Supports temperature: {config.supports_temperature}")
         print()
 
 
@@ -253,7 +296,7 @@ def show_agent_assignments():
     print("-" * 50)
     for agent, model_key in AGENT_MODELS.items():
         config = MODELS[model_key]
-        temp = TEMPERATURES[agent]
+        temp = TEMPERATURES[agent] if config.supports_temperature else "model default (overrides rejected)"
         print(f"  {agent}:")
         print(f"    Model: {config.name} ({model_key})")
         print(f"    Temperature: {temp}")

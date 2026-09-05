@@ -190,6 +190,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 Notes:
 
 - All six agents are assigned OpenAI models in `backend/src/models.py`, so `OPENAI_API_KEY` is required for out-of-the-box agent runs.
+- The planner and fallback agents run on `gpt-6-astra`; the executor, verifier, decision and interaction agents run on `gpt-5.4`. See "Model assignment" below for why.
 - `GOOGLE_API_KEY` is only needed if you change `AGENT_MODELS` to a `gemini-*` key.
 - `TOKEN_SECRET` should be long/random in non-dev environments. It signs both access tokens and the short-lived password-reset tokens.
 - `CREDENTIALS_KEY` is a Fernet key encrypting the saved-credential vault at rest. Without it, the credential endpoints return 503 rather than storing anything in plaintext.
@@ -258,6 +259,24 @@ Core workflow is built in `backend/src/main.py` and uses these agents:
 - Interaction: delivers final output or requests user clarification.
 
 Execution actions are implemented in `backend/src/execution/` and exposed through a typed dispatcher.
+
+### Model assignment
+
+Each agent's model is set in `AGENT_MODELS` in `backend/src/models.py`.
+Two OpenAI tiers are in use, and the split follows how often each agent runs and how much a single wrong answer costs the run.
+
+| Agent | Model | Calls per run | Why |
+| --- | --- | --- | --- |
+| Planner | `gpt-6-astra` | 1-3 | The plan is the skeleton of the whole run; a bad plan is repaired downstream one failure at a time. |
+| Fallback | `gpt-6-astra` | Only after a failed step | Its diagnosis is written into the plan; a wrong one burns the transaction budget. |
+| Executor | `gpt-5.4` | Once per browser action | The largest context of any agent, on every action; the run's main cost driver. |
+| Verifier | `gpt-5.4` | Once per action | Structural signals (readback, page deltas, field progress) carry most of the verdict. |
+| Decision | `gpt-5.4` | On partial progress only | Step completion and advancement are rule-based; the model only breaks ties. |
+| Interaction | `gpt-5.4` | Once at the end | Presentation only. |
+
+`gpt-6-astra` costs 4x per input token and 3.3x per output token, so this split adds on the order of $0.20 to a typical run instead of quadrupling its cost.
+The OpenAI reasoning models accept only their default sampling temperature, so `models.py` never sends one to them; the `TEMPERATURES` table only applies to models flagged `supports_temperature`.
+The reasoning behind the split is recorded in `docs/issues/gpt-6-astra-for-planner-and-fallback.md`.
 
 ## API and WebSocket Endpoints
 
