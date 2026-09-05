@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Modal from "./Modal";
 import { api, clearToken } from "../lib/api";
 
@@ -20,45 +20,25 @@ const AUTONOMY_LEVELS = [
   },
 ];
 
-const DOCUMENT_SLOTS = [
-  { type: "resume", label: "Resume" },
-  { type: "cover_letter", label: "Cover letter" },
-];
-
-function formatSize(bytes) {
-  if (!bytes && bytes !== 0) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 /**
  * Settings that actually do something: agent autonomy (stored with the
- * encrypted vault and honored by the run's autonomy policy), the document
- * store the agent attaches from, password change, and account deletion.
+ * encrypted vault and honored by the run's autonomy policy), password change,
+ * and account deletion. Documents live in the Documents tab of Your Details,
+ * next to the rest of the profile the agent fills from.
  * The old free-text "Agent Prompt" box that nothing read is gone.
  */
 export default function SettingsModal({ onClose, onLogout }) {
   const [autonomy, setAutonomy] = useState("");
   const [autonomyBusy, setAutonomyBusy] = useState(false);
-  const [documents, setDocuments] = useState({});
-  const [docBusy, setDocBusy] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [notice, setNotice] = useState(null);
-  const fileInputsRef = useRef({});
 
   useEffect(() => {
     (async () => {
-      try {
-        const { documents: docs } = await api.getDocuments();
-        setDocuments(docs || {});
-      } catch {
-        setDocuments({});
-      }
       try {
         const { credentials } = await api.readCredentials();
         setAutonomy(credentials?.autonomyPolicy?.level || "confirm_irreversible");
@@ -85,34 +65,6 @@ export default function SettingsModal({ onClose, onLogout }) {
       flash("error", err.detail || "Could not save the autonomy preference.");
     } finally {
       setAutonomyBusy(false);
-    }
-  };
-
-  const uploadDocument = async (docType, file) => {
-    if (!file) return;
-    setDocBusy(docType);
-    try {
-      const { documents: docs } = await api.uploadDocument(docType, file);
-      setDocuments(docs || {});
-      flash("ok", `${docType === "resume" ? "Resume" : "Cover letter"} uploaded.`);
-    } catch (err) {
-      flash("error", err.detail || "Upload failed.");
-    } finally {
-      setDocBusy("");
-      const input = fileInputsRef.current[docType];
-      if (input) input.value = "";
-    }
-  };
-
-  const removeDocument = async (docType) => {
-    setDocBusy(docType);
-    try {
-      const { documents: docs } = await api.deleteDocument(docType);
-      setDocuments(docs || {});
-    } catch (err) {
-      flash("error", err.detail || "Could not remove the file.");
-    } finally {
-      setDocBusy("");
     }
   };
 
@@ -187,58 +139,6 @@ export default function SettingsModal({ onClose, onLogout }) {
             </label>
           ))}
         </div>
-      </section>
-
-      <section className="settings-section">
-        <h3>Documents</h3>
-        <p className="settings-hint">
-          Stored securely on the server; the agent attaches them when an application asks.
-        </p>
-        {DOCUMENT_SLOTS.map(({ type, label }) => {
-          const doc = documents[type];
-          return (
-            <div key={type} className="document-row">
-              <div className="document-info">
-                <strong>{label}</strong>
-                {doc ? (
-                  <small>
-                    {doc.filename} ({formatSize(doc.size)})
-                  </small>
-                ) : (
-                  <small>Nothing uploaded yet.</small>
-                )}
-              </div>
-              <div className="document-actions">
-                <input
-                  ref={(el) => (fileInputsRef.current[type] = el)}
-                  id={`doc-${type}`}
-                  type="file"
-                  accept=".pdf,.docx,.doc,.txt,.rtf"
-                  className="document-file-input"
-                  onChange={(e) => uploadDocument(type, e.target.files?.[0])}
-                />
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={docBusy === type}
-                  onClick={() => fileInputsRef.current[type]?.click()}
-                >
-                  {docBusy === type ? "Working..." : doc ? "Replace" : "Upload"}
-                </button>
-                {doc && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={docBusy === type}
-                    onClick={() => removeDocument(type)}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
       </section>
 
       <section className="settings-section">

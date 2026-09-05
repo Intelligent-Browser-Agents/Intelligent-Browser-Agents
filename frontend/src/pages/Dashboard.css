@@ -1569,3 +1569,76 @@
 .modal-content .field-label {
   margin-top: 12px;
 }
+
+/* ── Documents tab (Your Details) ─────────────────────────────────────── */
+
+.documents-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.documents-panel .settings-hint {
+  margin: 0;
+}
+
+.document-list {
+  display: grid;
+  gap: 10px;
+}
+
+.document-add {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.document-add h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.document-add-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0 12px;
+}
+
+.document-add-row .creds-field {
+  margin-bottom: 0;
+}
+
+.document-file-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+}
+
+.document-file-picker .setting-btn {
+  min-width: 0;
+}
+
+.document-file-name {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setting-btn:disabled,
+.setting-btn:disabled:hover {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.document-add .setting-btn {
+  align-self: flex-start;
+}

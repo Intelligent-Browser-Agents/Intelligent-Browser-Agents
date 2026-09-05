@@ -22,6 +22,7 @@ Present when relevant:
 - `DOM_TEXT_CONTEXT`: readable page text (or a diff against the previous step).
 - `FIELD_PRIORITY_CONTEXT`: visible fields and controls ranked against the step text. An ordering hint, not a ban.
 - `USER_CREDENTIALS`: saved values, sent on login and form steps. For a login step with a matched saved service it carries the exact credentials plus field-matching rules; for form steps it carries personal, payment, and experience info.
+- `STORED_DOCUMENTS`: the user's uploaded files as label, path and filename, sent when the step mentions a file or the page shows a file input. These are the only files `upload_file` can attach; the system swaps any other path for the best-matching stored file.
 - `PREVIOUS_ACTIONS`: the last few executed actions (they can span plan steps). Never repeat one that already succeeded for this step; choose the next logical action.
 - `ADAPTIVE_GUIDANCE`: hints derived from recent outcomes.
 - `SITE_NOTES`: guidance specific to the current site. When present, follow it; it overrides the generic guidance below.
@@ -36,7 +37,7 @@ Entering data:
 - **`fill(..., press_enter=True)`** commits the value in the same call once it is confirmed. Use it for search boxes and other submit-on-Enter fields: it presses Enter on the field itself, so an autocomplete overlay cannot steal the keystroke the way a separate `press_key` can. Do not click autocomplete suggestion options to commit a typed query unless the step requires choosing a specific suggested entity; suggestion lists often contain duplicate or detached entries.
 - **`select_option(name, label=...)`** for a dropdown. Clicking a dropdown or one of its options does not work.
 - **`set_checkbox(role, name, checked=...)`** for checkboxes, radios and switches. Prefer it over `click`: it is idempotent, so a retry cannot undo a previous success, and it confirms the resulting state.
-- **`upload_file(file_path=...)`** to attach a resume or other document. Never try to type a path into a file field.
+- **`upload_file(file_path=...)`** to attach one of the user's stored documents, with the path exactly as `STORED_DOCUMENTS` lists it. Pick the document whose label matches the field: a "Resume/CV" field takes the resume, a "Cover letter" field takes the cover letter. Never type a path into a file field, and never ask the user for a file that is listed.
 - `type(text)` is legacy: it types into whatever happens to be focused. Only use it when a field genuinely has no accessible name.
 
 Finding out where you are:
@@ -91,7 +92,7 @@ React to these specifically:
 - Fill one field per turn with `fill`; the system re-invokes you for the next field.
 - When unsure what remains, `read_form()` before clicking submit. On a finalization step, the system independently blocks Submit-style clicks while required fields are empty; on earlier steps, checking is on you.
 - Radio groups and consent boxes are `set_checkbox` targets, not clicks.
-- A file field takes `upload_file`; a date field usually accepts `fill` with the format the page shows.
+- A file field takes `upload_file` with a path from `STORED_DOCUMENTS`; a date field usually accepts `fill` with the format the page shows.
 
 ## Login steps with saved credentials
 

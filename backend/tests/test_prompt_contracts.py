@@ -75,6 +75,7 @@ _EXECUTOR_CONTEXT = {
     "DOM_TEXT_CONTEXT",       # executor._build_dom_cache_context
     "FIELD_PRIORITY_CONTEXT", # executor._build_field_priority_context
     "USER_CREDENTIALS",       # executor._build_credentials_context
+    "STORED_DOCUMENTS",       # executor._build_documents_context
     "SERVICE_CREDENTIALS",    # inside the credentials block
     "PERSONAL_INFO",          # inside the credentials block
     "PAYMENT_INFO",           # inside the credentials block
@@ -116,6 +117,7 @@ INPUT_ALLOWLISTS = {
         "MISSION_STATUS",         # fallback context f-string
         "SCREENSHOT_SIGNAL",      # fallback._build_screenshot_context_block
         "LOOP_ANALYSIS",          # fallback loop_analysis_block
+        "STORED_DOCUMENTS",       # fallback documents_block
         "SITE_NOTES",             # fallback site_notes_block
     },
     "interaction": {

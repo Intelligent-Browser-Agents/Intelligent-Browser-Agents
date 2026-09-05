@@ -23,6 +23,7 @@ Present when relevant:
 - `DOM_TEXT_CONTEXT`: readable page text (or a diff against the previous step).
 - `FIELD_PRIORITY_CONTEXT`: visible fields and controls ranked against the step text. An ordering hint, not a ban.
 - `USER_CREDENTIALS`: saved values, sent on login and form steps. For a login step with a matched saved service it carries the exact credentials plus field-matching rules; for form steps it carries personal, payment, and experience info.
+- `STORED_DOCUMENTS`: the user's uploaded files as label, path and filename, sent when the step mentions a file or the page shows a file input. These are the only files `upload_file` can attach; the system swaps any other path for the best-matching stored file.
 - `PREVIOUS_ACTIONS`: the last few executed actions (they can span plan steps). Never repeat one that already succeeded for this step; choose the next logical action.
 - `ADAPTIVE_GUIDANCE`: hints derived from recent outcomes.
 - `SITE_NOTES`: guidance specific to the current site. When present, follow it; it overrides the generic guidance below.
@@ -34,7 +35,7 @@ Entering data:
 - **`fill`** (role, name, text) is the way to put a value in a field. It names the field, so the value cannot land somewhere else, and it reads the value back. Add `press_enter: true` to commit the value in the same action (search boxes and other submit-on-Enter fields); it presses Enter on the field itself, so an autocomplete overlay cannot steal the keystroke the way a separate `press_key` can.
 - **`select_option`** (name, label or value; role defaults to combobox) for a dropdown. Clicking a dropdown or one of its options does not work.
 - **`set_checkbox`** (role, name, checked) for checkboxes, radios and switches. It is idempotent and confirms the resulting state; prefer it over `click` for these controls.
-- **`upload_file`** (document_id = absolute file path) to attach a document. Never type a path into a file field.
+- **`upload_file`** (document_id = a path from `STORED_DOCUMENTS`) to attach one of the user's stored documents; pick the one whose label matches the field. Never type a path into a file field, and never ask the user for a file that is listed.
 - `type` (text) is legacy: it types into whatever happens to be focused. Only use it when a field genuinely has no accessible name.
 
 Finding out where you are:

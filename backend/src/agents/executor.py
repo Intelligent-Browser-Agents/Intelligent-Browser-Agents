@@ -21,6 +21,7 @@ from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt, get_execution_tools_prompt, load_site_notes
 from autonomy import assess_action
+from documents import match_document, render_for_executor, stored_documents
 from dom_extraction import dom_extractor
 from dom_extraction.snapshot import SNAPSHOT_SECTION_MAX_CHARS, capture_page_snapshot
 
@@ -110,6 +111,7 @@ class Executor:
         plan_step_url = self._extract_first_url(current_task) or "none"
         read_section_block = self._build_read_section_context(state, dom_snapshot)
         credentials_block = self._build_credentials_context(state, current_task, current_url)
+        documents_block = self._build_documents_context(state, current_task, dom_snapshot)
         recent_actions_block = self._build_recent_actions(state)
         adaptive_guidance_block = self._build_adaptive_guidance(state, current_task)
         dom_cache_block = (
@@ -138,6 +140,7 @@ class Executor:
         {dom_cache_block}
         {field_priority_block}
         {credentials_block}
+        {documents_block}
         {recent_actions_block}
         {adaptive_guidance_block}
         {status_context_block}
@@ -210,6 +213,19 @@ class Executor:
                     error_type="unknown",
                 )
             args = self._normalize_tool_args(name, args, current_task)
+
+            if name == "upload_file" and isinstance(args, dict):
+                resolved, problem = self._resolve_upload_path(
+                    state, args.get("file_path"), args.get("name"), current_task
+                )
+                if resolved is None:
+                    return self._return_failure(
+                        state, current_url,
+                        action=name, args=args,
+                        message=problem,
+                        error_type="ambiguous_step",
+                    )
+                args["file_path"] = resolved
 
             # Deterministic credential enforcement for login-form entry.
             # The LLM may hallucinate placeholder credentials (e.g. user@example.com /
@@ -392,6 +408,19 @@ class Executor:
                         error_type=validated.error_type,
                     ),
                 }
+            if validated.action == "upload_file":
+                resolved, problem = self._resolve_upload_path(
+                    state, validated.args.document_id, validated.args.name, current_task
+                )
+                if resolved is None:
+                    return self._return_failure(
+                        state, current_url,
+                        action=validated.action,
+                        args=self._action_args_to_dict(validated.args),
+                        message=problem,
+                        error_type="ambiguous_step",
+                    )
+                validated.args.document_id = resolved
             # Forward the whole arg set. This used to copy only the legacy
             # fields, silently dropping nth/label/value/checked/document_id and
             # friends, which made select_option and upload_file unusable through
@@ -1805,23 +1834,85 @@ class Executor:
                 if exp_lines:
                     parts.append("EXPERIENCE/EDUCATION:\n" + "\n".join(exp_lines))
 
-            documents = creds.get("userDocuments") or {}
-            if isinstance(documents, dict):
-                doc_lines = [
-                    f"  {label}: {path}"
-                    for label, path in documents.items()
-                    if isinstance(path, str) and path.strip()
-                ]
-                if doc_lines:
-                    parts.append(
-                        "DOCUMENTS (stored files; attach with upload_file(file_path=<path>)):\n"
-                        + "\n".join(doc_lines)
-                    )
-
         if not parts:
             return ""
         text = "\n\nUSER_CREDENTIALS (available for auto-fill - enter these values with `fill`):\n" + "\n".join(parts)
         return self._clip_text(text, 1300)
+
+    # Steps and pages that involve a file. Independent of the form-keyword
+    # classifier above: "Attach your resume" matches none of those keywords, and
+    # a page with a file input needs the documents block whatever the step says.
+    _DOCUMENT_STEP_KEYWORDS = re.compile(
+        r"\bupload|\battach|\bresume\b|\bcv\b|\bcover\s*letter|\bdocument|\bfile\b"
+        r"|\bportfolio|\btranscript|\bcertificat|\bphoto\b",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _build_documents_context(cls, state: ProjectState, current_task: str, dom_snapshot: str) -> str:
+        """STORED_DOCUMENTS: the user's uploaded files, when a file is in play."""
+        documents = stored_documents(state.get("user_credentials"))
+        if not documents:
+            return ""
+        step_mentions_file = bool(cls._DOCUMENT_STEP_KEYWORDS.search(current_task or ""))
+        page_has_file_input = "[file input]" in (dom_snapshot or "")
+        if not (step_mentions_file or page_has_file_input):
+            return ""
+        text = (
+            "\n\nSTORED_DOCUMENTS (the user's uploaded files; attach one with "
+            "upload_file(file_path=<path>) using the path exactly as written):\n"
+            + render_for_executor(documents)
+            + "\nPick the document whose label matches the field or the step: a 'Resume/CV' field "
+            "takes the resume, a 'Cover letter' field takes the cover letter. Only these files can be "
+            "attached. Do not ask the user to provide or choose a file that is listed here."
+        )
+        return cls._clip_text(text, 1400)
+
+    @staticmethod
+    def _resolve_upload_path(
+        state: ProjectState,
+        requested_path: str | None,
+        field_name: str | None,
+        current_task: str,
+    ) -> tuple[str | None, str]:
+        """The stored document an upload_file call should attach.
+
+        The model proposes a path; this decides which stored file actually goes
+        to the page. A stored path (or filename) is honoured as is. Anything else
+        is remapped to the best match for the field name, then the step text,
+        then the only document, then the resume. Only stored documents can be
+        attached: an arbitrary host path would let a page talk the agent into
+        uploading a file the user never offered.
+
+        Returns (path, "") or (None, message explaining what is available).
+        """
+        documents = stored_documents(state.get("user_credentials"))
+        if not documents:
+            return None, (
+                "No documents are stored for this user, so nothing can be attached. "
+                "The user must upload the file under Your Details > Documents first."
+            )
+        chosen = match_document(
+            documents,
+            field_name or "",
+            current_task or "",
+            requested_path=requested_path,
+        )
+        if chosen is None:
+            listing = "; ".join(d.describe() for d in documents)
+            return None, (
+                f"No stored document fits this field. Stored documents: {listing}. "
+                "Call upload_file with the path of the one that matches."
+            )
+        if requested_path and os.path.normcase(os.path.abspath(requested_path)) != os.path.normcase(
+            os.path.abspath(chosen.path)
+        ):
+            print(
+                f"[executor] upload_file path {requested_path!r} is not a stored document; "
+                f"attaching {chosen.describe()} instead",
+                flush=True,
+            )
+        return chosen.path, ""
 
     @staticmethod
     def _find_matching_service(creds: dict, task: str, url: str) -> dict | None:

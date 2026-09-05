@@ -1,12 +1,11 @@
-"""Phase 7 API tests: run history, artifacts, documents, per-run HITL routing.
+"""Phase 7 API tests: run history, artifacts, per-run HITL routing.
 
 Runs are the product's unit of history, so the endpoints must be tenant-safe
-(a run belongs to its token subject), and the document store must only accept
-sane files since its contents are handed to the agent subprocess.
+(a run belongs to its token subject). The document store has its own tests in
+test_documents_api.py.
 """
 
 import asyncio
-import io
 from datetime import datetime, timezone
 
 import pytest
@@ -115,92 +114,6 @@ def test_run_screenshot_serves_the_artifact(monkeypatch, tmp_path):
     assert resp.status_code == 200
     assert resp.headers['content-type'] == 'image/jpeg'
     assert resp.content.startswith(b"\xff\xd8")
-
-
-# ---------------------------------------------------------------------------
-# Documents API
-# ---------------------------------------------------------------------------
-
-@pytest.fixture()
-def documents_dir(monkeypatch, tmp_path):
-    monkeypatch.setattr(server, 'USER_DOCUMENTS_DIR', str(tmp_path))
-    return tmp_path
-
-
-def test_documents_require_token(documents_dir):
-    client = TestClient(server.app)
-    assert client.get('/api/documents').status_code == 401
-
-
-def test_upload_rejects_unknown_type(documents_dir):
-    client = TestClient(server.app)
-    resp = client.post(
-        '/api/documents/passport',
-        headers=auth_headers(1),
-        files={'file': ('r.pdf', b'%PDF-1.4', 'application/pdf')},
-    )
-    assert resp.status_code == 404
-
-
-def test_upload_rejects_unsupported_extension(documents_dir):
-    client = TestClient(server.app)
-    resp = client.post(
-        '/api/documents/resume',
-        headers=auth_headers(1),
-        files={'file': ('resume.exe', b'MZ', 'application/octet-stream')},
-    )
-    assert resp.status_code == 400
-
-
-def test_upload_rejects_oversize_files(documents_dir):
-    client = TestClient(server.app)
-    big = io.BytesIO(b'a' * (server.DOCUMENT_MAX_BYTES + 1))
-    resp = client.post(
-        '/api/documents/resume',
-        headers=auth_headers(1),
-        files={'file': ('resume.pdf', big, 'application/pdf')},
-    )
-    assert resp.status_code == 413
-
-
-def test_upload_list_replace_and_delete_roundtrip(documents_dir):
-    client = TestClient(server.app)
-
-    resp = client.post(
-        '/api/documents/resume',
-        headers=auth_headers(1),
-        files={'file': ('resume.pdf', b'%PDF-1.4 original', 'application/pdf')},
-    )
-    assert resp.status_code == 200
-    assert 'resume' in resp.json()['documents']
-
-    # Replacing with a different extension drops the old file entirely.
-    resp = client.post(
-        '/api/documents/resume',
-        headers=auth_headers(1),
-        files={'file': ('resume.docx', b'PK new version', 'application/octet-stream')},
-    )
-    assert resp.status_code == 200
-    stored = list((documents_dir / '1').iterdir())
-    assert [p.name for p in stored] == ['resume.docx']
-
-    resp = client.get('/api/documents', headers=auth_headers(1))
-    assert resp.json()['documents']['resume']['filename'] == 'resume.docx'
-
-    resp = client.delete('/api/documents/resume', headers=auth_headers(1))
-    assert resp.status_code == 200
-    assert resp.json()['documents'] == {}
-
-
-def test_documents_are_per_user(documents_dir):
-    client = TestClient(server.app)
-    client.post(
-        '/api/documents/resume',
-        headers=auth_headers(1),
-        files={'file': ('resume.pdf', b'%PDF-1.4', 'application/pdf')},
-    )
-    resp = client.get('/api/documents', headers=auth_headers(2))
-    assert resp.json()['documents'] == {}
 
 
 # ---------------------------------------------------------------------------

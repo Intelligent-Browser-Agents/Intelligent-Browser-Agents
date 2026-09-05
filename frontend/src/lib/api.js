@@ -185,14 +185,17 @@ export const api = {
     return URL.createObjectURL(await response.blob());
   },
 
-  // ── Documents (resume, cover letter) ────────────────────────────────────
+  // ── Documents (resume, cover letter, anything the user labels) ──────────
 
   getDocuments: () => apiFetch('/api/documents'),
 
-  uploadDocument: async (docType, file) => {
+  // The label is the document's identity: uploading under an existing label
+  // replaces that file. The response carries the full listing.
+  uploadDocument: async (label, file) => {
     const form = new FormData();
+    form.append('label', label);
     form.append('file', file);
-    const response = await fetch(`${API_BASE}/api/documents/${docType}`, {
+    const response = await fetch(`${API_BASE}/api/documents`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}` },
       body: form,
@@ -204,6 +207,6 @@ export const api = {
     return payload;
   },
 
-  deleteDocument: (docType) =>
-    apiFetch(`/api/documents/${docType}`, { method: 'DELETE' }),
+  deleteDocument: (slug) =>
+    apiFetch(`/api/documents/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
 };

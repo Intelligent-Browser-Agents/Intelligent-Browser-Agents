@@ -17,6 +17,7 @@ from state import ProjectState, get_mission_goal
 from schema import FallbackStrategy, infer_step_intent
 from models import Models
 from prompt_loader import get_fallback_prompt, load_site_notes
+from documents import describe_documents, stored_documents
 
 
 class Fallback:
@@ -158,6 +159,14 @@ class Fallback:
             if site_notes
             else ""
         )
+        documents = stored_documents(state.get("user_credentials"))
+        documents_block = (
+            "STORED_DOCUMENTS (files the user already uploaded; the executor attaches them "
+            "with upload_file, so a step that needs one of these must not ask the user for it):\n"
+            f"{describe_documents(documents)}\n\n"
+            if documents
+            else ""
+        )
         context = f"""
 MAIN_GOAL: {user_intent}
 
@@ -185,7 +194,7 @@ MISSION_STATUS:
 
 {loop_analysis_block}
 
-{site_notes_block}
+{documents_block}{site_notes_block}
 Diagnose the failure and propose a recovery. Use update_type: revise_step with proposed_step for a single revised instruction; use insert_step_before with insert_step to add a prerequisite; use request_context if user input is needed; use abort only if the goal cannot be continued. If SCREENSHOT_SIGNAL says enabled, use screenshot evidence only as a last-resort tie-breaker for visual blockers/occlusion.
 """
 

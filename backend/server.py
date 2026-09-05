@@ -14,7 +14,7 @@ as a command-line argument.
 """
 
 # FastAPI framework, Requests for anything but GET
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 from cdp_stream import ScreencastRelay
 
@@ -295,47 +295,183 @@ _RUN_COLUMNS = (
 
 
 """
-Document store (resume, cover letter)
+Document store
 
-Files live on disk per user, outside the web root, and their paths ride the
-credential blob into the agent subprocess so `upload_file` can attach them.
-Two fixed slots keep the UX simple: one resume, one cover letter.
+Files the agent can attach to web forms: resume, cover letter, transcript,
+portfolio, anything the user labels. They live on disk per user, outside the
+web root, one directory per document slug holding the file under its sanitized
+original filename, so an employer receives "Edwin_Villanueva_Resume.pdf" rather
+than "resume.pdf". Labels live in a per-user manifest.json; the listing itself
+is derived from the directories, so a file removed by hand cannot leave a ghost
+entry. Label, filename and path ride the credential blob into the agent
+subprocess as `userDocuments` (see src/documents.py for the agents' side).
+
+Files from the earlier two-slot store (`<slug>.<ext>` at the top of the user
+directory) are still listed and are replaced cleanly.
 """
 
+import re
+import shutil
+
 USER_DOCUMENTS_DIR = os.path.join(_BACKEND_DIR, "user_documents")
-DOCUMENT_TYPES = ("resume", "cover_letter")
-DOCUMENT_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt", ".rtf")
-DOCUMENT_MAX_BYTES = 8 * 1024 * 1024
+# Offered by the UI as suggestions; any label that slugifies to something
+# non-empty is accepted.
+DOCUMENT_SUGGESTED_LABELS = ("Resume", "Cover letter", "Transcript", "Portfolio", "Certification", "Photo")
+DOCUMENT_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt", ".png", ".jpg", ".jpeg")
+DOCUMENT_MAX_BYTES = 10 * 1024 * 1024
+_DOCUMENT_MANIFEST = "manifest.json"
+_DOCUMENT_SLUG = re.compile(r"^[a-z0-9_]{1,40}$")
+_LEGACY_DOCUMENT_LABELS = {"resume": "Resume", "cover_letter": "Cover letter"}
+
+
+def document_slug(label: str) -> str:
+    """`Cover letter` -> `cover_letter`; empty when nothing usable remains."""
+    slug = re.sub(r"[^a-z0-9]+", "_", (label or "").strip().lower()).strip("_")
+    return slug[:40].rstrip("_")
+
+
+def _document_label(slug: str, manifest: dict) -> str:
+    label = manifest.get(slug)
+    if isinstance(label, str) and label.strip():
+        return label.strip()
+    return _LEGACY_DOCUMENT_LABELS.get(slug) or slug.replace("_", " ").capitalize()
+
+
+def _safe_document_filename(original: str, slug: str, extension: str) -> str:
+    """The original filename with anything path-like or unprintable removed.
+
+    The stem is sanitized on its own and the validated extension re-appended,
+    so a name that is nothing but bad characters falls back to the slug
+    instead of degenerating into `pdf.pdf`.
+    """
+    base = (original or "").replace("\\", "/").rsplit("/", 1)[-1]
+    if extension and base.lower().endswith(extension):
+        stem = base[: -len(extension)]
+    else:
+        stem = os.path.splitext(base)[0]
+    stem = re.sub(r"[^A-Za-z0-9._ -]+", "", stem).strip(" .")
+    stem = re.sub(r"\s+", " ", stem)[: 100 - len(extension)].strip(" .")
+    return f"{stem or slug}{extension}"
 
 
 def _document_dir(user_id: int) -> str:
     return os.path.join(USER_DOCUMENTS_DIR, str(int(user_id)))
 
 
-def _find_document(user_id: int, doc_type: str) -> str | None:
+def _read_document_manifest(user_id: int) -> dict:
+    path = os.path.join(_document_dir(user_id), _DOCUMENT_MANIFEST)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _write_document_manifest(user_id: int, manifest: dict) -> None:
+    directory = _document_dir(user_id)
+    os.makedirs(directory, exist_ok=True)
+    with open(os.path.join(directory, _DOCUMENT_MANIFEST), "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=True)
+
+
+def _find_document(user_id: int, slug: str) -> str | None:
     """Absolute path of the stored document, or None."""
     directory = _document_dir(user_id)
-    if not os.path.isdir(directory):
-        return None
+    slug_dir = os.path.join(directory, slug)
+    if os.path.isdir(slug_dir):
+        for entry in sorted(os.listdir(slug_dir)):
+            candidate = os.path.join(slug_dir, entry)
+            if os.path.isfile(candidate) and os.path.splitext(entry)[1].lower() in DOCUMENT_EXTENSIONS:
+                return candidate
     for ext in DOCUMENT_EXTENSIONS:
-        candidate = os.path.join(directory, f"{doc_type}{ext}")
-        if os.path.isfile(candidate):
-            return candidate
+        legacy = os.path.join(directory, f"{slug}{ext}")
+        if os.path.isfile(legacy):
+            return legacy
     return None
 
 
+def _document_slugs(user_id: int) -> list[str]:
+    directory = _document_dir(user_id)
+    if not os.path.isdir(directory):
+        return []
+    slugs: set[str] = set()
+    for entry in os.listdir(directory):
+        full = os.path.join(directory, entry)
+        if os.path.isdir(full) and _DOCUMENT_SLUG.match(entry):
+            slugs.add(entry)
+        elif os.path.isfile(full):
+            stem, ext = os.path.splitext(entry)
+            if ext.lower() in DOCUMENT_EXTENSIONS and _DOCUMENT_SLUG.match(stem):
+                slugs.add(stem)
+    return sorted(slug for slug in slugs if _find_document(user_id, slug))
+
+
 def list_user_documents(user_id: int) -> dict:
+    """{slug: {label, filename, size, updated_at}} for the UI."""
+    manifest = _read_document_manifest(user_id)
     out = {}
-    for doc_type in DOCUMENT_TYPES:
-        path = _find_document(user_id, doc_type)
-        if path:
-            stat = os.stat(path)
-            out[doc_type] = {
-                "filename": os.path.basename(path),
-                "size": stat.st_size,
-                "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-            }
+    for slug in _document_slugs(user_id):
+        path = _find_document(user_id, slug)
+        stat = os.stat(path)
+        out[slug] = {
+            "label": _document_label(slug, manifest),
+            "filename": os.path.basename(path),
+            "size": stat.st_size,
+            "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        }
     return out
+
+
+def documents_for_agent(user_id: int) -> dict:
+    """{slug: {label, filename, path}}: the `userDocuments` credential-blob entry."""
+    manifest = _read_document_manifest(user_id)
+    out = {}
+    for slug in _document_slugs(user_id):
+        path = _find_document(user_id, slug)
+        out[slug] = {
+            "label": _document_label(slug, manifest),
+            "filename": os.path.basename(path),
+            "path": path,
+        }
+    return out
+
+
+def _remove_document_files(user_id: int, slug: str) -> None:
+    directory = _document_dir(user_id)
+    shutil.rmtree(os.path.join(directory, slug), ignore_errors=True)
+    for ext in DOCUMENT_EXTENSIONS:
+        legacy = os.path.join(directory, f"{slug}{ext}")
+        if os.path.isfile(legacy):
+            os.remove(legacy)
+
+
+def store_document(user_id: int, label: str, original_filename: str, content: bytes) -> str:
+    """Persist one document under its label and return the slug.
+
+    Replaces any previous file stored under the same label, whichever layout
+    it used.
+    """
+    slug = document_slug(label)
+    extension = os.path.splitext(original_filename or "")[1].lower()
+    filename = _safe_document_filename(original_filename, slug, extension)
+    _remove_document_files(user_id, slug)
+    slug_dir = os.path.join(_document_dir(user_id), slug)
+    os.makedirs(slug_dir, exist_ok=True)
+    with open(os.path.join(slug_dir, filename), "wb") as handle:
+        handle.write(content)
+    manifest = _read_document_manifest(user_id)
+    manifest[slug] = label.strip()
+    _write_document_manifest(user_id, manifest)
+    return slug
+
+
+def delete_document_files(user_id: int, slug: str) -> None:
+    _remove_document_files(user_id, slug)
+    manifest = _read_document_manifest(user_id)
+    if slug in manifest:
+        manifest.pop(slug, None)
+        _write_document_manifest(user_id, manifest)
 
 
 def _token_secret() -> str:
@@ -1086,15 +1222,30 @@ Documents API
 """
 
 
+def _documents_response(user_id: int) -> dict:
+    return {
+        "documents": list_user_documents(user_id),
+        "suggested_labels": list(DOCUMENT_SUGGESTED_LABELS),
+        "error": "",
+    }
+
+
 @app.get('/api/documents')
 async def get_documents(user_id: int = Depends(require_user)):
-    return {"documents": list_user_documents(user_id), "error": ""}
+    return await asyncio.to_thread(_documents_response, user_id)
 
 
-@app.post('/api/documents/{doc_type}')
-async def upload_document(doc_type: str, file: UploadFile = File(...), user_id: int = Depends(require_user)):
-    if doc_type not in DOCUMENT_TYPES:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown document type.")
+@app.post('/api/documents')
+async def upload_document(
+    label: str = Form(...),
+    file: UploadFile = File(...),
+    user_id: int = Depends(require_user),
+):
+    if not document_slug(label):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Give the document a label with at least one letter or digit, e.g. Resume.",
+        )
     extension = os.path.splitext(file.filename or "")[1].lower()
     if extension not in DOCUMENT_EXTENSIONS:
         raise HTTPException(
@@ -1105,32 +1256,20 @@ async def upload_document(doc_type: str, file: UploadFile = File(...), user_id: 
     if len(content) > DOCUMENT_MAX_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="File is larger than 8 MB.",
+            detail=f"File is larger than {DOCUMENT_MAX_BYTES // (1024 * 1024)} MB.",
         )
-
-    def persist():
-        directory = _document_dir(user_id)
-        os.makedirs(directory, exist_ok=True)
-        # One slot per type: drop any previous file regardless of extension.
-        for old_ext in DOCUMENT_EXTENSIONS:
-            old = os.path.join(directory, f"{doc_type}{old_ext}")
-            if os.path.isfile(old):
-                os.remove(old)
-        with open(os.path.join(directory, f"{doc_type}{extension}"), "wb") as handle:
-            handle.write(content)
-
-    await asyncio.to_thread(persist)
-    return {"documents": list_user_documents(user_id), "error": ""}
+    await asyncio.to_thread(store_document, user_id, label, file.filename or "", content)
+    return await asyncio.to_thread(_documents_response, user_id)
 
 
-@app.delete('/api/documents/{doc_type}')
-async def delete_document(doc_type: str, user_id: int = Depends(require_user)):
-    if doc_type not in DOCUMENT_TYPES:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown document type.")
-    path = _find_document(user_id, doc_type)
-    if path:
-        await asyncio.to_thread(os.remove, path)
-    return {"documents": list_user_documents(user_id), "error": ""}
+@app.delete('/api/documents/{slug}')
+async def delete_document(slug: str, user_id: int = Depends(require_user)):
+    # The slug comes from the client here, so it is validated before it is
+    # used as a path component.
+    if not _DOCUMENT_SLUG.match(slug):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document id.")
+    await asyncio.to_thread(delete_document_files, user_id, slug)
+    return await asyncio.to_thread(_documents_response, user_id)
 
 
 HITL_PREFIX = "@@HITL@@"
@@ -1343,13 +1482,10 @@ async def stream_endpoint(websocket: WebSocket):
     run_id = str(uuid.uuid4())
     await websocket.send_json({"type": "run_started", "run_id": run_id})
 
-    # Stored documents (resume, cover letter) ride the credential blob so the
-    # agent's upload_file can attach them by path.
-    documents = {
-        doc_type: _find_document(user_id, doc_type)
-        for doc_type in DOCUMENT_TYPES
-        if _find_document(user_id, doc_type)
-    }
+    # Stored documents ride the credential blob (label, filename and path per
+    # slug) so the agent's upload_file can attach them; src/documents.py is the
+    # agents' side of this contract.
+    documents = await asyncio.to_thread(documents_for_agent, user_id)
     if documents:
         credentials = {**credentials, "userDocuments": documents}
 

@@ -237,9 +237,11 @@ By default, open the URL printed by Vite (commonly `http://localhost:5173`).
 1. Start backend server in `backend/`.
 2. Start frontend dev server in `frontend/`.
 3. Register or log in.
-4. Open dashboard and submit a prompt.
-5. Watch logs + live browser stream.
-6. Respond to HITL clarification requests when prompted.
+4. Under Your Details, fill in your profile and upload the files an application may ask for in the Documents tab (resume, cover letter, transcript, or anything else under a label of your choice).
+   The agent attaches the file whose label matches the form field itself; it never asks you to pick one.
+5. Open dashboard and submit a prompt.
+6. Watch logs + live browser stream.
+7. Respond to HITL clarification requests when prompted.
 
 Optional manual subprocess run (debugging only):
 
@@ -306,6 +308,9 @@ user id.
   CVV-like fields are stripped before storage.
 - `DELETE /api/users/credentials`
 - `POST /api/hitl_reply` - answer the caller's active clarification prompt.
+- `GET /api/documents` - the caller's stored documents (label, filename, size, date) plus the suggested labels.
+- `POST /api/documents` - multipart `label` + `file`; the label is the document's identity, so uploading under an existing label replaces that file.
+- `DELETE /api/documents/{slug}`
 
 ### WebSocket endpoints
 

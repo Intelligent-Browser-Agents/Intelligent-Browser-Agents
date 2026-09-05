@@ -7,6 +7,7 @@ execution outcomes to decide next action (advance / retry / plan_complete).
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from capabilities import normalize_plan_steps
+from documents import stored_documents
 from schema import OrchestratorPlan, OrchestratorDecision, infer_step_intent
 from state import ProjectState, get_mission_goal
 from models import Models
@@ -883,6 +884,14 @@ Based on the rules, output exactly one action: advance, retry, or plan_complete.
         experience = creds.get("userExperienceEntries") or []
         if experience:
             parts.append(f"- {len(experience)} experience/education entries")
+
+        documents = stored_documents(creds)
+        if documents:
+            listing = ", ".join(document.describe() for document in documents)
+            parts.append(
+                "- Stored documents the agent attaches itself with upload_file (never ask the user "
+                f"to provide these): {listing}"
+            )
 
         if not parts:
             return ""

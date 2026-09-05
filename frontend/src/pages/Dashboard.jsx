@@ -20,6 +20,7 @@ import Modal from "../components/Modal";
 import SettingsModal from "../components/SettingsModal";
 import RunHistory from "../components/RunHistory";
 import HitlForm from "../components/HitlForm";
+import DocumentsPanel from "../components/DocumentsPanel";
 import { api, buildWebSocketUrl, clearToken, getToken } from "../lib/api";
 
 // === COMPONENTS ===
@@ -124,6 +125,7 @@ function UserCredentials({
           <button type="button" className={`credentials-tab ${showingServices ? "active" : ""}`} onClick={() => setActiveCredentialsTab("services")}>Services</button>
           <button type="button" className={`credentials-tab ${showingPayments ? "active" : ""}`} onClick={() => setActiveCredentialsTab("payments")}>Payment Info</button>
           <button type="button" className={`credentials-tab ${activeCredentialsTab === "experience" ? "active" : ""}`} onClick={() => setActiveCredentialsTab("experience")}>Experience</button>
+          <button type="button" className={`credentials-tab ${activeCredentialsTab === "documents" ? "active" : ""}`} onClick={() => setActiveCredentialsTab("documents")}>Documents</button>
         </div>
         <div className="credentials-tab-body">
           {showingServices ? (
@@ -198,6 +200,8 @@ function UserCredentials({
                 </div>
               </div>
             )
+          ) : activeCredentialsTab === "documents" ? (
+            <DocumentsPanel />
           ) : !isExperienceDetailView ? (
             <div className="services-grid cards-scroll">
               {safeExperienceEntries.length === 0 ? (
