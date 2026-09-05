@@ -166,7 +166,9 @@ def test_reducer_backed_fields_are_declared_with_an_annotation():
 _MIN_UPDATES_PER_MODULE = {
     "executor.py": 4,
     "fallback.py": 8,
-    "interaction.py": 8,
+    # 8 -> 7 on 2026-09-05: the sensitive checkpoint's unclear-reply branch now
+    # re-asks in place instead of returning a state update of its own.
+    "interaction.py": 7,
     "orchestrator.py": 24,
     "verifier.py": 4,
 }

@@ -262,6 +262,14 @@ Core workflow is built in `backend/src/main.py` and uses these agents:
 
 Execution actions are implemented in `backend/src/execution/` and exposed through a typed dispatcher.
 
+### Sensitive actions
+
+The autonomy level in Settings decides which actions pause for approval.
+`confirm_irreversible` (the default) pauses before a click that reads like a submission, `autonomous` does not, and `observe_only` pauses before every change to a page.
+Money movement, deletion, and sending on the user's behalf always pause, at every level.
+A paused action appears in the chat with Yes and No buttons.
+Yes runs exactly the action that was proposed, with the same arguments, before any other agent takes a turn; No ends the run without executing it.
+
 ### Model assignment
 
 Each agent's model is set in `AGENT_MODELS` in `backend/src/models.py`.

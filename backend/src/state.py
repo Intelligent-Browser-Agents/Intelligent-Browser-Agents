@@ -138,7 +138,10 @@ class ProjectState(TypedDict):
     mission_failed: bool
     abort_reason: Optional[str]
     pending_sensitive_action: Optional[Dict]  # Pending sensitive action awaiting explicit user confirmation
-    sensitive_action_approval: Optional[Dict]  # Last confirmation response bound to an action signature
+    # The user's answer to that checkpoint. An approved record carries the exact
+    # action and args that were proposed; the graph routes it straight to the
+    # executor, which dispatches it as-is (no model call) and clears it.
+    sensitive_action_approval: Optional[Dict]
     requested_context: Optional[List[str]]  # Missing context requested from fallback for user clarification
 
     # User-provided credentials (service logins, personal info, payment, experience)

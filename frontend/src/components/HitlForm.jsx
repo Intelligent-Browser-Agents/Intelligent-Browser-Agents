@@ -7,6 +7,8 @@ import { useState } from "react";
  *
  * "confirmation" fields are the browser-interaction case ("do it in the live
  * view, then tell me when you're done"), so they get a one-click Done button.
+ * "approval" fields are the sensitive-action checkpoint and get Yes/No buttons:
+ * a typed "yesd" once stalled a run for three transactions.
  */
 export default function HitlForm({ hitl, onSubmit }) {
   const fields = hitl.requestedFields.length > 0 ? hitl.requestedFields : ["reply"];
@@ -14,6 +16,13 @@ export default function HitlForm({ hitl, onSubmit }) {
   const [sent, setSent] = useState(false);
 
   const isConfirmationOnly = fields.length === 1 && fields[0] === "confirmation";
+  const isApprovalOnly = fields.length === 1 && fields[0] === "approval";
+
+  const send = (reply) => {
+    if (sent) return;
+    setSent(true);
+    onSubmit(reply);
+  };
 
   const submit = (e) => {
     e.preventDefault();
@@ -32,14 +41,29 @@ export default function HitlForm({ hitl, onSubmit }) {
       if (parts.length === 0) return;
       reply = parts.join("\n");
     }
-    setSent(true);
-    onSubmit(reply);
+    send(reply);
   };
 
   return (
     <form className="hitl-form" onSubmit={submit} aria-label="The agent needs input">
-      <p className="hitl-form-title">The agent needs your input</p>
-      {isConfirmationOnly ? (
+      <p className="hitl-form-title">
+        {isApprovalOnly ? "The agent needs your approval" : "The agent needs your input"}
+      </p>
+      {isApprovalOnly ? (
+        <>
+          <p className="hitl-form-hint">
+            Approve the action described above, or cancel it. Nothing runs until you choose.
+          </p>
+          <div className="hitl-form-actions">
+            <button type="button" className="btn btn-primary" disabled={sent} onClick={() => send("yes")}>
+              Yes, proceed
+            </button>
+            <button type="button" className="btn btn-secondary" disabled={sent} onClick={() => send("no")}>
+              No, cancel
+            </button>
+          </div>
+        </>
+      ) : isConfirmationOnly ? (
         <p className="hitl-form-hint">
           Take over the live view if needed, then confirm when you are done.
         </p>
@@ -57,9 +81,11 @@ export default function HitlForm({ hitl, onSubmit }) {
           </label>
         ))
       )}
-      <button type="submit" className="btn btn-primary" disabled={sent}>
-        {sent ? "Sent" : isConfirmationOnly ? "Done, continue" : "Send"}
-      </button>
+      {!isApprovalOnly && (
+        <button type="submit" className="btn btn-primary" disabled={sent}>
+          {sent ? "Sent" : isConfirmationOnly ? "Done, continue" : "Send"}
+        </button>
+      )}
     </form>
   );
 }

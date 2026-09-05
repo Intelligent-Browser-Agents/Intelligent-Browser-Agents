@@ -20,7 +20,7 @@ from schema import ExecutionResult, LastExecutionEvent
 from state import ProjectState
 from models import Models
 from prompt_loader import get_execution_prompt, get_execution_tools_prompt, load_site_notes
-from autonomy import assess_action
+from autonomy import approved_action, assess_action
 from documents import match_document, render_for_executor, stored_documents
 from dom_extraction import dom_extractor
 from dom_extraction.snapshot import SNAPSHOT_SECTION_MAX_CHARS, capture_page_snapshot
@@ -106,6 +106,12 @@ class Executor:
         if current_plan:
             safe_idx = min(max(current_step, 0), len(current_plan) - 1)
             canonical_step = (current_plan[safe_idx] or current_task).strip() or current_task
+
+        # A sensitive action the user just approved is dispatched exactly as it
+        # was proposed: no new model call, no gate, no chance to pick another target.
+        approval = approved_action(state)
+        if approval is not None:
+            return await self._execute_approved_action(state, page, current_url, approval)
 
         dom_snapshot = await self._get_real_dom_snapshot(page, max_chars=self._dom_snapshot_budget(current_task))
         plan_step_url = self._extract_first_url(current_task) or "none"
@@ -295,7 +301,6 @@ class Executor:
                     error_type="repeated_action",
                 )
 
-            consume_sensitive_approval = False
             decision = assess_action(
                 name,
                 args if isinstance(args, dict) else {},
@@ -304,18 +309,18 @@ class Executor:
             )
             sensitive_reason = str(decision.get("reason") or "") if decision.get("mode") == "confirm" else None
             if sensitive_reason:
-                signature = self._action_signature(name, args)
-                if not self._is_sensitive_action_approved(state, signature):
-                    return self._request_sensitive_confirmation(
-                        state=state,
-                        current_url=current_url,
-                        action=name,
-                        args=args,
-                        current_task=current_task,
-                        reason=sensitive_reason,
-                        action_signature=signature,
-                    )
-                consume_sensitive_approval = True
+                # The approval that comes back is dispatched by
+                # _execute_approved_action on the next executor turn, without a
+                # new model call; nothing here needs to re-check it.
+                return self._request_sensitive_confirmation(
+                    state=state,
+                    current_url=current_url,
+                    action=name,
+                    args=args,
+                    current_task=current_task,
+                    reason=sensitive_reason,
+                    action_signature=self._action_signature(name, args),
+                )
 
             try:
                 # Browser tools had no timeout. A click cascading through frames,
@@ -331,7 +336,6 @@ class Executor:
                     action=name, args=args,
                     message=f"Browser action '{name}' timed out after {_TOOL_CALL_TIMEOUT_SECONDS}s.",
                     error_type="tool_limit",
-                    clear_sensitive_approval=consume_sensitive_approval,
                 )
             except Exception as e:
                 return self._return_failure(
@@ -339,7 +343,6 @@ class Executor:
                     action=name, args=args,
                     message=str(e),
                     error_type="unknown",
-                    clear_sensitive_approval=consume_sensitive_approval,
                 )
             result = self._coerce_tool_result_to_output(name, result, args)
             return await self._finish_from_result(
@@ -347,7 +350,6 @@ class Executor:
                 page,
                 current_url,
                 result,
-                clear_sensitive_approval=consume_sensitive_approval,
             )
         else:
             # Fallback: structured output (no tool_calls).
@@ -445,7 +447,6 @@ class Executor:
                     error_type="repeated_action",
                 )
 
-            consume_sensitive_approval = False
             decision = assess_action(
                 validated.action,
                 validated_args,
@@ -454,18 +455,15 @@ class Executor:
             )
             sensitive_reason = str(decision.get("reason") or "") if decision.get("mode") == "confirm" else None
             if sensitive_reason:
-                signature = self._action_signature(validated.action, validated_args)
-                if not self._is_sensitive_action_approved(state, signature):
-                    return self._request_sensitive_confirmation(
-                        state=state,
-                        current_url=current_url,
-                        action=validated.action,
-                        args=validated_args,
-                        current_task=current_task,
-                        reason=sensitive_reason,
-                        action_signature=signature,
-                    )
-                consume_sensitive_approval = True
+                return self._request_sensitive_confirmation(
+                    state=state,
+                    current_url=current_url,
+                    action=validated.action,
+                    args=validated_args,
+                    current_task=current_task,
+                    reason=sensitive_reason,
+                    action_signature=self._action_signature(validated.action, validated_args),
+                )
 
             missing_required = await self._required_empty_fields_before_finalization(
                 page,
@@ -484,7 +482,6 @@ class Executor:
                         f"{', '.join(missing_required)}"
                     ),
                     error_type="ambiguous_step",
-                    clear_sensitive_approval=consume_sensitive_approval,
                 )
 
             result = await dispatch_action(page, tool_action, runtime=self.runtime)
@@ -498,7 +495,6 @@ class Executor:
                 page,
                 current_url,
                 result,
-                clear_sensitive_approval=consume_sensitive_approval,
             )
 
     @staticmethod
@@ -587,6 +583,87 @@ class Executor:
         if clear_sensitive_approval:
             out["sensitive_action_approval"] = None
         return out
+
+    @staticmethod
+    def _action_args_from_tool_args(args: dict) -> ActionArgs:
+        """ActionArgs for a recorded action. Tool-mode `upload_file` names its
+        path `file_path`; the dispatcher's field is `document_id`."""
+        cleaned = {key: value for key, value in (args or {}).items() if value is not None}
+        file_path = cleaned.pop("file_path", None)
+        if file_path is not None and "document_id" not in cleaned:
+            cleaned["document_id"] = file_path
+        return ActionArgs(**cleaned)
+
+    async def _execute_approved_action(
+        self, state: ProjectState, page, current_url: str, approval: dict
+    ) -> dict:
+        """Dispatch the sensitive action the user just approved, exactly as proposed.
+
+        Observed failure (Apple careers run, 2026-09-05): after the user approved
+        the "Submit Resume" click, the run went back through the orchestrator and
+        a fresh executor call. The prompt then argued against repeating the
+        blocked click (it sat in PREVIOUS_ACTIONS as "do NOT repeat"), the
+        decision agent's retry text leaked the confirmation bookkeeping, and the
+        model picked the page's other duplicate link (nth=1), so the exact
+        signature the approval was bound to never matched and the same click was
+        confirmed three times. The approval is a one-shot ticket: dispatched here
+        without a model call, then cleared whatever happened.
+        """
+        name = str(approval.get("action") or "")
+        args = dict(approval.get("args") or {})
+        print(f"[executor] Dispatching user-approved {name} without a new model call", flush=True)
+
+        # Same guard the ordinary path applies before a finalizing click: the
+        # page may have changed while the question was open.
+        missing_required = await self._required_empty_fields_before_finalization(page, state, name, args)
+        if missing_required:
+            return self._return_failure(
+                state, current_url,
+                action=name, args=args,
+                message=(
+                    "Cannot finalize yet. Required fields are still incomplete: "
+                    f"{', '.join(missing_required)}"
+                ),
+                error_type="ambiguous_step",
+                clear_sensitive_approval=True,
+            )
+
+        try:
+            tool_action = Action(action=name, args=self._action_args_from_tool_args(args))
+        except Exception as e:
+            return self._return_failure(
+                state, current_url,
+                action=name, args=args,
+                message=f"The approved action could not be rebuilt for dispatch: {e}",
+                error_type="unknown",
+                clear_sensitive_approval=True,
+            )
+
+        try:
+            result = await asyncio.wait_for(
+                dispatch_action(page, tool_action, runtime=self.runtime),
+                timeout=_TOOL_CALL_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return self._return_failure(
+                state, current_url,
+                action=name, args=args,
+                message=f"Browser action '{name}' timed out after {_TOOL_CALL_TIMEOUT_SECONDS}s.",
+                error_type="tool_limit",
+                clear_sensitive_approval=True,
+            )
+        except Exception as e:
+            return self._return_failure(
+                state, current_url,
+                action=name, args=args,
+                message=str(e),
+                error_type="unknown",
+                clear_sensitive_approval=True,
+            )
+        result.message = f"{result.message} (executed after explicit user approval)"
+        return await self._finish_from_result(
+            state, page, current_url, result, clear_sensitive_approval=True
+        )
 
     def _request_sensitive_confirmation(
         self,
@@ -704,13 +781,6 @@ class Executor:
             "(see PAGE_SECTION_JUST_READ / PREVIOUS_ACTIONS). Act on what it showed - click or fill a "
             "listed target, scroll, or read a different section."
         )
-
-    @staticmethod
-    def _is_sensitive_action_approved(state: ProjectState, action_signature: str) -> bool:
-        approval = state.get("sensitive_action_approval") or {}
-        if not isinstance(approval, dict):
-            return False
-        return bool(approval.get("approved") is True and approval.get("action_signature") == action_signature)
 
     @staticmethod
     def _describe_sensitive_target(action: str, args: dict) -> str:

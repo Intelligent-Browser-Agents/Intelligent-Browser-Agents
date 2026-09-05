@@ -574,20 +574,6 @@ def test_executor_sensitive_action_reason_uses_autonomy_policy_for_submission_bu
     assert isinstance(reason, str) and reason
 
 
-def test_executor_sensitive_action_approval_requires_exact_signature():
-    approved_signature = Executor._action_signature("click", {"role": "button", "name": "Send"})
-    other_signature = Executor._action_signature("click", {"role": "button", "name": "Submit"})
-    state = {
-        "sensitive_action_approval": {
-            "approved": True,
-            "action_signature": approved_signature,
-        }
-    }
-
-    assert Executor._is_sensitive_action_approved(state, approved_signature) is True
-    assert Executor._is_sensitive_action_approved(state, other_signature) is False
-
-
 @pytest.mark.asyncio
 async def test_executor_finish_from_result_publishes_snapshot_and_verified_flag(monkeypatch):
     executor = Executor.__new__(Executor)

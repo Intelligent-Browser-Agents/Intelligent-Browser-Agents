@@ -103,6 +103,7 @@ class InteractionAgent:
         # ── Fast path: explicit sensitive-action confirmation checkpoint ──
         pending_sensitive = state.get("pending_sensitive_action") or {}
         if isinstance(pending_sensitive, dict) and pending_sensitive.get("action_signature"):
+            target = str(pending_sensitive.get("target") or pending_sensitive.get("action") or "the action")
             confirmation_message = (
                 pending_sensitive.get("message")
                 or "Please confirm this sensitive action. Reply yes to proceed or no to cancel."
@@ -113,15 +114,37 @@ class InteractionAgent:
                 "requested_fields": ["approval"],
             })
             parsed = self._parse_sensitive_confirmation(str(user_reply))
+            # An unclear reply ("yesd") is re-asked right here. Bouncing it back
+            # through the orchestrator and a fresh executor call cost three
+            # transactions per typo, and the executor, told to act "after an
+            # explicit yes", once went looking for the word "yes" on the page.
+            while parsed is None:
+                retry_message = (
+                    f"I did not understand \"{str(user_reply)[:60]}\". "
+                    f"Reply yes to run {target}, or no to cancel it."
+                )
+                user_reply = self._ask_user(state, {
+                    "type": "request",
+                    "message": retry_message,
+                    "requested_fields": ["approval"],
+                })
+                parsed = self._parse_sensitive_confirmation(str(user_reply))
             interaction_log = (
                 "[Interaction] Type: request (sensitive_confirmation)\n"
                 f"[Interaction] User replied: {str(user_reply)[:200]}"
             )
 
             if parsed is True:
+                # The approval carries the exact action and arguments that were
+                # proposed. The graph routes straight back to the executor, which
+                # dispatches them as-is (Executor._execute_approved_action):
+                # no new model decision gets to reword the task or pick another
+                # target in between.
                 return {
                     "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-                    "reasoning_log": [interaction_log],
+                    "reasoning_log": [
+                        interaction_log + f"\n[Interaction] Approved: {target}; executing it next."
+                    ],
                     "handoff_interaction": False,
                     "is_complete": False,
                     "pending_sensitive_action": None,
@@ -130,6 +153,8 @@ class InteractionAgent:
                         "reply": str(user_reply)[:200],
                         "action_signature": pending_sensitive.get("action_signature"),
                         "action": pending_sensitive.get("action"),
+                        "args": dict(pending_sensitive.get("args") or {}),
+                        "target": target,
                     },
                     "messages": [
                         {"role": "assistant", "content": confirmation_message},
@@ -137,41 +162,25 @@ class InteractionAgent:
                     ],
                 }
 
-            if parsed is False:
-                final_message = "Sensitive action canceled. No irreversible action was executed."
-                self._announce_finish(state, final_message)
-                return {
-                    "number_of_transactions": state.get("number_of_transactions", 0) + 1,
-                    "reasoning_log": [
-                        "[Interaction] Type: finish (sensitive_confirmation_denied)\n"
-                        f"[Interaction] User replied: {str(user_reply)[:200]}\n"
-                        f"[Interaction] Final:\n{final_message}"
-                    ],
-                    "messages": [{"role": "assistant", "content": final_message}],
-                    "is_complete": True,
-                    "handoff_interaction": False,
-                    "pending_sensitive_action": None,
-                    "sensitive_action_approval": {
-                        "approved": False,
-                        "reply": str(user_reply)[:200],
-                        "action_signature": pending_sensitive.get("action_signature"),
-                        "action": pending_sensitive.get("action"),
-                    },
-                }
-
-            # Unclear response: keep pending checkpoint and ask again on next loop.
+            final_message = "Sensitive action canceled. No irreversible action was executed."
+            self._announce_finish(state, final_message)
             return {
                 "number_of_transactions": state.get("number_of_transactions", 0) + 1,
                 "reasoning_log": [
-                    interaction_log
-                    + "\n[Interaction] Sensitive confirmation unclear; waiting for explicit yes/no."
+                    "[Interaction] Type: finish (sensitive_confirmation_denied)\n"
+                    f"[Interaction] User replied: {str(user_reply)[:200]}\n"
+                    f"[Interaction] Final:\n{final_message}"
                 ],
+                "messages": [{"role": "assistant", "content": final_message}],
+                "is_complete": True,
                 "handoff_interaction": False,
-                "is_complete": False,
-                "messages": [
-                    {"role": "assistant", "content": confirmation_message},
-                    {"role": "user", "content": str(user_reply)},
-                ],
+                "pending_sensitive_action": None,
+                "sensitive_action_approval": {
+                    "approved": False,
+                    "reply": str(user_reply)[:200],
+                    "action_signature": pending_sensitive.get("action_signature"),
+                    "action": pending_sensitive.get("action"),
+                },
             }
 
         # ── Fast path: orchestrator already generated clarification questions ──

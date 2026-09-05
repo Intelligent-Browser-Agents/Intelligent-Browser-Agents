@@ -1642,3 +1642,14 @@
 .document-add .setting-btn {
   align-self: flex-start;
 }
+
+/* Sensitive-action approval prompt: Yes/No side by side. */
+.hitl-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hitl-form-actions .btn {
+  align-self: auto;
+}

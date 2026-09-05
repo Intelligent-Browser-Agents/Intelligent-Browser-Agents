@@ -213,3 +213,22 @@ def assess_action(
         }
 
     return {"mode": "allow", "category": category, "reason": f"allowed at level {level}"}
+
+
+def approved_action(state: Optional[dict]) -> Optional[dict]:
+    """The sensitive action the user has just approved, ready to dispatch.
+
+    The interaction node records the approval together with the exact action
+    and arguments that were proposed; the executor runs them as-is on its next
+    turn (no new model call, no gate) and clears the record. Returns None when
+    there is nothing to dispatch: no approval, a denial, or a record from an
+    older checkpoint that carries no arguments.
+    """
+    approval = (state or {}).get("sensitive_action_approval")
+    if not isinstance(approval, dict) or approval.get("approved") is not True:
+        return None
+    action = str(approval.get("action") or "").strip()
+    args = approval.get("args")
+    if not action or not isinstance(args, dict):
+        return None
+    return approval

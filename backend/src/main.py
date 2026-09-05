@@ -5,10 +5,29 @@ from agents.executor import Executor
 from agents.fallback import Fallback
 from agents.interaction import InteractionAgent
 from state import ProjectState
+from autonomy import approved_action
 import status_tracker
 
 # Agents load their own prompts through prompt_loader, which resolves paths
 # relative to this package rather than the process working directory.
+
+
+def route_after_interaction(state) -> str:
+    """Where the graph goes after the interaction node.
+
+    END when the mission is complete or aborted. Straight back to execution when
+    the user has just approved a sensitive action: the approval is a one-shot
+    ticket the executor dispatches as-is. Routing it through the orchestrator
+    first let a fresh decision rewrite the task and a fresh executor call pick a
+    different target, so the same click was confirmed three times in the Apple
+    careers run. Otherwise the orchestrator (a clarification was answered or
+    context was supplied).
+    """
+    if state.get("is_complete", False):
+        return "END"
+    if approved_action(state) is not None:
+        return "execution"
+    return "orchestrator"
 
 
 def build_workflow(runtime):
@@ -67,13 +86,15 @@ def build_workflow(runtime):
     )
 
 
-    # Interaction: END when mission complete/aborted, else back to orchestrator (e.g. after clarification)
+    # Interaction: END when complete/aborted, execution when a sensitive action
+    # was just approved, otherwise back to the orchestrator.
     workflow.add_conditional_edges(
         "interaction",
-        lambda state: "END" if state.get("is_complete", False) else "orchestrator",
+        route_after_interaction,
         {
             "END": END,
-            "orchestrator": "orchestrator"
+            "execution": "execution",
+            "orchestrator": "orchestrator",
         }
     )
 
